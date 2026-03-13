@@ -1,0 +1,102 @@
+groups:
+  - name: learning-platform-recording-rules
+    rules:
+      - record: outbox_dispatch_success_ratio_5m
+        expr: |
+          sum(rate(outbox_dispatched_total[5m]))
+          /
+          clamp_min(sum(rate(outbox_dispatched_total[5m]) + rate(outbox_failed_total[5m])), 0.001)
+
+  - name: learning-platform-api-alerts
+    rules:
+      - alert: HighApiErrorRate
+        expr: sum(rate(error_count[5m])) / clamp_min(sum(rate(total_requests[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "High API error rate"
+          description: "API error ratio is above 5% for 5 minutes."
+
+      - alert: HighApiLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(request_duration_bucket[5m])) by (le)) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "High API latency"
+          description: "P95 API latency is above 1.5s for 10 minutes."
+
+  - name: learning-platform-outbox-alerts
+    rules:
+      - alert: OutboxDispatchSuccessRatioLow
+        expr: outbox_dispatch_success_ratio_5m < 0.9
+        for: 10m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Outbox dispatch success ratio low"
+          description: "Outbox dispatch success ratio over 5m has been below 90% for 10 minutes."
+
+      - alert: OutboxDispatchFailuresHigh
+        expr: rate(outbox_failed_total[10m]) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Outbox dispatch failures are elevated"
+          description: "Outbox dispatch failure rate is above 0.2/sec for 10 minutes."
+
+      - alert: OutboxDeadLetterGrowing
+        expr: increase(outbox_dead_total[30m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          service: learning-platform
+        annotations:
+          summary: "Outbox dead-letter queue growing"
+          description: "One or more outbox events were moved to dead-letter in the last 30 minutes."
+
+      - alert: OutboxPendingBacklogHigh
+        expr: outbox_queue_depth{status="pending"} > 500
+        for: 10m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Outbox pending backlog high"
+          description: "Pending outbox queue depth has remained above 500 for 10 minutes."
+
+      - alert: OutboxDeadBacklogHigh
+        expr: outbox_queue_depth{status="dead"} > 50
+        for: 10m
+        labels:
+          severity: critical
+          service: learning-platform
+        annotations:
+          summary: "Outbox dead-letter backlog high"
+          description: "Dead-letter outbox queue depth has remained above 50 for 10 minutes."
+
+      - alert: OutboxProcessingStuck
+        expr: outbox_queue_depth{status="processing"} > 50
+        for: 15m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Outbox processing backlog high"
+          description: "Outbox processing depth has remained above 50 for 15 minutes; workers may be stuck."
+
+      - alert: OutboxRecoveriesSpike
+        expr: increase(outbox_recovered_total[15m]) > 20
+        for: 5m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Outbox stuck recoveries spiking"
+          description: "More than 20 outbox events were recovered from processing in 15 minutes."
