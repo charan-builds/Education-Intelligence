@@ -1,6 +1,8 @@
 import { jwtDecode } from "jwt-decode";
 
 import { apiClient } from "@/services/apiClient";
+import type { User } from "@/types/user";
+import { clearAccessToken, getAccessToken, storeAccessToken } from "@/utils/authToken";
 
 export type AuthTokenResponse = {
   access_token: string;
@@ -21,8 +23,8 @@ export async function login(email: string, password: string): Promise<AuthTokenR
     password,
   });
 
-  if (typeof window !== "undefined" && data.access_token) {
-    localStorage.setItem("access_token", data.access_token);
+  if (data.access_token) {
+    storeAccessToken(data.access_token);
   }
 
   return data;
@@ -33,18 +35,13 @@ export async function register(
   password: string,
   tenant_id: number,
   role: string,
-): Promise<AuthTokenResponse> {
-  const { data } = await apiClient.post<AuthTokenResponse>("/auth/register", {
+): Promise<User> {
+  const { data } = await apiClient.post<User>("/auth/register", {
     email,
     password,
     tenant_id,
     role,
   });
-
-  if (typeof window !== "undefined" && data.access_token) {
-    localStorage.setItem("access_token", data.access_token);
-  }
-
   return data;
 }
 
@@ -53,7 +50,7 @@ export function getCurrentUser(): CurrentUser | null {
     return null;
   }
 
-  const token = localStorage.getItem("access_token");
+  const token = getAccessToken();
   if (!token) {
     return null;
   }
@@ -63,4 +60,8 @@ export function getCurrentUser(): CurrentUser | null {
   } catch {
     return null;
   }
+}
+
+export function logout(): void {
+  clearAccessToken();
 }

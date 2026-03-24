@@ -1,11 +1,16 @@
 export type RoadmapStep = {
   id: number;
   topic_id: number;
+  phase?: string | null;
   estimated_time_hours: number;
   difficulty: string;
   priority: number;
   deadline: string;
   progress_status: string;
+};
+
+export type UpdateRoadmapStepPayload = {
+  progress_status: "pending" | "in_progress" | "completed";
 };
 
 export type Roadmap = {

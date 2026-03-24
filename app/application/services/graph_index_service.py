@@ -8,7 +8,7 @@ class GraphIndexService:
         self.topic_repository = topic_repository
 
     async def _load(self, tenant_id: int | None = None) -> tuple[list[int], dict[int, list[int]]]:
-        topics = await self.topic_repository.list_topics()
+        topics = await self.topic_repository.list_topics(tenant_id=tenant_id)
         topic_ids = sorted(topic.id for topic in topics)
         edges = await self.topic_repository.get_prerequisite_edges(tenant_id=tenant_id)
 
@@ -55,7 +55,12 @@ class GraphIndexService:
 
         for topic_id in topic_ids:
             depth, path = compute(topic_id)
-            await self.topic_repository.update_topic_index(topic_id=topic_id, depth=depth, graph_path=path)
+            await self.topic_repository.update_topic_index(
+                topic_id=topic_id,
+                depth=depth,
+                graph_path=path,
+                tenant_id=tenant_id,
+            )
 
         return {topic_id: {"depth": memo[topic_id][0], "graph_path": memo[topic_id][1]} for topic_id in topic_ids}
 
@@ -65,28 +70,28 @@ class GraphIndexService:
             raise ValueError(f"Topic {topic_id} not found")
         return index[topic_id]
 
-    async def get_descendants(self, topic_id: int) -> list[int]:
-        topic = await self.topic_repository.get_topic(topic_id)
+    async def get_descendants(self, topic_id: int, tenant_id: int | None = None) -> list[int]:
+        topic = await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
         if topic is None:
             return []
 
         if not topic.graph_path:
-            await self.update_graph_index(topic_id)
-            topic = await self.topic_repository.get_topic(topic_id)
+            await self.update_graph_index(topic_id, tenant_id=tenant_id)
+            topic = await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
             if topic is None or not topic.graph_path:
                 return []
 
-        descendants = await self.topic_repository.list_topics_by_graph_prefix(topic.graph_path)
+        descendants = await self.topic_repository.list_topics_by_graph_prefix(topic.graph_path, tenant_id=tenant_id)
         return [item.id for item in descendants]
 
-    async def get_ancestors(self, topic_id: int) -> list[int]:
-        topic = await self.topic_repository.get_topic(topic_id)
+    async def get_ancestors(self, topic_id: int, tenant_id: int | None = None) -> list[int]:
+        topic = await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
         if topic is None:
             return []
 
         if not topic.graph_path:
-            await self.update_graph_index(topic_id)
-            topic = await self.topic_repository.get_topic(topic_id)
+            await self.update_graph_index(topic_id, tenant_id=tenant_id)
+            topic = await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
             if topic is None or not topic.graph_path:
                 return []
 

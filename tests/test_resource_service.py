@@ -1,6 +1,9 @@
 import asyncio
 from dataclasses import dataclass
 
+import pytest
+
+from app.application.exceptions import NotFoundError
 from app.application.services.resource_service import ResourceService
 
 
@@ -51,11 +54,35 @@ class _Repo:
         ]
 
 
+class _TopicRepo:
+    def __init__(self, valid_topic_ids: set[int] | None = None):
+        self.valid_topic_ids = valid_topic_ids or {4, 7, 8, 10, 11}
+
+    async def get_topic(self, topic_id: int, tenant_id: int | None = None):
+        _ = tenant_id
+        if topic_id in self.valid_topic_ids:
+            return {"id": topic_id}
+        return None
+
+
+class _GoalRepo:
+    def __init__(self, valid_goal_ids: set[int] | None = None):
+        self.valid_goal_ids = valid_goal_ids or {2, 3, 9}
+
+    async def get_by_id(self, tenant_id: int, goal_id: int):
+        _ = tenant_id
+        if goal_id in self.valid_goal_ids:
+            return {"id": goal_id}
+        return None
+
+
 def test_add_resource_commits_and_returns_resource():
     async def _run():
         service = ResourceService(_Session())
         repo = _Repo()
         service.resource_repository = repo
+        service.topic_repository = _TopicRepo()
+        service.goal_repository = _GoalRepo()
 
         created = await service.add_resource(
             tenant_id=1,
@@ -80,6 +107,8 @@ def test_search_resources_by_topic_forwards_filters():
         service = ResourceService(_Session())
         repo = _Repo()
         service.resource_repository = repo
+        service.topic_repository = _TopicRepo()
+        service.goal_repository = _GoalRepo()
 
         rows = await service.search_resources_by_topic(
             tenant_id=5,
@@ -102,6 +131,8 @@ def test_recommend_resources_for_user_prioritizes_weak_topics():
         service = ResourceService(_Session())
         repo = _Repo()
         service.resource_repository = repo
+        service.topic_repository = _TopicRepo()
+        service.goal_repository = _GoalRepo()
 
         resources = await service.recommend_resources_for_user(
             tenant_id=1,
@@ -114,5 +145,65 @@ def test_recommend_resources_for_user_prioritizes_weak_topics():
 
         # weak topics ordered by score => 4 then 7
         assert [r.topic_id for r in resources] == [4, 7]
+
+    asyncio.run(_run())
+
+
+def test_add_resource_requires_tenant_owned_topic_and_goal():
+    async def _run():
+        service = ResourceService(_Session())
+        service.resource_repository = _Repo()
+        service.topic_repository = _TopicRepo(valid_topic_ids={10})
+        service.goal_repository = _GoalRepo(valid_goal_ids={3})
+
+        with pytest.raises(NotFoundError):
+            await service.add_resource(
+                tenant_id=1,
+                topic_id=999,
+                goal_id=3,
+                resource_type="course",
+                title="Invalid topic",
+                url="https://example.com/invalid",
+                difficulty="easy",
+                rating=4.0,
+                goal_relevance=0.5,
+            )
+
+        with pytest.raises(NotFoundError):
+            await service.add_resource(
+                tenant_id=1,
+                topic_id=10,
+                goal_id=999,
+                resource_type="course",
+                title="Invalid goal",
+                url="https://example.com/invalid-goal",
+                difficulty="easy",
+                rating=4.0,
+                goal_relevance=0.5,
+            )
+
+    asyncio.run(_run())
+
+
+def test_recommend_resources_requires_tenant_owned_topics_and_goal():
+    async def _run():
+        service = ResourceService(_Session())
+        service.resource_repository = _Repo()
+        service.topic_repository = _TopicRepo(valid_topic_ids={4, 7})
+        service.goal_repository = _GoalRepo(valid_goal_ids={9})
+
+        with pytest.raises(NotFoundError):
+            await service.recommend_resources_for_user(
+                tenant_id=1,
+                topic_scores={4: 40.0, 99: 70.0},
+                goal_id=9,
+            )
+
+        with pytest.raises(NotFoundError):
+            await service.recommend_resources_for_user(
+                tenant_id=1,
+                topic_scores={4: 40.0, 7: 70.0},
+                goal_id=999,
+            )
 
     asyncio.run(_run())

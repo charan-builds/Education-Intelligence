@@ -26,8 +26,12 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   if (typeof window !== "undefined") {
     const token = localStorage.getItem("access_token");
+    const activeTenantId = localStorage.getItem("active_tenant_id");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+    if (activeTenantId) {
+      config.headers["X-Tenant-ID"] = activeTenantId;
     }
   }
   return config;
@@ -47,6 +51,12 @@ apiClient.interceptors.response.use(
 
     if (normalized.status === 401 && typeof window !== "undefined") {
       localStorage.removeItem("access_token");
+      localStorage.removeItem("active_tenant_id");
+      document.cookie = "access_token=; Path=/; Max-Age=0; SameSite=Lax";
+      const next = encodeURIComponent(window.location.pathname + window.location.search);
+      if (!window.location.pathname.startsWith("/auth")) {
+        window.location.href = `/auth?next=${next}`;
+      }
     }
 
     return Promise.reject(normalized);

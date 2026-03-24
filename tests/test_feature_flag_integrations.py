@@ -36,9 +36,9 @@ def test_mentor_service_feature_flag_disables_ai_mentor():
 def test_adaptive_engine_feature_flag_disables_adaptive_behavior():
     engine = AdaptiveTestingEngine()
     questions = [
-        AdaptiveQuestion(id=1, topic_id=10, difficulty=1, question_text="q1"),
-        AdaptiveQuestion(id=2, topic_id=10, difficulty=2, question_text="q2"),
-        AdaptiveQuestion(id=3, topic_id=10, difficulty=3, question_text="q3"),
+        AdaptiveQuestion(id=1, topic_id=10, difficulty=1, question_type="multiple_choice", question_text="q1"),
+        AdaptiveQuestion(id=2, topic_id=10, difficulty=2, question_type="multiple_choice", question_text="q2"),
+        AdaptiveQuestion(id=3, topic_id=10, difficulty=3, question_type="multiple_choice", question_text="q3"),
     ]
     previous = [{"question_id": 2, "score": 95.0}, {"question_id": 3, "score": 95.0}]
     next_q = engine.select_next_question(

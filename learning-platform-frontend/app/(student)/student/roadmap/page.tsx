@@ -1,0 +1,209 @@
+"use client";
+
+import Link from "next/link";
+import { motion } from "framer-motion";
+import { CheckCircle2, PlayCircle, Route, Sparkles, Wand2 } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import ProgressLineChart from "@/components/charts/ProgressLineChart";
+import PageHeader from "@/components/layouts/PageHeader";
+import RoadmapFlow from "@/components/student/RoadmapFlow";
+import Button from "@/components/ui/Button";
+import EmptyState from "@/components/ui/EmptyState";
+import MetricCard from "@/components/ui/MetricCard";
+import SurfaceCard from "@/components/ui/SurfaceCard";
+import StatusPill from "@/components/ui/StatusPill";
+import { useToast } from "@/components/providers/ToastProvider";
+import { useAuth } from "@/hooks/useAuth";
+import { normalizeRoadmapStatus, useStudentDashboard } from "@/hooks/useDashboard";
+import { updateRoadmapStep } from "@/services/roadmapService";
+
+export default function StudentRoadmapPage() {
+  const dashboard = useStudentDashboard();
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const updateStepMutation = useMutation({
+    mutationFn: ({
+      stepId,
+      progressStatus,
+    }: {
+      stepId: number;
+      progressStatus: "pending" | "in_progress" | "completed";
+    }) => updateRoadmapStep(stepId, { progress_status: progressStatus }),
+    onSuccess: async () => {
+      toast({
+        title: "Roadmap updated",
+        description: "Your step progress has been synced with the backend.",
+        variant: "success",
+      });
+      if (user?.user_id) {
+        await queryClient.invalidateQueries({ queryKey: ["dashboard", "student", "roadmap", user.user_id] });
+      }
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow="Roadmap"
+        title="Navigate your personalized learning sequence"
+        description="This workspace turns the roadmap into a visual journey with AI-powered next actions, graph storytelling, and step-by-step progression."
+        actions={
+          <Link
+            href="/mentor/dashboard"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            Mentor guidance
+            <Sparkles className="h-4 w-4" />
+          </Link>
+        }
+      />
+
+      {dashboard.steps.length === 0 ? (
+        <EmptyState
+          title="No roadmap available"
+          description="Complete a diagnostic and generate a roadmap before tracking topics here."
+        />
+      ) : (
+        <>
+          <motion.section
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className="premium-hero soft-ring relative overflow-hidden rounded-[34px] border border-white/70 p-6"
+          >
+            <div className="premium-orb left-0 top-0 h-24 w-24 bg-teal-300/25" />
+            <div className="premium-orb right-0 top-10 h-28 w-28 bg-orange-300/25" style={{ animationDelay: "1.1s" }} />
+            <div className="relative grid gap-4 lg:grid-cols-3">
+              <div className="story-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Unlock path</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-950">{dashboard.kpis.totalSteps} mapped steps</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">A structured sequence instead of a flat content catalog.</p>
+              </div>
+              <div className="story-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Now advancing</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-950">{dashboard.kpis.inProgress} active missions</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Each active step keeps the user inside a visible progression loop.</p>
+              </div>
+              <div className="story-card">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">AI assist</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-950">Explain or quiz any step</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Every roadmap node can hand off directly to the mentor for support.</p>
+              </div>
+            </div>
+          </motion.section>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricCard title="Total steps" value={dashboard.kpis.totalSteps} tone="info" icon={<Route className="h-5 w-5" />} />
+            <MetricCard title="Completed" value={dashboard.kpis.completed} tone="success" icon={<CheckCircle2 className="h-5 w-5" />} />
+            <MetricCard title="In progress" value={dashboard.kpis.inProgress} tone="warning" icon={<PlayCircle className="h-5 w-5" />} />
+          </div>
+
+          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+            <RoadmapFlow
+              steps={dashboard.steps}
+              topics={Array.from(dashboard.topicMap.entries()).map(([id, name]) => ({ id, name }))}
+              weakTopicIds={dashboard.weakTopics.map((item) => item.topicId)}
+            />
+            <ProgressLineChart
+              title="Completion trend"
+              description="Step-by-step completion progression across the generated roadmap."
+              data={dashboard.charts.progressLine}
+            />
+          </div>
+
+          <SurfaceCard
+            title="Step planner"
+            description="Update individual roadmap steps and jump into topic learning pages."
+          >
+            <div className="space-y-3">
+              {dashboard.steps.map((step) => {
+                const status = normalizeRoadmapStatus(step.progress_status);
+                return (
+                  <div
+                    key={step.id}
+                    className="rounded-[28px] border border-slate-200 bg-white/75 p-5 dark:border-slate-700 dark:bg-slate-900/75"
+                  >
+                    <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <p className="text-base font-semibold text-slate-950 dark:text-slate-100">
+                            {dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`}
+                          </p>
+                          <StatusPill
+                            label={status}
+                            tone={status === "completed" ? "success" : status === "in_progress" ? "warning" : "default"}
+                          />
+                        </div>
+                        <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">
+                          Priority {step.priority} • {step.phase ?? "Learning phase"} • {step.estimated_time_hours}h • {step.difficulty}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Link
+                          href={`/student/topics/${step.topic_id}`}
+                          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                          Open topic
+                        </Link>
+                        <Link
+                          href={`/mentor/chat?prompt=${encodeURIComponent(
+                            `Explain ${
+                              dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`
+                            } clearly, tell me why it matters in the roadmap, and give me one quick example.`,
+                          )}`}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        >
+                          Explain
+                          <Sparkles className="h-4 w-4" />
+                        </Link>
+                        <Link
+                          href={`/mentor/chat?prompt=${encodeURIComponent(
+                            `Generate 3 practice questions for ${
+                              dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`
+                            } with concise answers.`,
+                          )}`}
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white"
+                        >
+                          Quiz me
+                          <Wand2 className="h-4 w-4 text-amber-300" />
+                        </Link>
+                        {status === "pending" ? (
+                          <Button
+                            onClick={() => updateStepMutation.mutate({ stepId: step.id, progressStatus: "in_progress" })}
+                            disabled={updateStepMutation.isPending}
+                          >
+                            Start
+                          </Button>
+                        ) : null}
+                        {status !== "completed" ? (
+                          <Button
+                            onClick={() => updateStepMutation.mutate({ stepId: step.id, progressStatus: "completed" })}
+                            disabled={updateStepMutation.isPending}
+                            variant="secondary"
+                          >
+                            Complete
+                          </Button>
+                        ) : (
+                          <Button
+                            onClick={() => updateStepMutation.mutate({ stepId: step.id, progressStatus: "in_progress" })}
+                            disabled={updateStepMutation.isPending}
+                            variant="ghost"
+                          >
+                            Reopen
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </SurfaceCard>
+        </>
+      )}
+    </div>
+  );
+}

@@ -1,16 +1,21 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.autonomous_learning_agent_service import AutonomousLearningAgentService
 from app.application.services.mentor_notification_service import MentorNotificationService
 from app.application.services.mentor_service import MentorService
 from app.core.dependencies import get_current_user
 from app.infrastructure.database import get_db_session
+from app.realtime.hub import realtime_hub
 from app.schemas.mentor_schema import (
     MentorChatRequest,
     MentorChatResponse,
     MentorNotificationsResponse,
     MentorProgressAnalysisResponse,
     MentorSuggestionsResponse,
+    AutonomousAgentResponse,
 )
 
 router = APIRouter(prefix="/mentor", tags=["mentor"])
@@ -25,11 +30,40 @@ async def mentor_chat(
     if payload.user_id != current_user.id or payload.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    result = MentorService(session=db).chat(
+    result = await MentorService(session=db).chat(
         message=payload.message,
         user_id=payload.user_id,
         tenant_id=payload.tenant_id,
+        chat_history=payload.chat_history,
     )
+    await realtime_hub.send_user(
+        payload.tenant_id,
+        payload.user_id,
+        {
+            "type": "mentor.response.ready",
+            "request_id": payload.request_id,
+            "reply": result["reply"],
+            "used_ai": result["used_ai"],
+            "session_summary": result.get("session_summary", ""),
+        },
+    )
+    if payload.request_id and result.get("reply"):
+        async def _stream_chunks() -> None:
+            reply = str(result["reply"])
+            for index in range(8, len(reply) + 8, 8):
+                await realtime_hub.send_user(
+                    payload.tenant_id,
+                    payload.user_id,
+                    {
+                        "type": "mentor.response.chunk",
+                        "request_id": payload.request_id,
+                        "content": reply[:index],
+                        "done": index >= len(reply),
+                    },
+                )
+                await asyncio.sleep(0.02)
+
+        asyncio.create_task(_stream_chunks())
     return MentorChatResponse(**result)
 
 
@@ -39,18 +73,8 @@ async def mentor_suggestions(
     current_user=Depends(get_current_user),
 ):
     service = MentorService(session=db)
-    guidance_text = await service.generate_advice(user_id=current_user.id, message="Provide concise next-step suggestions")
-
-    # Deterministic split to produce UI-friendly bullet suggestions.
-    chunks = [chunk.strip() for chunk in guidance_text.split(".") if chunk.strip()]
-    suggestions = chunks[:4]
-    if not suggestions:
-        suggestions = [
-            "Complete one pending roadmap step today.",
-            "Revisit a weak topic and practice for 30 minutes.",
-            "Write a short summary of what you learned.",
-        ]
-    return MentorSuggestionsResponse(suggestions=suggestions)
+    result = await service.contextual_suggestions(user_id=current_user.id, tenant_id=current_user.tenant_id)
+    return MentorSuggestionsResponse(**result)
 
 
 @router.get("/progress-analysis", response_model=MentorProgressAnalysisResponse)
@@ -113,4 +137,28 @@ async def mentor_notifications(
             }
             for item in notifications
         ]
+    )
+
+
+@router.get("/agent/status", response_model=AutonomousAgentResponse)
+async def mentor_agent_status(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    return await AutonomousLearningAgentService(db).run_cycle(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        execute_actions=False,
+    )
+
+
+@router.post("/agent/run", response_model=AutonomousAgentResponse)
+async def mentor_agent_run(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    return await AutonomousLearningAgentService(db).run_cycle(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        execute_actions=True,
     )

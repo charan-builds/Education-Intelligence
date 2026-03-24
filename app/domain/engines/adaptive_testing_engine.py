@@ -10,6 +10,17 @@ class AdaptiveQuestion:
     topic_id: int
     difficulty: int
     question_text: str
+    question_type: str = "short_text"
+    answer_options: list[str] | None = None
+
+
+@dataclass(frozen=True)
+class AdaptiveSelectionResult:
+    question: AdaptiveQuestion
+    target_topic_id: int
+    target_difficulty: int
+    strategy: str
+    weakness_topic_ids: list[int]
 
 
 class AdaptiveTestingEngine:
@@ -26,7 +37,9 @@ class AdaptiveTestingEngine:
             id=int(getattr(question, "id")),
             topic_id=int(getattr(question, "topic_id")),
             difficulty=int(getattr(question, "difficulty")),
+            question_type=str(getattr(question, "question_type", "short_text")),
             question_text=str(getattr(question, "question_text")),
+            answer_options=list(getattr(question, "answer_options", []) or []),
         )
 
     def _target_difficulty(
@@ -56,10 +69,15 @@ class AdaptiveTestingEngine:
         normalized_questions: list[AdaptiveQuestion],
         previous_answers: list[dict],
         topic_scores: dict[int, float] | None,
+        weakness_topic_ids: list[int] | None = None,
     ) -> int:
         available_topics = sorted({q.topic_id for q in normalized_questions})
         if not available_topics:
             raise ValueError("No topics available")
+
+        for topic_id in weakness_topic_ids or []:
+            if topic_id in available_topics:
+                return topic_id
 
         if topic_scores:
             weakest_score = min(topic_scores.values())
@@ -89,8 +107,9 @@ class AdaptiveTestingEngine:
         questions: list[Any],
         previous_answers: list[dict],
         topic_scores: dict[int, float] | None,
+        weakness_topic_ids: list[int] | None = None,
         feature_flags: dict[str, bool] | None = None,
-    ) -> AdaptiveQuestion | None:
+    ) -> AdaptiveSelectionResult | None:
         normalized_questions = [self._normalize_question(question) for question in questions]
         if not normalized_questions:
             return None
@@ -102,7 +121,13 @@ class AdaptiveTestingEngine:
             answered_ids = {int(answer.get("question_id", 0)) for answer in previous_answers}
             for question in remaining:
                 if question.id not in answered_ids:
-                    return question
+                    return AdaptiveSelectionResult(
+                        question=question,
+                        target_topic_id=question.topic_id,
+                        target_difficulty=self.MEDIUM,
+                        strategy="fixed_fallback",
+                        weakness_topic_ids=list(weakness_topic_ids or []),
+                    )
             return None
 
         answered_ids = {int(answer.get("question_id", 0)) for answer in previous_answers}
@@ -111,7 +136,7 @@ class AdaptiveTestingEngine:
             return None
 
         target_difficulty = self._target_difficulty(normalized_questions, previous_answers)
-        target_topic = self._target_topic(remaining, previous_answers, topic_scores)
+        target_topic = self._target_topic(remaining, previous_answers, topic_scores, weakness_topic_ids=weakness_topic_ids)
 
         in_topic = [question for question in remaining if question.topic_id == target_topic]
 
@@ -119,6 +144,20 @@ class AdaptiveTestingEngine:
             return (abs(question.difficulty - target_difficulty), question.difficulty, question.id)
 
         if in_topic:
-            return sorted(in_topic, key=sort_key)[0]
+            question = sorted(in_topic, key=sort_key)[0]
+            return AdaptiveSelectionResult(
+                question=question,
+                target_topic_id=target_topic,
+                target_difficulty=target_difficulty,
+                strategy="adaptive_targeted",
+                weakness_topic_ids=list(weakness_topic_ids or []),
+            )
 
-        return sorted(remaining, key=lambda q: (q.topic_id, *sort_key(q)))[0]
+        question = sorted(remaining, key=lambda q: (q.topic_id, *sort_key(q)))[0]
+        return AdaptiveSelectionResult(
+            question=question,
+            target_topic_id=target_topic,
+            target_difficulty=target_difficulty,
+            strategy="adaptive_fallback",
+            weakness_topic_ids=list(weakness_topic_ids or []),
+        )

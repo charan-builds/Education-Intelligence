@@ -6,8 +6,8 @@ settings = get_settings()
 
 celery_app = Celery(
     "learning_platform",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=settings.celery_broker_url,
+    backend=settings.celery_result_backend,
 )
 
 celery_app.conf.update(

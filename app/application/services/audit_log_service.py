@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -11,6 +12,7 @@ class AuditLogService:
     def __init__(self, log_file_path: str | None = None):
         settings = get_settings()
         self.log_file_path = log_file_path or settings.audit_log_file_path
+        self.max_read_lines = settings.audit_log_read_max_lines
 
     def list_feature_flag_events(
         self,
@@ -34,7 +36,7 @@ class AuditLogService:
         seen = 0
         try:
             with path.open("r", encoding="utf-8") as fp:
-                lines = fp.readlines()
+                lines = list(deque(fp, maxlen=self.max_read_lines))
                 sequence = reversed(lines) if order == "desc" else lines
                 for raw_line in sequence:
                     line = raw_line.strip()

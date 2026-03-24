@@ -22,6 +22,7 @@ class LearningEventService:
         topic_id: int | None = None,
         diagnostic_test_id: int | None = None,
         metadata: dict | None = None,
+        commit: bool = True,
     ) -> LearningEvent:
         event = LearningEvent(
             tenant_id=tenant_id,
@@ -34,7 +35,8 @@ class LearningEventService:
         )
         self.session.add(event)
         await self.session.flush()
-        await self.session.commit()
+        if commit:
+            await self.session.commit()
         return event
 
     async def track_question_answered(
@@ -46,6 +48,7 @@ class LearningEventService:
         question_id: int,
         score: float,
         time_taken: float,
+        commit: bool = True,
     ) -> LearningEvent:
         return await self.track_event(
             tenant_id=tenant_id,
@@ -58,6 +61,7 @@ class LearningEventService:
                 "score": score,
                 "time_taken": time_taken,
             },
+            commit=commit,
         )
 
     async def track_topic_completed(
@@ -66,6 +70,7 @@ class LearningEventService:
         user_id: int,
         topic_id: int,
         completion_score: float,
+        commit: bool = True,
     ) -> LearningEvent:
         return await self.track_event(
             tenant_id=tenant_id,
@@ -73,6 +78,7 @@ class LearningEventService:
             event_type=self.EVENT_TOPIC_COMPLETED,
             topic_id=topic_id,
             metadata={"completion_score": completion_score},
+            commit=commit,
         )
 
     async def track_diagnostic_completed(
@@ -81,6 +87,7 @@ class LearningEventService:
         user_id: int,
         diagnostic_test_id: int,
         goal_id: int,
+        commit: bool = True,
     ) -> LearningEvent:
         return await self.track_event(
             tenant_id=tenant_id,
@@ -88,4 +95,5 @@ class LearningEventService:
             event_type=self.EVENT_DIAGNOSTIC_COMPLETED,
             diagnostic_test_id=diagnostic_test_id,
             metadata={"goal_id": goal_id},
+            commit=commit,
         )

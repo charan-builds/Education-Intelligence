@@ -1,0 +1,86 @@
+name: Docker Smoke Checks
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  smoke-role-panels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Start required Docker services
+        run: >
+          docker compose up -d --build
+          postgres redis ai_service api celery_worker celery_beat nginx
+
+      - name: Wait for gateway health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/gateway-health >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Gateway did not become healthy in time" >&2
+          exit 1
+
+      - name: Run role panel smoke regression
+        run: make smoke-role-panels
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Shut down services
+        if: always()
+        run: docker compose down -v
+
+  smoke-multitenant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        run: cp .env.example .env
+
+      - name: Start required Docker services
+        run: >
+          docker compose up -d --build
+          postgres redis ai_service api celery_worker celery_beat nginx
+
+      - name: Wait for gateway health
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/gateway-health >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Gateway did not become healthy in time" >&2
+          exit 1
+
+      - name: Run multi-tenant smoke regression
+        run: make smoke-multitenant
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Shut down services
+        if: always()
+        run: docker compose down -v

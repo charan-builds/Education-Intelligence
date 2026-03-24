@@ -80,6 +80,12 @@ outbox_queue_depth = Gauge(
     ["status"],
 )
 
+cache_operations_total = Counter(
+    "cache_operations_total",
+    "Cache operation counts by operation and result",
+    ["operation", "result"],
+)
+
 metrics_router = APIRouter()
 
 

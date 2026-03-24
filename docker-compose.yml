@@ -1,6 +1,18 @@
-version: "3.9"
-
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: learning-platform-frontend/Dockerfile
+    container_name: learning_platform_frontend
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    depends_on:
+      nginx:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -14,9 +26,13 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    command: ./scripts/start_api.sh
     environment:
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai_service:8100}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    volumes:
+      - ./logs:/app/logs
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
       interval: 30s
@@ -32,7 +48,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -46,7 +62,7 @@ services:
     image: redis:7-alpine
     container_name: learning_platform_redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6380}:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
@@ -68,8 +84,15 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
-    command: celery -A app.infrastructure.jobs.celery_app:celery_app worker --loglevel=info
+    command: celery -A app.infrastructure.jobs.celery_app:celery_app worker --loglevel=info --pool=solo
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    healthcheck:
+      disable: true
 
   celery_beat:
     build:
@@ -83,14 +106,23 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
     restart: unless-stopped
     command: celery -A app.infrastructure.jobs.celery_app:celery_app beat --loglevel=info
+    environment:
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    healthcheck:
+      disable: true
 
   ai_service:
     build:
       context: .
       dockerfile: ai_service/Dockerfile
     container_name: learning_platform_ai_service
+    env_file:
+      - .env
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]

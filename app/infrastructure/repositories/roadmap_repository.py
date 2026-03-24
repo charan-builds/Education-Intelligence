@@ -29,6 +29,10 @@ class RoadmapRepository(BaseRepository):
         difficulty: str = "medium",
         priority: int = 1,
         progress_status: str = "pending",
+        step_type: str = "core",
+        rationale: str | None = None,
+        unlocks_topic_id: int | None = None,
+        is_revision: bool = False,
     ) -> RoadmapStep:
         step = RoadmapStep(
             roadmap_id=roadmap_id,
@@ -38,10 +42,26 @@ class RoadmapRepository(BaseRepository):
             priority=priority,
             deadline=deadline,
             progress_status=progress_status,
+            step_type=step_type,
+            rationale=rationale,
+            unlocks_topic_id=unlocks_topic_id,
+            is_revision=is_revision,
         )
         self.session.add(step)
         await self.session.flush()
         return step
+
+    async def get_latest_roadmap_for_user(self, *, user_id: int, tenant_id: int) -> Roadmap | None:
+        stmt = (
+            select(Roadmap)
+            .options(selectinload(Roadmap.steps))
+            .join(Roadmap.user)
+            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, tenant_id))
+            .order_by(Roadmap.id.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def list_user_roadmaps(
         self,
@@ -65,6 +85,20 @@ class RoadmapRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_roadmap_for_user(self, *, roadmap_id: int, user_id: int, tenant_id: int) -> Roadmap | None:
+        stmt = (
+            select(Roadmap)
+            .options(selectinload(Roadmap.steps))
+            .join(Roadmap.user)
+            .where(
+                Roadmap.id == roadmap_id,
+                Roadmap.user_id == user_id,
+                tenant_user_scope(Roadmap.user, tenant_id),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def count_user_roadmaps(self, user_id: int, tenant_id: int) -> int:
         result = await self.session.execute(
             select(func.count(Roadmap.id))
@@ -72,3 +106,22 @@ class RoadmapRepository(BaseRepository):
             .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, tenant_id))
         )
         return int(result.scalar_one())
+
+    async def get_step_for_user(self, *, step_id: int, user_id: int, tenant_id: int) -> RoadmapStep | None:
+        stmt = (
+            select(RoadmapStep)
+            .join(RoadmapStep.roadmap)
+            .join(Roadmap.user)
+            .where(
+                RoadmapStep.id == step_id,
+                Roadmap.user_id == user_id,
+                tenant_user_scope(Roadmap.user, tenant_id),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update_step_status(self, step: RoadmapStep, *, progress_status: str) -> RoadmapStep:
+        step.progress_status = progress_status
+        await self.session.flush()
+        return step

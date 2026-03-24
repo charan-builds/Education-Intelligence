@@ -10,48 +10,62 @@ import ReactFlow, {
   Node,
   Position,
 } from "reactflow";
-import "reactflow/dist/style.css";
 
 export type TopicGraphNode = {
   id: number;
   name: string;
+  node_type?: "topic" | "skill";
+  status?: string;
+  mastery_score?: number | null;
+  cluster?: string;
 };
 
 export type TopicGraphEdge = {
-  topic_id: number;
-  prerequisite_topic_id: number;
+  source_id?: number;
+  target_id?: number;
+  topic_id?: number;
+  prerequisite_topic_id?: number;
+  edge_type?: "prerequisite" | "maps_to_skill";
 };
 
 type TopicGraphProps = {
   topics: TopicGraphNode[];
   prerequisites: TopicGraphEdge[];
   weakTopicIds?: number[];
+  highlightedPathIds?: number[];
+  focusTopicId?: number;
   heightClassName?: string;
 };
 
 const X_GAP = 260;
-const Y_GAP = 120;
+const Y_GAP = 128;
 
 function computeDepths(nodes: TopicGraphNode[], edges: TopicGraphEdge[]): Map<number, number> {
+  const topicNodes = nodes.filter((node) => (node.node_type ?? "topic") === "topic");
   const incoming = new Map<number, number>();
   const adjacency = new Map<number, number[]>();
 
-  for (const node of nodes) {
+  for (const node of topicNodes) {
     incoming.set(node.id, 0);
     adjacency.set(node.id, []);
   }
 
   for (const edge of edges) {
-    if (!incoming.has(edge.topic_id) || !incoming.has(edge.prerequisite_topic_id)) {
+    const edgeType = edge.edge_type ?? "prerequisite";
+    if (edgeType !== "prerequisite") {
       continue;
     }
-    adjacency.get(edge.prerequisite_topic_id)?.push(edge.topic_id);
-    incoming.set(edge.topic_id, (incoming.get(edge.topic_id) ?? 0) + 1);
+    const sourceId = edge.source_id ?? edge.prerequisite_topic_id;
+    const targetId = edge.target_id ?? edge.topic_id;
+    if (!sourceId || !targetId || !incoming.has(sourceId) || !incoming.has(targetId)) {
+      continue;
+    }
+    adjacency.get(sourceId)?.push(targetId);
+    incoming.set(targetId, (incoming.get(targetId) ?? 0) + 1);
   }
 
-  const queue = [...nodes.map((n) => n.id).filter((id) => (incoming.get(id) ?? 0) === 0)].sort((a, b) => a - b);
+  const queue = [...topicNodes.map((n) => n.id).filter((id) => (incoming.get(id) ?? 0) === 0)].sort((a, b) => a - b);
   const depth = new Map<number, number>();
-
   for (const id of queue) {
     depth.set(id, 0);
   }
@@ -65,9 +79,7 @@ function computeDepths(nodes: TopicGraphNode[], edges: TopicGraphEdge[]): Map<nu
     const currentDepth = depth.get(current) ?? 0;
     const nextList = [...(adjacency.get(current) ?? [])].sort((a, b) => a - b);
     for (const next of nextList) {
-      const candidateDepth = currentDepth + 1;
-      depth.set(next, Math.max(depth.get(next) ?? 0, candidateDepth));
-
+      depth.set(next, Math.max(depth.get(next) ?? 0, currentDepth + 1));
       const remaining = (incoming.get(next) ?? 0) - 1;
       incoming.set(next, remaining);
       if (remaining === 0) {
@@ -77,89 +89,217 @@ function computeDepths(nodes: TopicGraphNode[], edges: TopicGraphEdge[]): Map<nu
     }
   }
 
-  // fallback for cycles/disconnected components
-  for (const node of nodes) {
+  for (const node of topicNodes) {
     if (!depth.has(node.id)) {
       depth.set(node.id, 0);
     }
   }
-
   return depth;
+}
+
+function nodePalette(node: TopicGraphNode, isWeak: boolean, isHighlighted: boolean, isFocus: boolean) {
+  if ((node.node_type ?? "topic") === "skill") {
+    return {
+      border: "rgba(14,165,233,0.35)",
+      background: "linear-gradient(135deg, rgba(224,242,254,0.98), rgba(255,255,255,0.92))",
+      color: "#0f172a",
+      boxShadow: "0 18px 40px rgba(14,165,233,0.12)",
+    };
+  }
+  if (isFocus) {
+    return {
+      border: "rgba(79,70,229,0.45)",
+      background: "linear-gradient(135deg, rgba(224,231,255,0.98), rgba(255,255,255,0.94))",
+      color: "#312e81",
+      boxShadow: "0 22px 48px rgba(79,70,229,0.18)",
+    };
+  }
+  if (isWeak) {
+    return {
+      border: "rgba(239,68,68,0.35)",
+      background: "linear-gradient(135deg, rgba(255,241,242,0.98), rgba(255,255,255,0.9))",
+      color: "#991b1b",
+      boxShadow: "0 18px 40px rgba(239,68,68,0.16)",
+    };
+  }
+  if (isHighlighted) {
+    return {
+      border: "rgba(16,185,129,0.35)",
+      background: "linear-gradient(135deg, rgba(236,253,245,0.98), rgba(255,255,255,0.92))",
+      color: "#065f46",
+      boxShadow: "0 18px 40px rgba(16,185,129,0.16)",
+    };
+  }
+  return {
+    border: "rgba(148,163,184,0.28)",
+    background: "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,246,255,0.88))",
+    color: "#0f172a",
+    boxShadow: "0 18px 40px rgba(15,23,42,0.08)",
+  };
 }
 
 export default function TopicGraph({
   topics,
   prerequisites,
   weakTopicIds = [],
+  highlightedPathIds = [],
+  focusTopicId,
   heightClassName = "h-[560px]",
 }: TopicGraphProps) {
   const weakSet = useMemo(() => new Set(weakTopicIds), [weakTopicIds]);
+  const pathSet = useMemo(() => new Set(highlightedPathIds), [highlightedPathIds]);
 
   const { nodes, edges } = useMemo(() => {
     const depths = computeDepths(topics, prerequisites);
-    const columns = new Map<number, TopicGraphNode[]>();
+    const topicColumns = new Map<number, TopicGraphNode[]>();
+    const skillNodes = topics.filter((topic) => (topic.node_type ?? "topic") === "skill").sort((a, b) => a.id - b.id);
 
     for (const topic of topics) {
-      const d = depths.get(topic.id) ?? 0;
-      if (!columns.has(d)) {
-        columns.set(d, []);
+      if ((topic.node_type ?? "topic") !== "topic") {
+        continue;
       }
-      columns.get(d)?.push(topic);
+      const depth = depths.get(topic.id) ?? 0;
+      if (!topicColumns.has(depth)) {
+        topicColumns.set(depth, []);
+      }
+      topicColumns.get(depth)?.push(topic);
     }
 
     const graphNodes: Node[] = [];
-    const sortedDepths = [...columns.keys()].sort((a, b) => a - b);
-
+    const sortedDepths = [...topicColumns.keys()].sort((a, b) => a - b);
     for (const depth of sortedDepths) {
-      const columnNodes = [...(columns.get(depth) ?? [])].sort((a, b) => a.id - b.id);
+      const columnNodes = [...(topicColumns.get(depth) ?? [])].sort((a, b) => a.id - b.id);
       columnNodes.forEach((topic, row) => {
         const isWeak = weakSet.has(topic.id);
+        const isHighlighted = pathSet.has(topic.id);
+        const isFocus = topic.id === focusTopicId;
+        const palette = nodePalette(topic, isWeak, isHighlighted, isFocus);
+        const mastery = topic.mastery_score != null ? `${Math.round(topic.mastery_score)}%` : "new";
         graphNodes.push({
           id: String(topic.id),
-          data: { label: `${topic.name}${isWeak ? " (weak)" : ""}` },
+          data: {
+            label: (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold">{topic.name}</span>
+                  <span className="rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]">
+                    {mastery}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] opacity-70">
+                  <span>{topic.cluster ?? "general"}</span>
+                  <span>{topic.status ?? "unknown"}</span>
+                </div>
+              </div>
+            ),
+          },
           position: { x: depth * X_GAP, y: row * Y_GAP },
           sourcePosition: Position.Right,
           targetPosition: Position.Left,
           style: {
-            borderRadius: 12,
-            border: `1px solid ${isWeak ? "#ef4444" : "#cbd5e1"}`,
-            background: isWeak ? "#fef2f2" : "#ffffff",
-            color: isWeak ? "#991b1b" : "#0f172a",
-            width: 210,
+            borderRadius: 24,
+            border: `1px solid ${palette.border}`,
+            background: palette.background,
+            color: palette.color,
+            width: 236,
             fontWeight: 600,
+            boxShadow: palette.boxShadow,
+            padding: "12px 14px",
           },
         });
       });
     }
 
-    const graphEdges: Edge[] = prerequisites
-      .filter((edge) => topics.some((t) => t.id === edge.topic_id) && topics.some((t) => t.id === edge.prerequisite_topic_id))
-      .map((edge) => ({
-        id: `${edge.prerequisite_topic_id}->${edge.topic_id}`,
-        source: String(edge.prerequisite_topic_id),
-        target: String(edge.topic_id),
+    const skillColumnX = (sortedDepths.at(-1) ?? 0) * X_GAP + X_GAP;
+    skillNodes.forEach((skill, row) => {
+      const palette = nodePalette(skill, false, false, false);
+      graphNodes.push({
+        id: `skill-${skill.id}`,
+        data: {
+          label: (
+            <div className="space-y-1">
+              <span className="text-sm font-semibold">{skill.name}</span>
+              <div className="text-[10px] uppercase tracking-[0.18em] opacity-70">skill node</div>
+            </div>
+          ),
+        },
+        position: { x: skillColumnX, y: row * 96 },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        style: {
+          borderRadius: 20,
+          border: `1px solid ${palette.border}`,
+          background: palette.background,
+          color: palette.color,
+          width: 204,
+          boxShadow: palette.boxShadow,
+          padding: "10px 12px",
+        },
+      });
+    });
+
+    const topicNodeIds = new Set(topics.filter((item) => (item.node_type ?? "topic") === "topic").map((item) => item.id));
+    const skillNodeIds = new Set(skillNodes.map((item) => item.id));
+
+    const graphEdges: Edge[] = prerequisites.flatMap((edge): Edge[] => {
+      const edgeType = edge.edge_type ?? "prerequisite";
+      const sourceId = edge.source_id ?? edge.prerequisite_topic_id;
+      const targetId = edge.target_id ?? edge.topic_id;
+      if (!sourceId || !targetId) {
+        return [];
+      }
+      if (edgeType === "prerequisite") {
+        if (!topicNodeIds.has(sourceId) || !topicNodeIds.has(targetId)) {
+          return [];
+        }
+        const onPath = pathSet.has(sourceId) && pathSet.has(targetId);
+        const targetWeak = weakSet.has(targetId);
+        return [
+          {
+          id: `${sourceId}->${targetId}`,
+          source: String(sourceId),
+          target: String(targetId),
+          type: "smoothstep",
+          markerEnd: { type: MarkerType.ArrowClosed },
+          animated: targetWeak || onPath,
+          style: {
+            stroke: onPath ? "#10b981" : targetWeak ? "#ef4444" : "#64748b",
+            strokeWidth: onPath ? 3 : targetWeak ? 2.4 : 1.8,
+          },
+          },
+        ];
+      }
+      if (!topicNodeIds.has(sourceId) || !skillNodeIds.has(targetId)) {
+        return [];
+      }
+      return [
+        {
+        id: `${sourceId}->skill-${targetId}`,
+        source: String(sourceId),
+        target: `skill-${targetId}`,
         type: "smoothstep",
         markerEnd: { type: MarkerType.ArrowClosed },
-        animated: weakSet.has(edge.topic_id),
+        animated: false,
         style: {
-          stroke: weakSet.has(edge.topic_id) ? "#ef4444" : "#64748b",
-          strokeWidth: weakSet.has(edge.topic_id) ? 2.5 : 1.8,
+          stroke: "#0ea5e9",
+          strokeWidth: 1.6,
+          strokeDasharray: "4 4",
         },
-      }));
+        },
+      ];
+    });
 
     return { nodes: graphNodes, edges: graphEdges };
-  }, [topics, prerequisites, weakSet]);
+  }, [focusTopicId, pathSet, prerequisites, topics, weakSet]);
 
   return (
-    <div className={`w-full rounded-xl border border-slate-200 bg-white ${heightClassName}`}>
+    <div
+      className={`w-full overflow-hidden rounded-[28px] border border-white/70 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.92))] ${heightClassName}`}
+    >
       <ReactFlow nodes={nodes} edges={edges} fitView>
-        <MiniMap
-          pannable
-          zoomable
-          nodeColor={(node) => ((node.style as { background?: string } | undefined)?.background ?? "#ffffff")}
-        />
+        <MiniMap pannable zoomable nodeColor={(node) => (String(node.id).startsWith("skill-") ? "#bae6fd" : "#c7d2fe")} />
         <Controls />
-        <Background gap={18} size={1} color="#e2e8f0" />
+        <Background gap={18} size={1} color="#dbeafe" />
       </ReactFlow>
     </div>
   );

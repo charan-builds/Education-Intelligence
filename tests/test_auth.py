@@ -1,4 +1,13 @@
-from app.core.security import create_access_token, decode_access_token, hash_password, verify_password
+import pytest
+
+from app.core.security import (
+    AuthenticationError,
+    create_access_token,
+    decode_access_token,
+    enforce_roles,
+    hash_password,
+    verify_password,
+)
 
 
 def test_password_hash_and_verify():
@@ -14,3 +23,10 @@ def test_jwt_round_trip():
     assert payload["sub"] == "12"
     assert payload["tenant_id"] == 3
     assert payload["role"] == "student"
+
+
+def test_enforce_roles_requires_explicit_mentor_membership():
+    enforce_roles("mentor", {"mentor", "admin"})
+
+    with pytest.raises(AuthenticationError):
+        enforce_roles("mentor", {"teacher"})

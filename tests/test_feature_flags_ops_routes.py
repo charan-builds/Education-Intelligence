@@ -16,6 +16,7 @@ class _FakeFeatureFlagService:
     last_tenant_id = None
     last_enable_args = None
     last_disable_args = None
+    created_at = datetime(2026, 3, 13, 0, 0, tzinfo=timezone.utc)
 
     def __init__(self, session):
         self.session = session
@@ -28,7 +29,7 @@ class _FakeFeatureFlagService:
                 tenant_id=tenant_id,
                 feature_name="ml_recommendation_enabled",
                 enabled=True,
-                created_at=datetime.now(timezone.utc),
+                created_at=_FakeFeatureFlagService.created_at,
             )
         ]
 
@@ -42,7 +43,7 @@ class _FakeFeatureFlagService:
             tenant_id=tenant_id,
             feature_name=flag_name,
             enabled=True,
-            created_at=datetime.now(timezone.utc),
+            created_at=_FakeFeatureFlagService.created_at,
         )
 
     async def disable_feature(self, flag_name: str, tenant_id: int):
@@ -52,12 +53,16 @@ class _FakeFeatureFlagService:
             tenant_id=tenant_id,
             feature_name=flag_name,
             enabled=False,
-            created_at=datetime.now(timezone.utc),
+            created_at=_FakeFeatureFlagService.created_at,
         )
 
 
 def _user(role: str, tenant_id: int = 10):
     return SimpleNamespace(role=SimpleNamespace(value=role), tenant_id=tenant_id)
+
+
+def _request():
+    return SimpleNamespace(headers={})
 
 
 def test_feature_flags_forbidden_for_student(monkeypatch):
@@ -66,6 +71,7 @@ def test_feature_flags_forbidden_for_student(monkeypatch):
     async def _run():
         with pytest.raises(HTTPException) as exc:
             await feature_flag_routes.list_feature_flags(
+                request=_request(),
                 tenant_id=None,
                 db=_DummySession(),
                 current_user=_user("student", tenant_id=5),
@@ -80,13 +86,22 @@ def test_feature_flags_admin_scoped_tenant(monkeypatch):
 
     async def _run():
         result = await feature_flag_routes.list_feature_flags(
+            request=_request(),
             tenant_id=999,
             db=_DummySession(),
             current_user=_user("admin", tenant_id=42),
         )
+        payload = result.body.decode()
         assert _FakeFeatureFlagService.last_tenant_id == 42
-        assert len(result.items) == 1
-        assert result.items[0].tenant_id == 42
+        assert '"tenant_id":42' in payload
+        assert '"limit":50' in payload
+        assert '"offset":0' in payload
+        assert '"returned":1' in payload
+        assert '"total":1' in payload
+        assert '"has_more":false' in payload
+        assert '"next_offset":null' in payload
+        assert result.headers["Cache-Control"] == "private, max-age=30"
+        assert result.headers["Vary"] == "Authorization, If-None-Match"
 
     asyncio.run(_run())
 
@@ -96,12 +111,91 @@ def test_feature_flags_super_admin_explicit_tenant(monkeypatch):
 
     async def _run():
         result = await feature_flag_routes.list_feature_flags(
+            request=_request(),
             tenant_id=77,
             db=_DummySession(),
             current_user=_user("super_admin", tenant_id=1),
         )
+        payload = result.body.decode()
         assert _FakeFeatureFlagService.last_tenant_id == 77
-        assert result.items[0].tenant_id == 77
+        assert '"tenant_id":77' in payload
+
+    asyncio.run(_run())
+
+
+def test_feature_flags_list_etag_304(monkeypatch):
+    monkeypatch.setattr(feature_flag_routes, "FeatureFlagService", _FakeFeatureFlagService)
+
+    async def _run():
+        first = await feature_flag_routes.list_feature_flags(
+            request=_request(),
+            tenant_id=77,
+            db=_DummySession(),
+            current_user=_user("super_admin", tenant_id=1),
+        )
+        etag = first.headers.get("etag")
+        req = _request()
+        req.headers = {"if-none-match": etag}
+        second = await feature_flag_routes.list_feature_flags(
+            request=req,
+            tenant_id=77,
+            db=_DummySession(),
+            current_user=_user("super_admin", tenant_id=1),
+        )
+        assert second.status_code == 304
+        assert second.headers["Cache-Control"] == "private, max-age=30"
+        assert second.headers["Vary"] == "Authorization, If-None-Match"
+
+    asyncio.run(_run())
+
+
+def test_feature_flags_list_pagination(monkeypatch):
+    class _PagedFeatureFlagService(_FakeFeatureFlagService):
+        async def list_for_tenant(self, tenant_id: int):
+            _FakeFeatureFlagService.last_tenant_id = tenant_id
+            return [
+                SimpleNamespace(
+                    id=1,
+                    tenant_id=tenant_id,
+                    feature_name="adaptive_testing_enabled",
+                    enabled=True,
+                    created_at=_FakeFeatureFlagService.created_at,
+                ),
+                SimpleNamespace(
+                    id=2,
+                    tenant_id=tenant_id,
+                    feature_name="ai_mentor_enabled",
+                    enabled=False,
+                    created_at=_FakeFeatureFlagService.created_at,
+                ),
+                SimpleNamespace(
+                    id=3,
+                    tenant_id=tenant_id,
+                    feature_name="ml_recommendation_enabled",
+                    enabled=True,
+                    created_at=_FakeFeatureFlagService.created_at,
+                ),
+            ]
+
+    monkeypatch.setattr(feature_flag_routes, "FeatureFlagService", _PagedFeatureFlagService)
+
+    async def _run():
+        result = await feature_flag_routes.list_feature_flags(
+            request=_request(),
+            tenant_id=None,
+            limit=2,
+            offset=0,
+            db=_DummySession(),
+            current_user=_user("admin", tenant_id=42),
+        )
+        payload = result.body.decode()
+        assert '"returned":2' in payload
+        assert '"total":3' in payload
+        assert '"has_more":true' in payload
+        assert '"next_offset":2' in payload
+        assert '"adaptive_testing_enabled"' in payload
+        assert '"ai_mentor_enabled"' in payload
+        assert '"ml_recommendation_enabled"' not in payload
 
     asyncio.run(_run())
 
@@ -113,6 +207,7 @@ def test_update_feature_flag_admin_scoped(monkeypatch):
 
     async def _run():
         result = await feature_flag_routes.update_feature_flag(
+            request=_request(),
             flag_name="ml_recommendation_enabled",
             payload=FeatureFlagUpdateRequest(enabled=True, tenant_id=999),
             db=_DummySession(),
@@ -134,6 +229,7 @@ def test_update_feature_flag_super_admin_tenant_override(monkeypatch):
 
     async def _run():
         result = await feature_flag_routes.update_feature_flag(
+            request=_request(),
             flag_name="adaptive_testing_enabled",
             payload=FeatureFlagUpdateRequest(enabled=False, tenant_id=55),
             db=_DummySession(),
@@ -151,12 +247,35 @@ def test_update_feature_flag_super_admin_tenant_override(monkeypatch):
 def test_feature_flag_catalog_admin(monkeypatch):
     async def _run():
         result = await feature_flag_routes.feature_flag_catalog(
+            request=_request(),
             current_user=_user("admin", tenant_id=12),
         )
-        assert "adaptive_testing_enabled" in result.items
-        assert "ai_mentor_enabled" in result.items
-        assert "ml_recommendation_enabled" in result.items
-        assert result.items == sorted(result.items)
+        payload = result.body.decode()
+        assert "adaptive_testing_enabled" in payload
+        assert "ai_mentor_enabled" in payload
+        assert "ml_recommendation_enabled" in payload
+        assert result.headers["Cache-Control"] == "private, max-age=60"
+        assert result.headers["Vary"] == "Authorization, If-None-Match"
+
+    asyncio.run(_run())
+
+
+def test_feature_flag_catalog_etag_304():
+    async def _run():
+        first = await feature_flag_routes.feature_flag_catalog(
+            request=_request(),
+            current_user=_user("admin", tenant_id=12),
+        )
+        etag = first.headers.get("etag")
+        req = _request()
+        req.headers = {"if-none-match": etag}
+        second = await feature_flag_routes.feature_flag_catalog(
+            request=req,
+            current_user=_user("admin", tenant_id=12),
+        )
+        assert second.status_code == 304
+        assert second.headers["Cache-Control"] == "private, max-age=60"
+        assert second.headers["Vary"] == "Authorization, If-None-Match"
 
     asyncio.run(_run())
 
@@ -169,6 +288,7 @@ def test_update_feature_flag_rejects_unknown_flag(monkeypatch):
     async def _run():
         with pytest.raises(HTTPException) as exc:
             await feature_flag_routes.update_feature_flag(
+                request=_request(),
                 flag_name="unknown_flag",
                 payload=FeatureFlagUpdateRequest(enabled=True, tenant_id=999),
                 db=_DummySession(),

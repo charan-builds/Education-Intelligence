@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.models.base import Base
@@ -17,5 +17,11 @@ class RoadmapStep(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     progress_status: Mapped[str] = mapped_column(String(64), nullable=False, default="pending")
+    step_type: Mapped[str] = mapped_column(String(32), nullable=False, default="core")
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    unlocks_topic_id: Mapped[int | None] = mapped_column(
+        ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    is_revision: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     roadmap = relationship("Roadmap", back_populates="steps")

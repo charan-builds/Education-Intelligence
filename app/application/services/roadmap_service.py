@@ -6,6 +6,7 @@ from app.core.pagination import decode_cursor, encode_cursor
 from app.core.feature_flags import FeatureFlagService
 from app.domain.engines.knowledge_graph import KnowledgeGraphEngine
 from app.domain.engines.learning_profile_engine import LearningProfileEngine
+from app.domain.engines.weakness_modeling_engine import WeaknessModelingEngine
 from app.domain.engines.topic_difficulty_engine import TopicDifficultyEngine
 from app.application.services.recommendation_service import RecommendationService
 from app.infrastructure.cache.cache_service import CacheService
@@ -14,6 +15,9 @@ from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
 from app.infrastructure.repositories.topic_repository import TopicRepository
 from app.application.exceptions import NotFoundError
 from app.application.exceptions import ValidationError
+from app.application.services.learning_event_service import LearningEventService
+from app.application.services.learning_intelligence_service import LearningIntelligenceService
+from app.application.services.retention_service import RetentionService
 
 
 class RoadmapService:
@@ -24,12 +28,57 @@ class RoadmapService:
         self.diagnostic_repository = DiagnosticRepository(session)
         self.recommendation_service = RecommendationService()
         self.learning_profile_engine = LearningProfileEngine()
+        self.weakness_engine = WeaknessModelingEngine()
         self.topic_difficulty_engine = TopicDifficultyEngine()
         self.cache_service = CacheService()
         self.feature_flag_service = FeatureFlagService(session)
+        self.learning_event_service = LearningEventService(session)
+        self.retention_service = RetentionService(session)
+
+    @staticmethod
+    def _phase_label(priority: int, total_steps: int) -> str:
+        if total_steps <= 0:
+            return "Phase 1 - Foundations"
+        chunk_size = max(1, (total_steps + 2) // 3)
+        if priority <= chunk_size:
+            return "Phase 1 - Foundations"
+        if priority <= chunk_size * 2:
+            return "Phase 2 - Intermediate Skills"
+        return "Phase 3 - Advanced Specialization"
+
+    def _serialize_roadmap(self, roadmap, total_steps: int) -> dict:
+        return {
+            "id": roadmap.id,
+            "user_id": roadmap.user_id,
+            "goal_id": roadmap.goal_id,
+            "generated_at": roadmap.generated_at.isoformat(),
+            "steps": [
+                {
+                    "id": step.id,
+                    "topic_id": step.topic_id,
+                    "phase": self._phase_label(step.priority, total_steps),
+                    "estimated_time_hours": step.estimated_time_hours,
+                    "difficulty": step.difficulty,
+                    "priority": step.priority,
+                    "deadline": step.deadline.isoformat(),
+                    "progress_status": step.progress_status,
+                    "step_type": getattr(step, "step_type", "core"),
+                    "rationale": getattr(step, "rationale", None),
+                    "unlocks_topic_id": getattr(step, "unlocks_topic_id", None),
+                    "is_revision": bool(getattr(step, "is_revision", False)),
+                }
+                for step in roadmap.steps
+            ],
+        }
 
     async def generate(self, user_id: int, tenant_id: int, goal_id: int, test_id: int):
         try:
+            latest_roadmap = await self.roadmap_repository.get_latest_roadmap_for_user(user_id=user_id, tenant_id=tenant_id)
+            if latest_roadmap is not None and int(latest_roadmap.goal_id) == int(goal_id):
+                roadmap_age_seconds = (datetime.now(timezone.utc) - latest_roadmap.generated_at).total_seconds()
+                if roadmap_age_seconds < 300:
+                    return latest_roadmap
+
             topic_scores = await self.diagnostic_repository.topic_scores_for_test(test_id, user_id, tenant_id)
             if not topic_scores:
                 raise NotFoundError("Diagnostic result not found or unauthorized")
@@ -52,6 +101,10 @@ class RoadmapService:
             user_learning_profile = {
                 "profile_type": profile.profile_type,
                 "confidence": profile.confidence,
+                "speed": profile.speed,
+                "accuracy": profile.accuracy,
+                "consistency": profile.consistency,
+                "stamina": profile.stamina,
             }
             goal_context = {"goal_id": goal_id}
             try:
@@ -68,6 +121,17 @@ class RoadmapService:
                 goal=goal_context,
                 feature_flags={"ml_recommendation_enabled": ml_enabled},
             )
+            prerequisite_map: dict[int, list[int]] = {}
+            for topic_id, prerequisite_topic_id in prerequisite_edges:
+                prerequisite_map.setdefault(int(topic_id), []).append(int(prerequisite_topic_id))
+            weakness_analysis = self.weakness_engine.analyze(
+                topic_scores={int(topic_id): float(score) for topic_id, score in topic_scores.items()},
+                prerequisite_map=prerequisite_map,
+            )
+            for cluster in weakness_analysis["weakness_clusters"]:
+                for topic_id in cluster["topic_ids"]:
+                    if topic_id not in recommended_targets:
+                        recommended_targets.append(int(topic_id))
 
             knowledge_graph_engine = KnowledgeGraphEngine(self.topic_repository)
             topic_order: list[int] = []
@@ -124,6 +188,7 @@ class RoadmapService:
                     * (1 + (dependency_depth * 0.1)),
                     2,
                 )
+                clustered = any(topic_id in cluster["topic_ids"] for cluster in weakness_analysis["weakness_clusters"])
                 await self.roadmap_repository.add_step(
                     roadmap_id=roadmap.id,
                     topic_id=topic_id,
@@ -131,10 +196,24 @@ class RoadmapService:
                     difficulty=difficulty_result.level,
                     priority=index + 1,
                     deadline=base_date + timedelta(days=days_per_step * (index + 1)),
+                    step_type="core",
+                    rationale=(
+                        "Scheduled early to stabilize a weakness cluster and unblock downstream mastery."
+                        if clustered
+                        else "Scheduled from diagnostic gaps, dependency depth, and learning profile analysis."
+                    ),
                 )
 
             await self.session.commit()
-            return roadmap
+            await self.cache_service.delete_prefix("analytics:")
+            loaded_roadmap = await self.roadmap_repository.get_roadmap_for_user(
+                roadmap_id=roadmap.id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            if loaded_roadmap is None:
+                raise NotFoundError("Generated roadmap could not be reloaded")
+            return loaded_roadmap
         except Exception:
             await self.session.rollback()
             raise
@@ -189,28 +268,68 @@ class RoadmapService:
             },
         }
         serialized_payload = {
-            "items": [
-                {
-                    "id": roadmap.id,
-                    "user_id": roadmap.user_id,
-                    "goal_id": roadmap.goal_id,
-                    "generated_at": roadmap.generated_at.isoformat(),
-                    "steps": [
-                        {
-                            "id": step.id,
-                            "topic_id": step.topic_id,
-                            "estimated_time_hours": step.estimated_time_hours,
-                            "difficulty": step.difficulty,
-                            "priority": step.priority,
-                            "deadline": step.deadline.isoformat(),
-                            "progress_status": step.progress_status,
-                        }
-                        for step in roadmap.steps
-                    ],
-                }
-                for roadmap in items
-            ],
+            "items": [self._serialize_roadmap(roadmap, len(roadmap.steps)) for roadmap in items],
             "meta": payload["meta"],
         }
         await self.cache_service.set(cache_key, serialized_payload, ttl=300)
         return payload
+
+    async def update_step_status(
+        self,
+        *,
+        step_id: int,
+        user_id: int,
+        tenant_id: int,
+        progress_status: str,
+    ) -> dict:
+        normalized_status = progress_status.strip().lower()
+        allowed_statuses = {"pending", "in_progress", "completed"}
+        if normalized_status not in allowed_statuses:
+            raise ValidationError("Invalid roadmap step status")
+
+        step = await self.roadmap_repository.get_step_for_user(step_id=step_id, user_id=user_id, tenant_id=tenant_id)
+        if step is None:
+            raise NotFoundError("Roadmap step not found")
+
+        await self.roadmap_repository.update_step_status(step, progress_status=normalized_status)
+        await self.session.commit()
+
+        if normalized_status == "completed":
+            await self.learning_event_service.track_topic_completed(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                topic_id=step.topic_id,
+                completion_score=100.0,
+                commit=False,
+            )
+            await self.retention_service.schedule_topic_review(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                topic_id=step.topic_id,
+                completion_score=100.0,
+            )
+
+        await self.cache_service.delete_prefix(f"tenant:{tenant_id}:roadmap:{user_id}:")
+        await self.cache_service.delete_prefix("analytics:")
+        return {
+            "id": step.id,
+            "topic_id": step.topic_id,
+            "phase": None,
+            "estimated_time_hours": step.estimated_time_hours,
+            "difficulty": step.difficulty,
+            "priority": step.priority,
+            "deadline": step.deadline,
+            "progress_status": step.progress_status,
+            "step_type": getattr(step, "step_type", "core"),
+            "rationale": getattr(step, "rationale", None),
+            "unlocks_topic_id": getattr(step, "unlocks_topic_id", None),
+            "is_revision": bool(getattr(step, "is_revision", False)),
+        }
+
+    async def adapt_latest(self, *, user_id: int, tenant_id: int) -> dict:
+        result = await LearningIntelligenceService(self.session).adaptive_refresh(
+            user_id=user_id,
+            tenant_id=tenant_id,
+        )
+        await self.cache_service.delete_prefix(f"tenant:{tenant_id}:roadmap:{user_id}:")
+        return result

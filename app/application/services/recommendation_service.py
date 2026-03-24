@@ -65,6 +65,7 @@ class RecommendationService:
                     tenant_id=tenant_id,
                     goal=goal_name,
                     topic_scores=topic_scores,
+                    prerequisites=prerequisite_edges,
                     learning_profile=learning_profile or {},
                 )
                 raw_steps = ai_response.get("recommended_steps", [])

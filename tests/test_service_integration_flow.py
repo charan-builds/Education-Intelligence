@@ -29,6 +29,8 @@ class _User:
 class _Question:
     id: int
     topic_id: int
+    correct_answer: str
+    accepted_answers: list[str] | None = None
 
 
 @dataclass
@@ -95,7 +97,12 @@ class _UserRepo:
 
 class _TopicRepo:
     async def get_question(self, question_id: int):
-        return _Question(id=question_id, topic_id=101 if question_id == 1 else 102)
+        return _Question(
+            id=question_id,
+            topic_id=101 if question_id == 1 else 102,
+            correct_answer="ans1" if question_id == 1 else "ans2",
+            accepted_answers=["answer one"] if question_id == 1 else ["answer two"],
+        )
 
     async def get_prerequisite_edges(self, tenant_id=None):
         return [(102, 101)]
@@ -231,8 +238,8 @@ def test_end_to_end_service_flow_with_tenant_scope():
             user_id=user.id,
             tenant_id=1,
             answers=[
-                {"question_id": 1, "user_answer": "ans1", "score": 45.0, "time_taken": 5.0},
-                {"question_id": 2, "user_answer": "ans2", "score": 55.0, "time_taken": 7.0},
+                {"question_id": 1, "user_answer": "ans1", "time_taken": 5.0},
+                {"question_id": 2, "user_answer": "ans2", "time_taken": 7.0},
             ],
         )
 

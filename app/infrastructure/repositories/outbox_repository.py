@@ -14,6 +14,21 @@ class OutboxRepository:
 
     async def create_event(self, *, tenant_id: int | None, event_type: str, payload_json: str) -> OutboxEvent:
         now = datetime.now(timezone.utc)
+        existing = (
+            await self.session.execute(
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.tenant_id == tenant_id,
+                    OutboxEvent.event_type == event_type,
+                    OutboxEvent.payload_json == payload_json,
+                    OutboxEvent.status.in_(["pending", "processing"]),
+                )
+                .order_by(OutboxEvent.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing
         row = OutboxEvent(
             tenant_id=tenant_id,
             event_type=event_type,

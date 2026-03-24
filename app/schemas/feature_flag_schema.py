@@ -13,8 +13,18 @@ class FeatureFlagResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class FeatureFlagPageMeta(BaseModel):
+    limit: int
+    offset: int
+    returned: int
+    total: int
+    has_more: bool
+    next_offset: int | None
+
+
 class FeatureFlagPageResponse(BaseModel):
     items: list[FeatureFlagResponse]
+    meta: FeatureFlagPageMeta
 
 
 class FeatureFlagUpdateRequest(BaseModel):

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from statistics import mean
+from statistics import mean, pstdev
 
 
 @dataclass(frozen=True)
 class LearningProfileResult:
     profile_type: str
     confidence: float
+    speed: float
+    accuracy: float
+    consistency: float
+    stamina: float
 
 
 class LearningProfileEngine:
@@ -25,6 +29,7 @@ class LearningProfileEngine:
     PROFILE_PRACTICE_FOCUSED = "practice_focused"
     PROFILE_BALANCED = "balanced"
     PROFILE_SLOW_DEEP = "slow_deep_learner"
+    PROFILE_FAST_EXPLORER = "fast_explorer"
 
     def analyze(
         self,
@@ -33,10 +38,19 @@ class LearningProfileEngine:
         difficulty_distribution: dict[str, int],
     ) -> LearningProfileResult:
         if not response_times or not accuracies:
-            return LearningProfileResult(profile_type=self.PROFILE_BALANCED, confidence=0.5)
+            return LearningProfileResult(
+                profile_type=self.PROFILE_BALANCED,
+                confidence=0.5,
+                speed=50.0,
+                accuracy=50.0,
+                consistency=50.0,
+                stamina=50.0,
+            )
 
         avg_time = mean(response_times)
         avg_accuracy = mean(accuracies)
+        time_variance = pstdev(response_times) if len(response_times) > 1 else 0.0
+        accuracy_variance = pstdev(accuracies) if len(accuracies) > 1 else 0.0
 
         easy = int(difficulty_distribution.get("easy", 0))
         medium = int(difficulty_distribution.get("medium", 0))
@@ -50,6 +64,7 @@ class LearningProfileEngine:
         concept_score = 0.0
         practice_score = 0.0
         slow_deep_score = 0.0
+        fast_explorer_score = 0.0
 
         if avg_accuracy >= 75:
             concept_score += 0.45
@@ -72,10 +87,20 @@ class LearningProfileEngine:
         if hard_ratio >= 0.25:
             slow_deep_score += 0.2
 
+        if avg_time < 16:
+            fast_explorer_score += 0.45
+        if avg_accuracy >= 62:
+            fast_explorer_score += 0.25
+        if hard_ratio >= 0.2:
+            fast_explorer_score += 0.15
+        if time_variance < 10:
+            fast_explorer_score += 0.15
+
         scores = {
             self.PROFILE_CONCEPT_FOCUSED: concept_score,
             self.PROFILE_PRACTICE_FOCUSED: practice_score,
             self.PROFILE_SLOW_DEEP: slow_deep_score,
+            self.PROFILE_FAST_EXPLORER: fast_explorer_score,
             self.PROFILE_BALANCED: 0.6,
         }
 
@@ -84,4 +109,17 @@ class LearningProfileEngine:
         margin = sorted_scores[0] - sorted_scores[1]
 
         confidence = min(0.99, max(0.5, scores[top_profile] + margin / 2))
-        return LearningProfileResult(profile_type=top_profile, confidence=round(confidence, 2))
+        speed = max(0.0, min(100.0, 100.0 - min(avg_time, 90.0) / 90.0 * 100.0))
+        consistency = max(
+            0.0,
+            min(100.0, 100.0 - ((time_variance * 1.3) + (accuracy_variance * 0.35))),
+        )
+        stamina = max(0.0, min(100.0, (hard_ratio * 65.0) + (avg_accuracy * 0.35)))
+        return LearningProfileResult(
+            profile_type=top_profile,
+            confidence=round(confidence, 2),
+            speed=round(speed, 2),
+            accuracy=round(avg_accuracy, 2),
+            consistency=round(consistency, 2),
+            stamina=round(stamina, 2),
+        )

@@ -26,6 +26,15 @@ venv/
 dist/
 build/
 *.egg-info/
+*.tsbuildinfo
+logs/
+
+# Frontend local artifacts
+learning-platform-frontend/node_modules/
+learning-platform-frontend/.next/
+learning-platform-frontend/.turbo/
+learning-platform-frontend/playwright-report/
+learning-platform-frontend/test-results/
 
 # Tooling/editor
 .vscode/

@@ -1,8 +1,18 @@
 export type DiagnosticAnswerPayload = {
   question_id: number;
   user_answer: string;
-  score: number;
+  score?: number | null;
   time_taken: number;
+};
+
+export type DiagnosticQuestion = {
+  id: number;
+  topic_id: number;
+  difficulty: number;
+  difficulty_label: string;
+  question_type: "multiple_choice" | "short_text" | string;
+  question_text: string;
+  answer_options: string[];
 };
 
 export type DiagnosticSession = {

@@ -1,12 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import hashlib
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.params import Query as QueryParam
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import get_current_user
 from app.core.feature_flags import FeatureFlagService, SUPPORTED_FEATURE_FLAGS, is_supported_feature_flag
 from app.core.logging import get_logger
 from app.infrastructure.database import get_db_session
+from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.feature_flag_schema import (
     FeatureFlagCatalogResponse,
+    FeatureFlagPageMeta,
     FeatureFlagPageResponse,
     FeatureFlagResponse,
     FeatureFlagUpdateRequest,
@@ -17,8 +24,13 @@ logger = get_logger()
 
 
 @router.get("", response_model=FeatureFlagPageResponse)
+@limiter.limit("30/minute", key_func=rate_limit_key_by_ip)
+@limiter.limit("60/minute", key_func=rate_limit_key_by_user)
 async def list_feature_flags(
+    request: Request,
     tenant_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
@@ -31,21 +43,80 @@ async def list_feature_flags(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    items = await FeatureFlagService(db).list_for_tenant(scoped_tenant_id)
-    return FeatureFlagPageResponse(items=items)
+    resolved_limit = limit.default if isinstance(limit, QueryParam) else limit
+    resolved_offset = offset.default if isinstance(offset, QueryParam) else offset
+    all_items = await FeatureFlagService(db).list_for_tenant(scoped_tenant_id)
+    page_items = all_items[resolved_offset : resolved_offset + resolved_limit]
+    has_more = resolved_offset + resolved_limit < len(all_items)
+    next_offset = resolved_offset + resolved_limit if has_more else None
+    payload = FeatureFlagPageResponse(
+        items=page_items,
+        meta=FeatureFlagPageMeta(
+            limit=resolved_limit,
+            offset=resolved_offset,
+            returned=len(page_items),
+            total=len(all_items),
+            has_more=has_more,
+            next_offset=next_offset,
+        ),
+    )
+    payload_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str)
+    etag = f'W/"{hashlib.sha256(payload_json.encode("utf-8")).hexdigest()}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": "private, max-age=30",
+                "Vary": "Authorization, If-None-Match",
+            },
+        )
+    return JSONResponse(
+        content=payload.model_dump(mode="json"),
+        headers={
+            "ETag": etag,
+            "Cache-Control": "private, max-age=30",
+            "Vary": "Authorization, If-None-Match",
+        },
+    )
 
 
 @router.get("/catalog", response_model=FeatureFlagCatalogResponse)
+@limiter.limit("30/minute", key_func=rate_limit_key_by_ip)
+@limiter.limit("60/minute", key_func=rate_limit_key_by_user)
 async def feature_flag_catalog(
+    request: Request,
     current_user=Depends(get_current_user),
 ):
     if current_user.role.value not in {"admin", "super_admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    return FeatureFlagCatalogResponse(items=sorted(SUPPORTED_FEATURE_FLAGS))
+    payload = FeatureFlagCatalogResponse(items=sorted(SUPPORTED_FEATURE_FLAGS))
+    payload_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str)
+    etag = f'W/"{hashlib.sha256(payload_json.encode("utf-8")).hexdigest()}"'
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": "private, max-age=60",
+                "Vary": "Authorization, If-None-Match",
+            },
+        )
+    return JSONResponse(
+        content=payload.model_dump(mode="json"),
+        headers={
+            "ETag": etag,
+            "Cache-Control": "private, max-age=60",
+            "Vary": "Authorization, If-None-Match",
+        },
+    )
 
 
 @router.post("/{flag_name}", response_model=FeatureFlagResponse)
+@limiter.limit("20/minute", key_func=rate_limit_key_by_ip)
+@limiter.limit("40/minute", key_func=rate_limit_key_by_user)
 async def update_feature_flag(
+    request: Request,
     flag_name: str,
     payload: FeatureFlagUpdateRequest,
     db: AsyncSession = Depends(get_db_session),

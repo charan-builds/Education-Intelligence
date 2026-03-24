@@ -3,13 +3,13 @@ from app.domain.engines.adaptive_testing_engine import AdaptiveQuestion, Adaptiv
 
 def _questions():
     return [
-        AdaptiveQuestion(id=1, topic_id=10, difficulty=1, question_text="q1"),
-        AdaptiveQuestion(id=2, topic_id=10, difficulty=2, question_text="q2"),
-        AdaptiveQuestion(id=3, topic_id=10, difficulty=3, question_text="q3"),
-        AdaptiveQuestion(id=7, topic_id=10, difficulty=3, question_text="q7"),
-        AdaptiveQuestion(id=4, topic_id=20, difficulty=1, question_text="q4"),
-        AdaptiveQuestion(id=5, topic_id=20, difficulty=2, question_text="q5"),
-        AdaptiveQuestion(id=6, topic_id=20, difficulty=3, question_text="q6"),
+        AdaptiveQuestion(id=1, topic_id=10, difficulty=1, question_type="multiple_choice", question_text="q1"),
+        AdaptiveQuestion(id=2, topic_id=10, difficulty=2, question_type="multiple_choice", question_text="q2"),
+        AdaptiveQuestion(id=3, topic_id=10, difficulty=3, question_type="multiple_choice", question_text="q3"),
+        AdaptiveQuestion(id=7, topic_id=10, difficulty=3, question_type="multiple_choice", question_text="q7"),
+        AdaptiveQuestion(id=4, topic_id=20, difficulty=1, question_type="multiple_choice", question_text="q4"),
+        AdaptiveQuestion(id=5, topic_id=20, difficulty=2, question_type="multiple_choice", question_text="q5"),
+        AdaptiveQuestion(id=6, topic_id=20, difficulty=3, question_type="multiple_choice", question_text="q6"),
     ]
 
 

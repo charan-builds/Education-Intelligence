@@ -1,7 +1,8 @@
 import json
 import logging
-from pathlib import Path
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 from app.core.config import get_settings
@@ -44,9 +45,18 @@ def get_logger() -> logging.Logger:
     if settings.audit_log_file_path:
         log_path = Path(settings.audit_log_file_path)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_path, encoding="utf-8")
+        file_handler = RotatingFileHandler(
+            log_path,
+            maxBytes=settings.audit_log_max_bytes,
+            backupCount=settings.audit_log_backup_count,
+            encoding="utf-8",
+        )
         file_handler.setLevel(logging.INFO)
         file_handler.setFormatter(JsonFormatter())
         logger.addHandler(file_handler)
 
     return logger
+
+
+def bind_log_data(**kwargs: Any) -> dict[str, dict[str, Any]]:
+    return {"log_data": kwargs}

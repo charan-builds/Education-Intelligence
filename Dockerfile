@@ -15,6 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml /app/
 COPY app /app/app
 COPY alembic /app/alembic
+COPY scripts /app/scripts
+COPY seed.py /app/
 COPY alembic.ini /app/
 COPY README.md /app/
 
@@ -35,10 +37,12 @@ RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
 COPY app /app/app
 COPY alembic /app/alembic
+COPY scripts /app/scripts
+COPY seed.py /app/
 COPY alembic.ini /app/
 COPY README.md /app/
 
-RUN chown -R appuser:appgroup /app
+RUN chmod +x /app/scripts/start_api.sh && chown -R appuser:appgroup /app
 USER appuser
 
 EXPOSE 8000

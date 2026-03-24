@@ -4,7 +4,7 @@ from app.domain.models.user import UserRole
 
 
 class RegisterRequest(BaseModel):
-    tenant_id: int
+    tenant_id: int = 1
     email: EmailStr
     password: str
     role: UserRole

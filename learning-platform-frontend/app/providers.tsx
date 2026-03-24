@@ -3,6 +3,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PropsWithChildren, useState } from "react";
 
+import { AuthProvider } from "@/components/providers/AuthProvider";
+import DevAccessPanel from "@/components/dev/DevAccessPanel";
+import { TenantProvider } from "@/components/providers/TenantProvider";
+import { ThemeProvider } from "@/components/providers/ThemeProvider";
+import { RealtimeProvider } from "@/components/providers/RealtimeProvider";
+import { ToastProvider } from "@/components/providers/ToastProvider";
+import PageTransition from "@/components/ui/PageTransition";
+
 export default function Providers({ children }: PropsWithChildren) {
   const [queryClient] = useState(
     () =>
@@ -21,5 +29,20 @@ export default function Providers({ children }: PropsWithChildren) {
       }),
   );
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <TenantProvider>
+            <ToastProvider>
+              <RealtimeProvider>
+                <PageTransition>{children}</PageTransition>
+                <DevAccessPanel />
+              </RealtimeProvider>
+            </ToastProvider>
+          </TenantProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </ThemeProvider>
+  );
 }

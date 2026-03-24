@@ -1,3 +1,5 @@
+import React from "react";
+
 type RoadmapProgressProps = {
   totalTopics: number;
   completedTopics: number;

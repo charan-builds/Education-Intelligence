@@ -19,6 +19,15 @@ Clean architecture modular monolith:
 - `domain` -> entities + core engines (infra-agnostic)
 - `infrastructure` -> DB/session/repositories
 
+Distributed target architecture:
+- see [docs/distributed_system_architecture.md](/home/charan_derangula/projects/intelligentSystems/docs/distributed_system_architecture.md)
+
+Global deployment target:
+- see [docs/global_deployment_architecture.md](/home/charan_derangula/projects/intelligentSystems/docs/global_deployment_architecture.md)
+
+Business strategy:
+- see [docs/business_strategy.md](/home/charan_derangula/projects/intelligentSystems/docs/business_strategy.md)
+
 Rules enforced:
 - Routes do not access DB directly.
 - Business logic is in services.
@@ -41,11 +50,20 @@ cp .env.example .env
 ```
 
 Required variables:
-- `DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/learning_platform`
-- `REDIS_URL=redis://localhost:6379`
+- `DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/learning_platform`
+- `REDIS_URL=redis://redis:6379/0`
+- `CELERY_BROKER_URL=redis://redis:6379/0`
+- `CELERY_RESULT_BACKEND=redis://redis:6379/0`
+- `POSTGRES_HOST_PORT=5433` for host access to the Compose Postgres container
+- `REDIS_HOST_PORT=6380` for host access to the Compose Redis container
+- `CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
 - `SECRET_KEY=supersecret`
 - `ALGORITHM=HS256`
 - `ACCESS_TOKEN_EXPIRE_MINUTES=60`
+- `DEFAULT_TENANT_ID=1`
+- `AUDIT_LOG_MAX_BYTES=10485760`
+- `AUDIT_LOG_BACKUP_COUNT=5`
+- `AUDIT_LOG_READ_MAX_LINES=50000`
 
 ## Setup
 ```bash
@@ -64,17 +82,76 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
+Seed local defaults:
+```bash
+python seed.py
+```
+
+Seeded credentials:
+- platform tenant: `Platform`
+- super admin: `superadmin@platform.example.com` / `SuperAdmin123!`
+- tenant: `Demo University`
+- tenant_id: `1`
+- student panel: `student@example.com` / `Student123!`
+- teacher panel: `teacher@example.com` / `Teacher123!`
+- mentor panel: `mentor@example.com` / `Mentor123!`
+- admin panel: `admin@example.com` / `admin123`
+
+Additional demo tenant users:
+- tenant: `Northwind School`
+  - student: `student@northwind.local` / `Student123!`
+  - teacher: `teacher@northwind.local` / `Teacher123!`
+  - mentor: `mentor@northwind.local` / `Mentor123!`
+  - admin: `admin@northwind.local` / `admin123`
+- tenant: `Acme Learning Co`
+  - student: `student@acme.local` / `Student123!`
+  - teacher: `teacher@acme.local` / `Teacher123!`
+  - mentor: `mentor@acme.local` / `Mentor123!`
+  - admin: `admin@acme.local` / `admin123`
+
 ## Docker (API + Gateway + DB + Redis + Worker)
 ```bash
 docker compose up --build
 ```
 
+## Kubernetes / Cloud Deployment
+
+Production-oriented Kubernetes manifests live in:
+
+- [k8s/namespace.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/namespace.yaml)
+- [k8s/configmap.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/configmap.yaml)
+- [k8s/secrets.example.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/secrets.example.yaml)
+- [k8s/api.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/api.yaml)
+- [k8s/frontend.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/frontend.yaml)
+- [k8s/ai-service.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/ai-service.yaml)
+- [k8s/workers.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/workers.yaml)
+- [k8s/ingress.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/ingress.yaml)
+- [k8s/hpa.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/hpa.yaml)
+- [k8s/pdb.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/pdb.yaml)
+- [k8s/network-policy.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/network-policy.yaml)
+- [k8s/cronjobs.yaml](/home/charan_derangula/projects/intelligentSystems/k8s/cronjobs.yaml)
+
+CI/CD deployment workflow:
+
+- [.github/workflows/deploy.yml](/home/charan_derangula/projects/intelligentSystems/.github/workflows/deploy.yml)
+
 Gateway entrypoint:
 - `http://localhost:8000` -> Nginx -> FastAPI
+- `http://localhost:3000` -> Next.js frontend
 
 Notes:
 - API container is internal-only in compose; Nginx is the public edge.
+- Frontend runs as a separate container and talks to the API gateway through `NEXT_PUBLIC_API_URL`.
+- API startup automatically runs Alembic migrations and the seed bootstrap before starting Uvicorn.
+- Compose binds Postgres to `127.0.0.1:5433` and Redis to `127.0.0.1:6380` by default to avoid conflicts with local developer services. Override with `POSTGRES_HOST_PORT` or `REDIS_HOST_PORT` if needed.
+- `docker compose up` credentials from `scripts/bootstrap_seed.py`:
+  - `superadmin@platform.example.com` / `SuperAdmin123!`
+  - `admin@platform.example.com` / `Admin123!`
+  - `teacher@platform.example.com` / `Teacher123!`
+  - `mentor@platform.example.com` / `Mentor123!`
+  - `student@platform.example.com` / `Student123!`
 - Nginx config includes gzip, request rate limiting, forwarded headers, and SSL-ready template config.
+- `./logs` is mounted into API and Celery containers so rotating audit/application logs persist outside container restarts.
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3001` (defaults from `.env.example`)
 
@@ -128,7 +205,11 @@ In compose, backend reaches it via:
 
 ## Ops APIs
 - `GET /ops/feature-flags` (admin/super_admin; tenant-scoped for admin)
+- `GET /ops/feature-flags` accepts `limit` and `offset`, and returns pagination metadata (`limit`, `offset`, `returned`, `total`, `has_more`, `next_offset`)
+- `GET /ops/feature-flags`, `GET /ops/feature-flags/catalog`, and `POST /ops/feature-flags/{flag_name}` are rate-limited per-user and per-IP
+- `GET /ops/feature-flags` supports ETag and cache headers (`Cache-Control`, `Vary`)
 - `GET /ops/feature-flags/catalog` (admin/super_admin; supported flag names)
+  - supports ETag and cache headers (`Cache-Control`, `Vary`)
 - `POST /ops/feature-flags/{flag_name}` (admin/super_admin; tenant-scoped for admin)
   - returns `400` for unsupported flag names
 - `GET /ops/audit/feature-flags` (admin/super_admin; tenant-scoped for admin)
@@ -149,6 +230,81 @@ In compose, backend reaches it via:
 pytest -q
 ```
 
+Project-level verification shortcuts:
+
+```bash
+make preflight
+make verify-backend
+make verify-frontend
+make verify
+make smoke
+make smoke-multitenant
+```
+
+Frontend unit/integration tests:
+
+```bash
+cd learning-platform-frontend
+npm run test:run
+```
+
+Browser E2E learner journey:
+
+```bash
+cd learning-platform-frontend
+npx playwright install chromium
+E2E_API_URL=http://127.0.0.1:8000 npm run test:e2e
+```
+
+Notes:
+- The E2E test starts the Next.js frontend automatically.
+- The FastAPI backend must already be running and seeded with at least one valid goal.
+- Default E2E assumptions:
+  - `E2E_TENANT_ID=1`
+  - `E2E_GOAL_ID=1`
+
+Multi-tenant smoke verification:
+
+```bash
+make smoke-multitenant
+```
+
+This verifies the seeded demo organizations can each log in and only see their tenant-owned goals/topics through the real API.
+
+Launch checklist:
+- see [docs/launch_checklist.md](/home/charan_derangula/projects/intelligentSystems/docs/launch_checklist.md)
+
+## Frontend Route Map
+
+Primary entry routes:
+- `/`
+- `/auth`
+- `/dashboard`
+- `/diagnostic`
+- `/goals`
+- `/roadmap`
+
+Role dashboards:
+- `/dashboard/student`
+- `/dashboard/teacher`
+- `/dashboard/admin`
+- `/dashboard/super-admin`
+
+Learning flow:
+- `/goals/select`
+- `/diagnostic/test`
+- `/diagnostic/result`
+- `/roadmap/view`
+- `/topic/{topicId}`
+- `/progress`
+- `/mentor`
+- `/community`
+
+Routing notes:
+- parent routes (`/dashboard`, `/diagnostic`, `/goals`, `/roadmap`) redirect to the correct concrete page
+- protected routes redirect unauthenticated users to `/auth?next=...`
+- authenticated users hitting `/auth` are redirected to the intended `next` path or their role dashboard
+
 ## Implemented Endpoints
 - `POST /auth/register`
 - `POST /auth/login`
@@ -159,6 +315,11 @@ pytest -q
 - `POST /diagnostic/start`
 - `POST /diagnostic/submit`
 - `GET /diagnostic/result`
+- `POST /diagnostic/next-question`
+
+Diagnostic scoring notes:
+- Question correctness is now evaluated in the backend using `questions.correct_answer`
+- Frontend no longer needs to calculate diagnostic scores locally
 - `POST /roadmap/generate`
 - `GET /roadmap/{user_id}`
 
@@ -190,3 +351,27 @@ Optional env overrides:
 ```bash
 BASE_URL=http://127.0.0.1:8000 SMOKE_TENANT_ID=1 SMOKE_GOAL_ID=1 make smoke
 ```
+
+Run the seeded role-panel regression smoke flow:
+
+```bash
+make smoke-role-panels
+```
+
+Flow covered:
+- student login, profile, goals, diagnostic, roadmap, mentor chat
+- teacher analytics
+- mentor analytics and suggestions
+- admin users and analytics
+- super-admin platform overview and outbox stats
+
+Optional env override:
+
+```bash
+BASE_URL=http://127.0.0.1:8000 make smoke-role-panels
+```
+
+CI coverage:
+- GitHub Actions now runs `.github/workflows/role-panel-smoke.yml`
+- It starts the Docker-backed API stack and executes both `make smoke-role-panels` and `make smoke-multitenant`
+- The two smoke checks run as separate jobs on pull requests, pushes to `main`/`master`, and manual dispatch

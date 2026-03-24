@@ -12,6 +12,7 @@ from app.infrastructure.cache.cache_service import CacheService
 SUPPORTED_FEATURE_FLAGS: tuple[str, ...] = (
     "adaptive_testing_enabled",
     "ai_mentor_enabled",
+    "ai_question_generation_enabled",
     "ml_recommendation_enabled",
 )
 
@@ -30,6 +31,9 @@ class FeatureFlagService:
 
     def _cache_key(self, flag_name: str, tenant_id: int) -> str:
         return f"tenant:{tenant_id}:feature_flag:{flag_name}"
+
+    def _list_cache_key(self, tenant_id: int) -> str:
+        return f"tenant:{tenant_id}:feature_flags:list"
 
     def _read_local_cache(self, key: tuple[int, str]) -> bool | None:
         cached = self._local_cache.get(key)
@@ -66,6 +70,7 @@ class FeatureFlagService:
         await self.session.commit()
         self._write_local_cache((tenant_id, flag_name), True)
         await self.cache_service.set(self._cache_key(flag_name, tenant_id), {"enabled": True}, ttl=self.cache_ttl_seconds)
+        await self.cache_service.delete(self._list_cache_key(tenant_id))
         return row
 
     async def disable_feature(self, flag_name: str, tenant_id: int) -> FeatureFlag:
@@ -90,6 +95,7 @@ class FeatureFlagService:
         await self.session.commit()
         self._write_local_cache((tenant_id, flag_name), False)
         await self.cache_service.set(self._cache_key(flag_name, tenant_id), {"enabled": False}, ttl=self.cache_ttl_seconds)
+        await self.cache_service.delete(self._list_cache_key(tenant_id))
         return row
 
     async def is_enabled(self, flag_name: str, tenant_id: int) -> bool:
@@ -115,9 +121,36 @@ class FeatureFlagService:
         return value
 
     async def list_for_tenant(self, tenant_id: int) -> list[FeatureFlag]:
+        cached = await self.cache_service.get(self._list_cache_key(tenant_id))
+        if isinstance(cached, list):
+            return [
+                FeatureFlag(
+                    id=item["id"],
+                    tenant_id=item["tenant_id"],
+                    feature_name=item["feature_name"],
+                    enabled=item["enabled"],
+                    created_at=datetime.fromisoformat(item["created_at"]),
+                )
+                for item in cached
+            ]
         result = await self.session.execute(
             select(FeatureFlag)
             .where(FeatureFlag.tenant_id == tenant_id)
             .order_by(FeatureFlag.feature_name.asc())
         )
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        await self.cache_service.set(
+            self._list_cache_key(tenant_id),
+            [
+                {
+                    "id": row.id,
+                    "tenant_id": row.tenant_id,
+                    "feature_name": row.feature_name,
+                    "enabled": row.enabled,
+                    "created_at": row.created_at.isoformat(),
+                }
+                for row in rows
+            ],
+            ttl=self.cache_ttl_seconds,
+        )
+        return rows

@@ -37,3 +37,8 @@ async def list_users(
         offset=pagination.offset,
         cursor=pagination.cursor,
     )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user=Depends(get_current_user)):
+    return current_user

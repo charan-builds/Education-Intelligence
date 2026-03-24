@@ -1,4 +1,5 @@
-export type UserRole = "super_admin" | "admin" | "teacher" | "student";
+export type UserRole = "super_admin" | "admin" | "teacher" | "mentor" | "student";
+export type AssignableUserRole = Exclude<UserRole, "super_admin">;
 
 export type User = {
   id: number;
@@ -24,5 +25,5 @@ export type UserPageResponse = {
 export type CreateUserPayload = {
   email: string;
   password: string;
-  role: UserRole;
+  role: AssignableUserRole;
 };

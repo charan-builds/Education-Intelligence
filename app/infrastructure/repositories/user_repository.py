@@ -35,6 +35,14 @@ class UserRepository(BaseRepository):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_ids_in_tenant(self, user_ids: list[int], tenant_id: int) -> list[User]:
+        if not user_ids:
+            return []
+        result = await self.session.execute(
+            select(User).where(User.id.in_(user_ids), User.tenant_id == tenant_id)
+        )
+        return list(result.scalars().all())
+
     async def get_by_email_in_tenant(self, email: str, tenant_id: int) -> User | None:
         result = await self.session.execute(
             select(User).where(User.email == email, User.tenant_id == tenant_id)
