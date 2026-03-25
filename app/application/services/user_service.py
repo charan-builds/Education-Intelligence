@@ -18,6 +18,8 @@ class UserService:
 
     async def create_user(self, tenant_id: int, email: str, password: str, role: UserRole) -> User:
         try:
+            if role != UserRole.student:
+                raise ValidationError("Privileged users must be created through the invite flow")
             tenant = await self.tenant_repository.get_by_id(tenant_id)
             if tenant is None:
                 raise ValidationError("Invalid tenant")

@@ -20,6 +20,30 @@ def mentor_chat_prompt(payload: dict[str, Any]) -> str:
     )
 
 
+def specialist_agent_prompt(*, agent_name: str, role: str, payload: dict[str, Any]) -> str:
+    return (
+        f"You are the {agent_name} in a multi-agent learning platform. "
+        f"Your specialist role is: {role}. "
+        "Return only JSON with keys: summary and recommendations. "
+        "Recommendations must be a short list of concrete actions.\n"
+        f"Shared context: {_json(payload)}"
+    )
+
+
+def multi_agent_synthesis_prompt(payload: dict[str, Any], agent_outputs: list[dict[str, Any]]) -> str:
+    return (
+        "You are the orchestrator of a team of specialized learning agents. "
+        "Combine their outputs into one coherent learner-facing response. "
+        "Return only JSON with keys: response, suggested_focus_topics, guidance, session_summary, memory_update, orchestrator_summary. "
+        "guidance must contain explanation, suggestions, next_steps. "
+        "memory_update must contain learner_summary, weak_topics, strong_topics, past_mistakes, improvement_signals, "
+        "preferred_learning_style, learning_speed, session_summary. "
+        "Use the specialist outputs to explain why the answer is collaborative and not generic.\n"
+        f"Context: {_json(payload)}\n"
+        f"Agent outputs: {_json(agent_outputs)}"
+    )
+
+
 def roadmap_prompt(payload: dict[str, Any]) -> str:
     return (
         "You are a learning-path planner. "

@@ -16,3 +16,4 @@ class Topic(Base):
     graph_path: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
 
     questions = relationship("Question", back_populates="topic")
+    skill_vectors = relationship("UserSkillVector")

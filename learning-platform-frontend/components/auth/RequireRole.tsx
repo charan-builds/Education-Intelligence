@@ -3,7 +3,9 @@
 import React, { ReactNode, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
+import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
+import { normalizeAppPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath, roleHasAccess } from "@/utils/roleRedirect";
 
 type RequireRoleProps = {
@@ -20,7 +22,7 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
       return;
     }
     if (!isAuthenticated) {
-      router.replace("/auth");
+      router.replace(normalizeAppPath("/auth"));
       return;
     }
     if (role && !roleHasAccess(role, allowedRoles)) {
@@ -29,11 +31,21 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
   }, [allowedRoles, isAuthenticated, isReady, role, router]);
 
   if (!isReady) {
-    return <main className="mx-auto min-h-screen max-w-4xl px-6 py-12 text-slate-600">Loading session...</main>;
+    return <AccessState mode="loading" />;
   }
 
-  if (!isAuthenticated || (role && !roleHasAccess(role, allowedRoles))) {
-    return <main className="mx-auto min-h-screen max-w-4xl px-6 py-12 text-slate-600">Redirecting...</main>;
+  if (!isAuthenticated) {
+    return <AccessState mode="redirecting" description="Redirecting to sign in..." />;
+  }
+
+  if (role && !roleHasAccess(role, allowedRoles)) {
+    return (
+      <AccessState
+        mode="unauthorized"
+        redirectHref={getRoleRedirectPath(role)}
+        redirectLabel="Open my workspace"
+      />
+    );
   }
 
   return <>{children}</>;

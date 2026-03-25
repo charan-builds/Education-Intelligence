@@ -17,6 +17,13 @@ class PromptSection(BaseModel):
     next_steps: list[str] = Field(default_factory=list)
 
 
+class AgentCollaborationOutput(BaseModel):
+    agent_name: str
+    role: str
+    summary: str
+    recommendations: list[str] = Field(default_factory=list)
+
+
 class LearningPathRequest(BaseModel):
     user_id: int
     tenant_id: int
@@ -60,10 +67,16 @@ class MentorResponse(BaseModel):
     response: str
     suggested_focus_topics: list[int] = Field(default_factory=list)
     provider: str | None = None
+    latency_ms: float | None = None
+    fallback_used: bool = False
+    fallback_reason: str | None = None
     next_checkin_date: date | None = None
     guidance: PromptSection
     session_summary: str = ""
     memory_update: dict[str, Any] = Field(default_factory=dict)
+    routed_agents: list[str] = Field(default_factory=list)
+    orchestrator_summary: str = ""
+    agent_outputs: list[AgentCollaborationOutput] = Field(default_factory=list)
 
 
 class ProgressAnalysisRequest(BaseModel):

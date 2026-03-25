@@ -6,13 +6,17 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.feature_store_service import FeatureStoreService
 from app.domain.models.learning_event import LearningEvent
 from app.domain.models.ml_feature_snapshot import MLFeatureSnapshot
 from app.domain.models.ml_model_registry import MLModelRegistry
 from app.domain.models.ml_training_run import MLTrainingRun
 from app.domain.models.question import Question
+from app.domain.models.diagnostic_test import DiagnosticTest
+from app.domain.models.topic import Topic
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user_answer import UserAnswer
+from app.domain.models.user_skill_vector import UserSkillVector
 from app.domain.engines.ml_recommendation_engine import MLRecommendationEngine
 from app.domain.engines.predictive_intelligence_engine import PredictiveIntelligenceEngine
 
@@ -22,6 +26,7 @@ class MLPlatformService:
         self.session = session
         self.recommendation_engine = MLRecommendationEngine()
         self.predictive_engine = PredictiveIntelligenceEngine()
+        self.feature_store_service = FeatureStoreService(session)
 
     async def build_feature_snapshot(self, *, user_id: int, tenant_id: int) -> dict:
         events_result = await self.session.execute(
@@ -32,7 +37,8 @@ class MLPlatformService:
         answer_result = await self.session.execute(
             select(UserAnswer.score, UserAnswer.time_taken, Question.difficulty)
             .join(Question, Question.id == UserAnswer.question_id)
-            .where(UserAnswer.user_id == user_id)
+            .join(DiagnosticTest, DiagnosticTest.id == UserAnswer.test_id)
+            .where(DiagnosticTest.user_id == user_id, DiagnosticTest.user.has(tenant_id=tenant_id))
         )
         answers = answer_result.all()
 
@@ -40,6 +46,13 @@ class MLPlatformService:
             select(TopicScore.score, TopicScore.retention_score).where(TopicScore.user_id == user_id, TopicScore.tenant_id == tenant_id)
         )
         topic_scores = topic_scores_result.all()
+        skill_vector_result = await self.session.execute(
+            select(UserSkillVector.mastery_score, UserSkillVector.confidence_score).where(
+                UserSkillVector.user_id == user_id,
+                UserSkillVector.tenant_id == tenant_id,
+            )
+        )
+        skill_vectors = skill_vector_result.all()
 
         total_minutes = 0.0
         for event in events:
@@ -48,6 +61,8 @@ class MLPlatformService:
             except json.JSONDecodeError:
                 metadata = {}
             total_minutes += float(metadata.get("minutes", metadata.get("duration_minutes", 0.0)) or 0.0)
+            if float(event.time_spent_seconds or 0) > 0:
+                total_minutes += float(event.time_spent_seconds or 0) / 60.0
 
         avg_time_minutes = round(total_minutes / max(len(events), 1), 2) if events else 0.0
         avg_accuracy = round(sum(float(score) for score, _, _ in answers) / max(len(answers), 1), 2) if answers else 0.0
@@ -55,6 +70,9 @@ class MLPlatformService:
         retention_rate = round(sum(float(ret) * 100.0 for _, ret in topic_scores) / max(len(topic_scores), 1), 2) if topic_scores else 0.0
         engagement_score = round(min(100.0, (len(events) * 7.5) + (avg_time_minutes * 1.2)), 2)
         learning_speed = round(avg_accuracy / max(avg_time_minutes, 1.0) * 10.0, 2) if avg_accuracy else 0.0
+        mastery_avg = round(sum(float(score) for score, _ in skill_vectors) / max(len(skill_vectors), 1), 2) if skill_vectors else 0.0
+        confidence_avg = round(sum(float(conf) for _, conf in skill_vectors) / max(len(skill_vectors), 1), 4) if skill_vectors else 0.0
+        retry_count = sum(1 for event in events if str(event.action_type or event.event_type) == "retry")
 
         payload = {
             "user_id": user_id,
@@ -66,6 +84,9 @@ class MLPlatformService:
             "total_learning_events": len(events),
             "average_answer_accuracy": avg_accuracy,
             "average_time_spent_minutes": avg_time_minutes,
+            "topic_mastery_average": mastery_avg,
+            "confidence_average": confidence_avg,
+            "retry_count": retry_count,
         }
 
         row = MLFeatureSnapshot(
@@ -76,6 +97,14 @@ class MLPlatformService:
             created_at=datetime.now(timezone.utc),
         )
         self.session.add(row)
+        await self.feature_store_service.upsert_user_features(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            feature_set_name="learner_features",
+            values=payload,
+            updated_at=row.created_at,
+        )
+        await self.feature_store_service.refresh_topic_features(tenant_id=tenant_id)
         await self.session.commit()
         return payload
 
@@ -242,6 +271,32 @@ class MLPlatformService:
             "active_models": await self.list_active_models(tenant_id=tenant_id),
             "recent_training_runs": await self.list_recent_training_runs(tenant_id=tenant_id),
         }
+
+    async def export_training_dataset(self, *, tenant_id: int, user_id: int | None = None) -> list[dict]:
+        return await self.feature_store_service.export_training_dataset(tenant_id=tenant_id, user_id=user_id)
+
+    async def topic_feature_overview(self, *, tenant_id: int) -> list[dict]:
+        await self.feature_store_service.refresh_topic_features(tenant_id=tenant_id)
+        rows = (
+            await self.session.execute(
+                select(Topic.id, Topic.name, func.avg(Question.difficulty), func.avg(TopicScore.score))
+                .select_from(Topic)
+                .outerjoin(Question, Question.topic_id == Topic.id)
+                .outerjoin(TopicScore, (TopicScore.topic_id == Topic.id) & (TopicScore.tenant_id == tenant_id))
+                .where(Topic.tenant_id == tenant_id)
+                .group_by(Topic.id, Topic.name)
+                .order_by(Topic.id.asc())
+            )
+        ).all()
+        return [
+            {
+                "topic_id": int(topic_id),
+                "topic_name": str(topic_name),
+                "average_question_difficulty": round(float(avg_difficulty or 0.0), 2),
+                "average_mastery_score": round(float(avg_score or 0.0), 2),
+            }
+            for topic_id, topic_name, avg_difficulty, avg_score in rows
+        ]
 
     async def _latest_model(self, *, tenant_id: int, model_name: str) -> dict | None:
         result = await self.session.execute(

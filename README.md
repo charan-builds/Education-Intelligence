@@ -28,6 +28,15 @@ Global deployment target:
 Business strategy:
 - see [docs/business_strategy.md](/home/charan_derangula/projects/intelligentSystems/docs/business_strategy.md)
 
+Multi-agent AI architecture:
+- see [docs/multi_agent_ai_architecture.md](/home/charan_derangula/projects/intelligentSystems/docs/multi_agent_ai_architecture.md)
+
+Digital twin architecture:
+- see [docs/digital_twin_architecture.md](/home/charan_derangula/projects/intelligentSystems/docs/digital_twin_architecture.md)
+
+Next-generation platform vision:
+- see [docs/next_generation_intelligent_learning_platform.md](/home/charan_derangula/projects/intelligentSystems/docs/next_generation_intelligent_learning_platform.md)
+
 Rules enforced:
 - Routes do not access DB directly.
 - Business logic is in services.

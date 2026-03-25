@@ -1,5 +1,7 @@
 from pydantic import BaseModel
 
+from app.schemas.common_schema import PageMeta
+
 
 class TopicMasteryDistributionResponse(BaseModel):
     beginner: int
@@ -31,6 +33,7 @@ class RoadmapProgressSummaryResponse(BaseModel):
     average_completion_percent: int
     average_mastery_percent: int
     learners: list[LearnerRoadmapProgressResponse]
+    meta: PageMeta
 
 
 class TopicMasteryAnalyticsResponse(BaseModel):
@@ -85,3 +88,42 @@ class RetentionAnalyticsResponse(BaseModel):
     due_review_count: int
     retention_curve: list[RetentionCurvePointResponse]
     weak_retention_topics: list[WeakRetentionTopicResponse]
+
+
+class SkillVectorItemResponse(BaseModel):
+    topic_id: int
+    topic_name: str
+    mastery_score: float
+    confidence_score: float
+    last_updated: str
+
+
+class WeakTopicInsightResponse(BaseModel):
+    topic_id: int
+    topic_name: str
+    mastery_score: float
+    confidence_score: float
+
+
+class LearningTrendPointResponse(BaseModel):
+    label: str
+    events: int
+    minutes_spent: float
+    completions: int
+    retries: int
+
+
+class LearnerIntelligenceOverviewResponse(BaseModel):
+    tenant_id: int
+    user_id: int
+    mastery_avg: float
+    confidence_avg: float
+    learning_speed_seconds: float
+    retry_count: int
+    tracked_topics: int
+
+
+class LearnerSkillVectorResponse(BaseModel):
+    tenant_id: int
+    user_id: int
+    vectors: list[SkillVectorItemResponse]

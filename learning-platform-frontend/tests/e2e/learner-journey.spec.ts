@@ -23,8 +23,8 @@ test("student learner journey from login to roadmap progress", async ({ page, re
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page).toHaveURL(/\/dashboard\/student/);
-  await page.goto("/goals/select");
+  await expect(page).toHaveURL(/\/student\/dashboard/);
+  await page.goto("/student/goals");
   await expect(page.getByText("Available Goals")).toBeVisible();
 
   const goalCards = page.locator("section button");
@@ -34,7 +34,7 @@ test("student learner journey from login to roadmap progress", async ({ page, re
   await goalCards.first().click();
   await page.getByRole("button", { name: "Start Diagnostic" }).click();
 
-  await expect(page).toHaveURL(/\/diagnostic\/test/);
+  await expect(page).toHaveURL(/\/student\/diagnostic/);
 
   for (let index = 0; index < 5; index += 1) {
     const radioOptions = page.locator('input[type="radio"]');
@@ -46,13 +46,13 @@ test("student learner journey from login to roadmap progress", async ({ page, re
       break;
     }
 
-    await page.getByRole("button", { name: /Next Question|Submitting/ }).click();
-    if (/\/diagnostic\/result/.test(page.url())) {
+    await page.getByRole("button", { name: /Continue|Submitting|Loading/ }).click();
+    if (/\/student\/diagnostic\/result/.test(page.url())) {
       break;
     }
   }
 
-  await expect(page).toHaveURL(/\/diagnostic\/result/);
+  await expect(page).toHaveURL(/\/student\/diagnostic\/result/);
   const resultUrl = new URL(page.url());
   const testId = Number(resultUrl.searchParams.get("test_id"));
   expect(testId).toBeGreaterThan(0);
@@ -74,7 +74,7 @@ test("student learner journey from login to roadmap progress", async ({ page, re
   });
   expect(roadmapResponse.ok()).toBeTruthy();
 
-  await page.goto("/roadmap/view");
+  await page.goto("/student/roadmap");
   await expect(page.getByText("Learning Roadmap")).toBeVisible();
 
   const actionButton = page.getByRole("button", { name: /Start Topic|Mark Complete|Reopen/ }).first();

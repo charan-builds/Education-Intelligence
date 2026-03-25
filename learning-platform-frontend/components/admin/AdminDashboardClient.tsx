@@ -10,6 +10,7 @@ import { useTenantScope } from "@/hooks/useTenantScope";
 import RoleDashboardLayout from "@/components/layout/RoleDashboardLayout";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
+import { appRoutes } from "@/utils/appRoutes";
 import { getAnalyticsOverview, getRoadmapProgressSummary } from "@/services/analyticsService";
 import {
   createTopic,
@@ -981,10 +982,10 @@ export default function AdminDashboardClient() {
         title="Admin Dashboard"
         description="Manage tenant users, topics, questions, goals, and graph relationships through the connected backend administration APIs."
         navItems={[
-          { label: "Admin Overview", href: "/dashboard/admin" },
-          { label: "Student Panel", href: "/dashboard/student" },
-          { label: "Teacher Panel", href: "/dashboard/teacher" },
-          { label: "Super Admin", href: "/dashboard/super-admin" },
+          { label: "Admin Overview", href: appRoutes.admin.dashboard },
+          { label: "Student Panel", href: appRoutes.student.dashboard },
+          { label: "Teacher Panel", href: appRoutes.teacher.dashboard },
+          { label: "Super Admin", href: appRoutes.superAdmin.dashboard },
         ]}
       >
 

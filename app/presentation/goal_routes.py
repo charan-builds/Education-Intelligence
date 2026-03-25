@@ -38,15 +38,11 @@ async def create_goal(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = GoalService(db)
-    try:
-        return await service.create_goal(
-            tenant_id=_current_user.tenant_id,
-            name=payload.name,
-            description=payload.description,
-        )
-    except TypeError:
-        return await service.create_goal(name=payload.name, description=payload.description)
+    return await GoalService(db).create_goal(
+        tenant_id=_current_user.tenant_id,
+        name=payload.name,
+        description=payload.description,
+    )
 
 
 @router.get("/topics", response_model=GoalTopicPageResponse)
@@ -55,11 +51,7 @@ async def list_goal_topics(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(get_current_user),
 ):
-    service = GoalService(db)
-    try:
-        return await service.list_goal_topics_page(tenant_id=_current_user.tenant_id, goal_id=goal_id)
-    except TypeError:
-        return await service.list_goal_topics_page(goal_id=goal_id)
+    return await GoalService(db).list_goal_topics_page(tenant_id=_current_user.tenant_id, goal_id=goal_id)
 
 
 @router.post("/topics", response_model=GoalTopicResponse)
@@ -68,15 +60,11 @@ async def create_goal_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = GoalService(db)
-    try:
-        return await service.create_goal_topic(
-            tenant_id=_current_user.tenant_id,
-            goal_id=payload.goal_id,
-            topic_id=payload.topic_id,
-        )
-    except TypeError:
-        return await service.create_goal_topic(goal_id=payload.goal_id, topic_id=payload.topic_id)
+    return await GoalService(db).create_goal_topic(
+        tenant_id=_current_user.tenant_id,
+        goal_id=payload.goal_id,
+        topic_id=payload.topic_id,
+    )
 
 
 @router.delete("/topics/{link_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -85,11 +73,7 @@ async def delete_goal_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = GoalService(db)
-    try:
-        await service.delete_goal_topic(_current_user.tenant_id, link_id)
-    except TypeError:
-        await service.delete_goal_topic(link_id)
+    await GoalService(db).delete_goal_topic(_current_user.tenant_id, link_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -100,16 +84,12 @@ async def update_goal(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = GoalService(db)
-    try:
-        return await service.update_goal(
-            _current_user.tenant_id,
-            goal_id,
-            name=payload.name,
-            description=payload.description,
-        )
-    except TypeError:
-        return await service.update_goal(goal_id, name=payload.name, description=payload.description)
+    return await GoalService(db).update_goal(
+        _current_user.tenant_id,
+        goal_id,
+        name=payload.name,
+        description=payload.description,
+    )
 
 
 @router.delete("/{goal_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -118,9 +98,5 @@ async def delete_goal(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = GoalService(db)
-    try:
-        await service.delete_goal(_current_user.tenant_id, goal_id)
-    except TypeError:
-        await service.delete_goal(goal_id)
+    await GoalService(db).delete_goal(_current_user.tenant_id, goal_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

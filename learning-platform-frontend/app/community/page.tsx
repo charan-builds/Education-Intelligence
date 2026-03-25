@@ -13,6 +13,7 @@ import SurfaceCard from "@/components/ui/SurfaceCard";
 import { useRealtime } from "@/components/providers/RealtimeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantScope } from "@/hooks/useTenantScope";
+import { appRoutes } from "@/utils/appRoutes";
 import {
   createDiscussionReply,
   createDiscussionThread,
@@ -28,6 +29,7 @@ export default function CommunityPage() {
   const { role, user } = useAuth();
   const { subscribeCommunity, subscribeThread, sendTyping, typingByThread, activeUsers } = useRealtime();
   const { activeTenantScope, clearActiveTenantScope } = useTenantScope();
+  const tenantScopeKey = activeTenantScope ?? String(user?.tenant_id ?? "current");
   const [selectedCommunityId, setSelectedCommunityId] = useState<number | null>(null);
   const [threadTitle, setThreadTitle] = useState("");
   const [threadBody, setThreadBody] = useState("");
@@ -36,12 +38,12 @@ export default function CommunityPage() {
   const [formMessage, setFormMessage] = useState("");
 
   const communitiesQuery = useQuery({
-    queryKey: ["community-communities"],
+    queryKey: ["community-communities", tenantScopeKey],
     queryFn: () => getCommunities(),
   });
 
   const badgesQuery = useQuery({
-    queryKey: ["community-badges"],
+    queryKey: ["community-badges", tenantScopeKey],
     queryFn: () => getBadges(),
   });
 
@@ -64,7 +66,7 @@ export default function CommunityPage() {
   }, [selectedCommunity?.id, subscribeCommunity]);
 
   const threadsQuery = useQuery({
-    queryKey: ["community-threads", selectedCommunity?.id],
+    queryKey: ["community-threads", tenantScopeKey, selectedCommunity?.id],
     queryFn: () => getDiscussionThreads({ community_id: selectedCommunity?.id }),
     enabled: Boolean(selectedCommunity?.id),
   });
@@ -83,7 +85,7 @@ export default function CommunityPage() {
   }, [selectedThreadId, subscribeThread]);
 
   const repliesQuery = useQuery({
-    queryKey: ["community-replies", selectedThreadId],
+    queryKey: ["community-replies", tenantScopeKey, selectedThreadId],
     queryFn: () => getDiscussionReplies(selectedThreadId as number),
     enabled: selectedThreadId !== null,
   });
@@ -92,8 +94,8 @@ export default function CommunityPage() {
     mutationFn: joinCommunity,
     onSuccess: async () => {
       setFormMessage("Joined community successfully.");
-      await queryClient.invalidateQueries({ queryKey: ["community-communities"] });
-      await queryClient.invalidateQueries({ queryKey: ["community-threads"] });
+      await queryClient.invalidateQueries({ queryKey: ["community-communities", tenantScopeKey] });
+      await queryClient.invalidateQueries({ queryKey: ["community-threads", tenantScopeKey] });
     },
     onError: () => setFormMessage("Unable to join this community."),
   });
@@ -104,8 +106,8 @@ export default function CommunityPage() {
       setFormMessage("Discussion thread posted.");
       setThreadTitle("");
       setThreadBody("");
-      await queryClient.invalidateQueries({ queryKey: ["community-threads", selectedCommunity?.id] });
-      await queryClient.invalidateQueries({ queryKey: ["community-communities"] });
+      await queryClient.invalidateQueries({ queryKey: ["community-threads", tenantScopeKey, selectedCommunity?.id] });
+      await queryClient.invalidateQueries({ queryKey: ["community-communities", tenantScopeKey] });
     },
     onError: () => setFormMessage("Unable to create discussion thread."),
   });
@@ -115,7 +117,7 @@ export default function CommunityPage() {
     onSuccess: async () => {
       setFormMessage("Reply posted.");
       setReplyBody("");
-      await queryClient.invalidateQueries({ queryKey: ["community-replies", selectedThreadId] });
+      await queryClient.invalidateQueries({ queryKey: ["community-replies", tenantScopeKey, selectedThreadId] });
     },
     onError: () => setFormMessage("Unable to post reply."),
   });
@@ -164,10 +166,10 @@ export default function CommunityPage() {
         title="Community Learning"
         description="Communities, memberships, discussions, and mentor badges are now loaded from the backend community APIs with tenant isolation."
         navItems={[
-          { label: "Student Dashboard", href: "/dashboard/student" },
-          { label: "Mentor", href: "/mentor" },
-          { label: "Roadmap", href: "/roadmap/view" },
-          { label: "Progress", href: "/progress" },
+          { label: "Student Dashboard", href: appRoutes.student.dashboard },
+          { label: "Mentor", href: appRoutes.mentor.dashboard },
+          { label: "Roadmap", href: appRoutes.student.roadmap },
+          { label: "Progress", href: appRoutes.student.progress },
         ]}
       >
         <section className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">

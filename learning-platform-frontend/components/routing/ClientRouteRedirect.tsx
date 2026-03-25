@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
+import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
+import { normalizeAppPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 type ClientRouteRedirectProps = {
@@ -16,19 +18,21 @@ export default function ClientRouteRedirect({
   useRoleRedirect = false,
 }: ClientRouteRedirectProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { isReady, role } = useAuth();
 
   useEffect(() => {
     if (!isReady) {
       return;
     }
+    const query = searchParams.toString();
+    const targetBase = useRoleRedirect ? getRoleRedirectPath(role) : normalizeAppPath(fallbackPath);
+    const target = query ? `${targetBase}?${query}` : targetBase;
+    if (target !== `${pathname}${query ? `?${query}` : ""}`) {
+      router.replace(target);
+    }
+  }, [fallbackPath, isReady, pathname, role, router, searchParams, useRoleRedirect]);
 
-    router.replace(useRoleRedirect ? getRoleRedirectPath(role) : fallbackPath);
-  }, [fallbackPath, isReady, role, router, useRoleRedirect]);
-
-  return (
-    <main className="mx-auto flex min-h-screen max-w-3xl items-center justify-center px-6 py-12">
-      <p className="text-sm text-slate-600 dark:text-slate-400">Redirecting...</p>
-    </main>
-  );
+  return <AccessState mode="redirecting" />;
 }

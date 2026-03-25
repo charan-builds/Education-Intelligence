@@ -87,7 +87,7 @@ services:
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
-    command: celery -A app.infrastructure.jobs.celery_app:celery_app worker --loglevel=info --pool=solo
+    command: celery -A app.infrastructure.jobs.celery_app:celery_app worker --loglevel=info --pool=prefork --concurrency=${CELERY_WORKER_CONCURRENCY:-4}
     environment:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}

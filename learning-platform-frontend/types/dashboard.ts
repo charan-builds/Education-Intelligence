@@ -58,6 +58,13 @@ export type StudentDashboardPayload = {
   learning_velocity: DashboardVelocityPoint[];
   weak_topic_heatmap: WeakTopicHeatmapItem[];
   weak_topics: WeakTopicHeatmapItem[];
+  cognitive_model: {
+    confusion_level: string;
+    confusion_signals: string[];
+    misunderstanding_patterns: string[];
+    teaching_style: string;
+    adaptive_actions: string[];
+  };
   mentor_suggestions: MentorSuggestionCard[];
   retention: {
     tenant_id: number;

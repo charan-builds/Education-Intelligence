@@ -1,14 +1,16 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.autonomous_learning_agent_service import AutonomousLearningAgentService
+from app.application.services.hybrid_mentorship_service import HybridMentorshipService
 from app.application.services.mentor_notification_service import MentorNotificationService
 from app.application.services.mentor_service import MentorService
 from app.core.dependencies import get_current_user
 from app.infrastructure.database import get_db_session
 from app.realtime.hub import realtime_hub
+from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.mentor_schema import (
     MentorChatRequest,
     MentorChatResponse,
@@ -16,13 +18,19 @@ from app.schemas.mentor_schema import (
     MentorProgressAnalysisResponse,
     MentorSuggestionsResponse,
     AutonomousAgentResponse,
+    HybridMentorshipOverviewResponse,
+    HybridSessionPlanRequest,
+    HybridSessionPlanResponse,
 )
 
 router = APIRouter(prefix="/mentor", tags=["mentor"])
 
 
 @router.post("/chat", response_model=MentorChatResponse)
+@limiter.limit("20/minute", key_func=rate_limit_key_by_ip)
+@limiter.limit("40/minute", key_func=rate_limit_key_by_user)
 async def mentor_chat(
+    request: Request,
     payload: MentorChatRequest,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
@@ -161,4 +169,38 @@ async def mentor_agent_run(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         execute_actions=True,
+    )
+
+
+@router.get("/hybrid-network", response_model=HybridMentorshipOverviewResponse)
+async def hybrid_mentor_network(
+    learner_id: int | None = None,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    effective_learner_id = learner_id or current_user.id
+    privileged_roles = {"mentor", "teacher", "admin", "super_admin"}
+    if effective_learner_id != current_user.id and current_user.role.value not in privileged_roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return await HybridMentorshipService(db).get_overview(
+        user_id=effective_learner_id,
+        tenant_id=current_user.tenant_id,
+    )
+
+
+@router.post("/hybrid-network/session-plan", response_model=HybridSessionPlanResponse)
+async def hybrid_mentor_session_plan(
+    payload: HybridSessionPlanRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    effective_learner_id = payload.learner_id or current_user.id
+    privileged_roles = {"mentor", "teacher", "admin", "super_admin"}
+    if effective_learner_id != current_user.id and current_user.role.value not in privileged_roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return await HybridMentorshipService(db).build_session_plan(
+        user_id=effective_learner_id,
+        tenant_id=current_user.tenant_id,
+        mentor_id=payload.mentor_id,
+        topic_id=payload.topic_id,
     )

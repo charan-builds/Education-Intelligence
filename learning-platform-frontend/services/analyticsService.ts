@@ -1,9 +1,13 @@
 import { apiClient } from "@/services/apiClient";
 import type {
   AnalyticsOverview,
+  LearnerIntelligenceOverview,
+  LearnerSkillVectorResponse,
+  LearningTrendPoint,
   PlatformAnalyticsOverview,
   RetentionAnalytics,
   RoadmapProgressSummary,
+  WeakTopicInsight,
   TopicMasteryDistribution,
 } from "@/types/analytics";
 
@@ -35,5 +39,25 @@ export async function getPlatformAnalyticsOverview(): Promise<PlatformAnalyticsO
 
 export async function getRetentionAnalytics(): Promise<RetentionAnalytics> {
   const { data } = await apiClient.get<RetentionAnalytics>("/analytics/retention");
+  return data;
+}
+
+export async function getStudentInsights(): Promise<LearnerIntelligenceOverview> {
+  const { data } = await apiClient.get<LearnerIntelligenceOverview>("/analytics/student-insights");
+  return data;
+}
+
+export async function getSkillVectors(): Promise<LearnerSkillVectorResponse> {
+  const { data } = await apiClient.get<LearnerSkillVectorResponse>("/analytics/skill-vectors");
+  return data;
+}
+
+export async function getWeakTopics(): Promise<WeakTopicInsight[]> {
+  const { data } = await apiClient.get<WeakTopicInsight[]>("/analytics/weak-topics");
+  return data;
+}
+
+export async function getLearningTrends(): Promise<LearningTrendPoint[]> {
+  const { data } = await apiClient.get<LearningTrendPoint[]>("/analytics/learning-trends");
   return data;
 }

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import decode_cursor, encode_cursor
@@ -17,7 +18,9 @@ from app.application.exceptions import NotFoundError
 from app.application.exceptions import ValidationError
 from app.application.services.learning_event_service import LearningEventService
 from app.application.services.learning_intelligence_service import LearningIntelligenceService
+from app.application.services.ml_platform_service import MLPlatformService
 from app.application.services.retention_service import RetentionService
+from app.application.services.skill_vector_service import SkillVectorService
 
 
 class RoadmapService:
@@ -34,6 +37,8 @@ class RoadmapService:
         self.feature_flag_service = FeatureFlagService(session)
         self.learning_event_service = LearningEventService(session)
         self.retention_service = RetentionService(session)
+        self.skill_vector_service = SkillVectorService(session)
+        self.ml_platform_service = MLPlatformService(session)
 
     @staticmethod
     def _phase_label(priority: int, total_steps: int) -> str:
@@ -51,6 +56,9 @@ class RoadmapService:
             "id": roadmap.id,
             "user_id": roadmap.user_id,
             "goal_id": roadmap.goal_id,
+            "test_id": roadmap.test_id,
+            "status": roadmap.status,
+            "error_message": roadmap.error_message,
             "generated_at": roadmap.generated_at.isoformat(),
             "steps": [
                 {
@@ -71,13 +79,59 @@ class RoadmapService:
             ],
         }
 
+    async def get_for_test(self, user_id: int, tenant_id: int, goal_id: int, test_id: int):
+        return await self.roadmap_repository.get_by_identity(
+            user_id=user_id,
+            goal_id=goal_id,
+            test_id=test_id,
+            tenant_id=tenant_id,
+        )
+
+    async def ensure_generation_requested(self, user_id: int, tenant_id: int, goal_id: int, test_id: int):
+        existing = await self.get_for_test(user_id=user_id, tenant_id=tenant_id, goal_id=goal_id, test_id=test_id)
+        if existing is not None:
+            return existing
+        try:
+            roadmap = await self.roadmap_repository.create_roadmap(
+                user_id=user_id,
+                goal_id=goal_id,
+                test_id=test_id,
+                generated_at=datetime.now(timezone.utc),
+                status="generating",
+            )
+            await self.session.commit()
+            return roadmap
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.get_for_test(user_id=user_id, tenant_id=tenant_id, goal_id=goal_id, test_id=test_id)
+            if existing is None:
+                raise
+            return existing
+        except Exception:
+            await self.session.rollback()
+            raise
+
     async def generate(self, user_id: int, tenant_id: int, goal_id: int, test_id: int):
         try:
-            latest_roadmap = await self.roadmap_repository.get_latest_roadmap_for_user(user_id=user_id, tenant_id=tenant_id)
-            if latest_roadmap is not None and int(latest_roadmap.goal_id) == int(goal_id):
-                roadmap_age_seconds = (datetime.now(timezone.utc) - latest_roadmap.generated_at).total_seconds()
-                if roadmap_age_seconds < 300:
-                    return latest_roadmap
+            roadmap = await self.roadmap_repository.get_by_identity(
+                user_id=user_id,
+                goal_id=goal_id,
+                test_id=test_id,
+                tenant_id=tenant_id,
+            )
+            if roadmap is None:
+                roadmap = await self.roadmap_repository.create_roadmap(
+                    user_id=user_id,
+                    goal_id=goal_id,
+                    test_id=test_id,
+                    generated_at=datetime.now(timezone.utc),
+                    status="generating",
+                )
+            elif roadmap.status == "ready" and roadmap.steps:
+                return roadmap
+            else:
+                await self.roadmap_repository.clear_steps(roadmap)
+                await self.roadmap_repository.mark_status(roadmap, status="generating", error_message=None)
 
             topic_scores = await self.diagnostic_repository.topic_scores_for_test(test_id, user_id, tenant_id)
             if not topic_scores:
@@ -149,11 +203,6 @@ class RoadmapService:
             if not topic_order:
                 topic_order = sorted(topic_scores.keys())
 
-            roadmap = await self.roadmap_repository.create_roadmap(
-                user_id=user_id,
-                goal_id=goal_id,
-                generated_at=datetime.now(timezone.utc),
-            )
             base_date = datetime.now(timezone.utc)
             days_per_step = 7
             if profile.profile_type == "slow_deep_learner":
@@ -204,8 +253,12 @@ class RoadmapService:
                     ),
                 )
 
+            await self.roadmap_repository.mark_status(roadmap, status="ready", error_message=None)
+            roadmap.generated_at = datetime.now(timezone.utc)
             await self.session.commit()
-            await self.cache_service.delete_prefix("analytics:")
+            await self.cache_service.bump_namespace_version("analytics:overview")
+            await self.cache_service.bump_namespace_version("analytics:topic-mastery")
+            await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
             loaded_roadmap = await self.roadmap_repository.get_roadmap_for_user(
                 roadmap_id=roadmap.id,
                 user_id=user_id,
@@ -214,8 +267,26 @@ class RoadmapService:
             if loaded_roadmap is None:
                 raise NotFoundError("Generated roadmap could not be reloaded")
             return loaded_roadmap
-        except Exception:
+        except Exception as exc:
             await self.session.rollback()
+            if "roadmap" in locals() and roadmap is not None:
+                try:
+                    failed_roadmap = await self.roadmap_repository.get_by_identity(
+                        user_id=user_id,
+                        goal_id=goal_id,
+                        test_id=test_id,
+                        tenant_id=tenant_id,
+                    )
+                    if failed_roadmap is not None:
+                        await self.roadmap_repository.clear_steps(failed_roadmap)
+                        await self.roadmap_repository.mark_status(
+                            failed_roadmap,
+                            status="failed",
+                            error_message=str(exc)[:500],
+                        )
+                        await self.session.commit()
+                except Exception:
+                    await self.session.rollback()
             raise
 
     async def list_for_user(self, user_id: int, tenant_id: int, limit: int, offset: int):
@@ -240,8 +311,11 @@ class RoadmapService:
             raise ValidationError("Invalid cursor") from exc
 
         cache_cursor = cursor if cursor is not None else "none"
-        cache_key = (
-            f"tenant:{tenant_id}:roadmap:{user_id}:limit:{limit}:offset:{offset}:cursor:{cache_cursor}"
+        cache_key = await self.cache_service.build_versioned_key(
+            f"roadmap:user:{tenant_id}:{user_id}",
+            limit=limit,
+            offset=offset,
+            cursor=cache_cursor,
         )
         cached = await self.cache_service.get(cache_key)
         if isinstance(cached, dict):
@@ -292,6 +366,22 @@ class RoadmapService:
             raise NotFoundError("Roadmap step not found")
 
         await self.roadmap_repository.update_step_status(step, progress_status=normalized_status)
+        await self.learning_event_service.track_learning_action(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            action_type="complete" if normalized_status == "completed" else "view" if normalized_status == "in_progress" else "skip",
+            topic_id=step.topic_id,
+            time_spent_seconds=int(step.estimated_time_hours * 3600) if normalized_status == "completed" else None,
+            metadata={"step_id": step.id, "progress_status": normalized_status},
+            commit=False,
+        )
+        await self.skill_vector_service.update_from_progress(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            topic_id=step.topic_id,
+            progress_status=normalized_status,
+            observed_at=datetime.now(timezone.utc),
+        )
         await self.session.commit()
 
         if normalized_status == "completed":
@@ -308,9 +398,14 @@ class RoadmapService:
                 topic_id=step.topic_id,
                 completion_score=100.0,
             )
+            await self.ml_platform_service.build_feature_snapshot(user_id=user_id, tenant_id=tenant_id)
+        else:
+            await self.session.commit()
 
-        await self.cache_service.delete_prefix(f"tenant:{tenant_id}:roadmap:{user_id}:")
-        await self.cache_service.delete_prefix("analytics:")
+        await self.cache_service.bump_namespace_version(f"roadmap:user:{tenant_id}:{user_id}")
+        await self.cache_service.bump_namespace_version("analytics:overview")
+        await self.cache_service.bump_namespace_version("analytics:topic-mastery")
+        await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
         return {
             "id": step.id,
             "topic_id": step.topic_id,
@@ -331,5 +426,5 @@ class RoadmapService:
             user_id=user_id,
             tenant_id=tenant_id,
         )
-        await self.cache_service.delete_prefix(f"tenant:{tenant_id}:roadmap:{user_id}:")
+        await self.cache_service.bump_namespace_version(f"roadmap:user:{tenant_id}:{user_id}")
         return result

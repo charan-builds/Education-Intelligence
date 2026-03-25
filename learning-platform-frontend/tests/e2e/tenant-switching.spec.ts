@@ -21,22 +21,22 @@ test("super admin can switch tenant scope and see tenant-specific admin content"
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await page.goto("/dashboard/super-admin");
+  await page.goto("/super-admin/dashboard");
   await expect(page.getByText("Tenant Inspection Scope")).toBeVisible();
 
   await page.getByLabel("Active Tenant Scope").selectOption("1");
   await expect(page.getByText("Inspection Tenant #1")).toBeVisible();
 
-  await page.goto("/dashboard/admin");
+  await page.goto("/admin/dashboard");
   await expect(page.getByText("tenant #1", { exact: false })).toBeVisible();
   await expect(page.getByText("Linear Algebra")).toBeVisible();
   await expect(page.getByText("Machine Learning")).toBeVisible();
 
-  await page.goto("/dashboard/super-admin");
+  await page.goto("/super-admin/dashboard");
   await page.getByLabel("Active Tenant Scope").selectOption("2");
   await expect(page.getByText("Inspection Tenant #2")).toBeVisible();
 
-  await page.goto("/dashboard/admin");
+  await page.goto("/admin/dashboard");
   await expect(page.getByText("tenant #2", { exact: false })).toBeVisible();
   await expect(page.getByText("Reading Comprehension")).toBeVisible();
   await expect(page.getByText("Basic Algebra")).toBeVisible();

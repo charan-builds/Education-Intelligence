@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Protocol
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.ai_context_builder import AIContextBuilder
+from app.application.services.cognitive_modeling_service import CognitiveModelingService
 from app.core.feature_flags import FeatureFlagService
+from app.core.logging import bind_log_data, get_logger
 from app.domain.engines.knowledge_graph import KnowledgeGraphEngine
 from app.domain.engines.learning_profile_engine import LearningProfileEngine
 from app.domain.models.diagnostic_test import DiagnosticTest
@@ -35,7 +38,10 @@ class LearnerMentorContext:
     overdue_steps: int
     topic_scores: dict[int, float]
     learning_profile: dict[str, str | float]
-    missing_foundations: list[int]
+    missing_foundations: list[int] | None = None
+    response_times: list[float] | None = None
+    accuracies: list[float] | None = None
+    cognitive_model: dict | None = None
 
 
 class MentorAdvisor(Protocol):
@@ -106,14 +112,23 @@ class MentorService:
         self.advisor = advisor or RuleBasedMentorAdvisor()
         self._fallback_advisor = RuleBasedMentorAdvisor()
         self.session = session
+        self.logger = get_logger()
 
         self.diagnostic_repository = DiagnosticRepository(session) if session is not None else None
         self.roadmap_repository = RoadmapRepository(session) if session is not None else None
         self.topic_repository = TopicRepository(session) if session is not None else None
         self.learning_profile_engine = LearningProfileEngine()
+        self.cognitive_modeling_service = CognitiveModelingService()
         self.ai_service_client = AIServiceClient()
         self.feature_flag_service = FeatureFlagService(session) if session is not None else None
         self.ai_context_builder = AIContextBuilder(session) if session is not None else None
+
+    @staticmethod
+    def _fallback_metadata(reason: str | None) -> dict:
+        return {
+            "fallback_used": bool(reason),
+            "fallback_reason": reason,
+        }
 
     def get_personalized_advice(
         self,
@@ -194,7 +209,9 @@ class MentorService:
         overdue_steps = sum(
             1
             for step in steps
-            if str(step.progress_status).lower() != "completed" and getattr(step, "deadline", None) is not None
+            if str(step.progress_status).lower() != "completed"
+            and getattr(step, "deadline", None) is not None
+            and step.deadline <= datetime.now(timezone.utc)
         )
 
         latest_test_row = await self.session.execute(
@@ -208,6 +225,15 @@ class MentorService:
         topic_scores: dict[int, float] = {}
         learning_profile: dict[str, str | float] = {"profile_type": "balanced", "confidence": 0.5}
         missing_foundations: list[int] = []
+        response_times: list[float] = []
+        accuracies: list[float] = []
+        cognitive_model: dict = self.cognitive_modeling_service.build_model(
+            topic_scores={},
+            response_times=[],
+            accuracies=[],
+            learning_profile=learning_profile,
+            past_mistakes=[],
+        )
 
         if latest_test is not None:
             topic_scores = await self.diagnostic_repository.topic_scores_for_test(
@@ -220,17 +246,40 @@ class MentorService:
                 user_id=user_id,
                 tenant_id=effective_tenant_id,
             )
+            response_times = [float(item) for item in analytics.get("response_times", [])]
+            accuracies = [float(item) for item in analytics.get("accuracies", [])]
             profile = self.learning_profile_engine.analyze(
-                response_times=analytics.get("response_times", []),
-                accuracies=analytics.get("accuracies", []),
+                response_times=response_times,
+                accuracies=accuracies,
                 difficulty_distribution=analytics.get("difficulty_distribution", {}),
             )
-            learning_profile = {"profile_type": profile.profile_type, "confidence": profile.confidence}
+            learning_profile = {
+                "profile_type": profile.profile_type,
+                "confidence": profile.confidence,
+                "speed": profile.speed,
+                "accuracy": profile.accuracy,
+                "consistency": profile.consistency,
+                "stamina": profile.stamina,
+            }
 
             knowledge_graph = KnowledgeGraphEngine(self.topic_repository)
             missing_foundations = await knowledge_graph.detect_missing_foundations(
                 topic_scores=topic_scores,
                 tenant_id=effective_tenant_id,
+            )
+            past_mistakes: list[str] = []
+            if self.ai_context_builder is not None:
+                snapshot = await self.ai_context_builder.memory_service.get_snapshot(
+                    tenant_id=effective_tenant_id,
+                    user_id=user_id,
+                )
+                past_mistakes = snapshot.past_mistakes
+            cognitive_model = self.cognitive_modeling_service.build_model(
+                topic_scores=topic_scores,
+                response_times=response_times,
+                accuracies=accuracies,
+                learning_profile=learning_profile,
+                past_mistakes=past_mistakes,
             )
 
         return LearnerMentorContext(
@@ -242,6 +291,9 @@ class MentorService:
             topic_scores=topic_scores,
             learning_profile=learning_profile,
             missing_foundations=missing_foundations,
+            response_times=response_times,
+            accuracies=accuracies,
+            cognitive_model=cognitive_model,
         )
 
     async def generate_advice(self, user_id: int, message: str) -> str:
@@ -267,8 +319,10 @@ class MentorService:
         guidance = [
             f"{advice['summary']}",
             f"Learning profile: {context.learning_profile['profile_type']}.",
+            f"Confusion level: {context.cognitive_model.get('confusion_level', 'unknown')}.",
             f"Roadmap completion: {context.completion_rate:.1f}% ({context.completed_steps}/{len(context.steps)} steps).",
             f"Weak foundations detected: {len(context.missing_foundations)} topic(s).",
+            f"Teaching style: {context.cognitive_model.get('teaching_style', 'Blend concept explanation with practice.')}",
             f"Guidance: {' '.join(advice['recommendations'])}",
         ]
 
@@ -292,6 +346,7 @@ class MentorService:
                     },
                     weak_topics=weak_topics,
                     topic_scores=context.topic_scores,
+                    cognitive_model=context.cognitive_model,
                 )
                 if self.ai_context_builder is not None
                 else None
@@ -326,7 +381,7 @@ class MentorService:
         learning_profile: dict,
         mentor_context: dict | None,
         chat_history: list[dict],
-    ) -> dict | None:
+    ) -> dict:
         try:
             roadmap_payload = [
                 {
@@ -349,9 +404,18 @@ class MentorService:
             )
             response = result.get("response")
             if not response:
-                return None
+                self.logger.warning("mentor_ai_empty_response", extra=bind_log_data(user_id=user_id, tenant_id=tenant_id))
+                return {
+                    "reply": None,
+                    "fallback_used": True,
+                    "fallback_reason": "empty_ai_response",
+                    "provider": result.get("provider"),
+                    "latency_ms": result.get("latency_ms"),
+                }
             return {
                 "reply": str(response),
+                "fallback_used": bool(result.get("fallback_used")),
+                "fallback_reason": result.get("fallback_reason"),
                 "suggested_focus_topics": [
                     int(topic_id)
                     for topic_id in result.get("suggested_focus_topics", [])
@@ -359,12 +423,28 @@ class MentorService:
                 ],
                 "why_recommended": [str(item) for item in (result.get("guidance") or {}).get("suggestions", [])][:3],
                 "provider": result.get("provider"),
+                "latency_ms": result.get("latency_ms"),
                 "next_checkin_date": result.get("next_checkin_date"),
                 "session_summary": str(result.get("session_summary") or ""),
                 "memory_update": result.get("memory_update") if isinstance(result.get("memory_update"), dict) else {},
             }
-        except Exception:
-            return None
+        except Exception as exc:
+            self.logger.error(
+                "mentor_ai_request_failed",
+                extra=bind_log_data(
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                ),
+            )
+            return {
+                "reply": None,
+                "fallback_used": True,
+                "fallback_reason": type(exc).__name__,
+                "provider": None,
+                "latency_ms": None,
+            }
 
     async def progress_analysis(self, user_id: int) -> dict:
         if self.session is None or self.diagnostic_repository is None or self.roadmap_repository is None or self.topic_repository is None:
@@ -477,8 +557,11 @@ class MentorService:
                     )
                 if isinstance(ai_guidance, list):
                     recommended_focus.extend([str(item) for item in ai_guidance[:2]])
-            except Exception:
-                pass
+            except Exception as exc:
+                self.logger.error(
+                    "mentor_progress_ai_failed",
+                    extra=bind_log_data(user_id=user_id, tenant_id=tenant_id, error_type=type(exc).__name__, error=str(exc)),
+                )
 
         return {
             "topic_improvements": topic_improvements,
@@ -499,9 +582,11 @@ class MentorService:
                 "reply": "Please share your learning question so I can help.",
                 "advisor_type": self.advisor.__class__.__name__,
                 "used_ai": False,
+                **self._fallback_metadata(None),
                 "suggested_focus_topics": [],
                 "why_recommended": ["A specific question lets the mentor tailor advice to your current roadmap and weak topics."],
                 "provider": None,
+                "latency_ms": None,
                 "next_checkin_date": None,
                 "session_summary": "",
                 "memory_summary": {},
@@ -518,9 +603,11 @@ class MentorService:
                 "reply": reply,
                 "advisor_type": self.advisor.__class__.__name__,
                 "used_ai": False,
+                **self._fallback_metadata("missing_user_context"),
                 "suggested_focus_topics": [],
                 "why_recommended": ["Fallback advice was used because learner context could not be loaded."],
                 "provider": None,
+                "latency_ms": None,
                 "next_checkin_date": None,
                 "session_summary": "",
                 "memory_summary": {},
@@ -546,6 +633,7 @@ class MentorService:
                     },
                     weak_topics=weak_topics,
                     topic_scores=context.topic_scores,
+                    cognitive_model=context.cognitive_model,
                 )
                 if self.ai_context_builder is not None
                 else None
@@ -561,7 +649,7 @@ class MentorService:
                 mentor_context=mentor_context,
                 chat_history=chat_history or [],
             )
-            if ai_reply is not None:
+            if ai_reply.get("reply"):
                 memory_summary = {}
                 if self.ai_context_builder is not None:
                     updated_snapshot = await self.ai_context_builder.memory_service.update_after_session(
@@ -584,13 +672,23 @@ class MentorService:
                     "reply": ai_reply["reply"],
                     "advisor_type": "AIServiceClient",
                     "used_ai": True,
+                    **self._fallback_metadata(ai_reply.get("fallback_reason") if ai_reply.get("fallback_used") else None),
                     "suggested_focus_topics": ai_reply.get("suggested_focus_topics", []),
                     "why_recommended": ai_reply.get("why_recommended", []),
                     "provider": ai_reply.get("provider"),
+                    "latency_ms": ai_reply.get("latency_ms"),
                     "next_checkin_date": ai_reply.get("next_checkin_date"),
                     "session_summary": ai_reply.get("session_summary", ""),
                     "memory_summary": memory_summary,
                 }
+            self.logger.warning(
+                "mentor_chat_fallback_to_rule_based",
+                extra=bind_log_data(
+                    user_id=user_id,
+                    tenant_id=context.tenant_id,
+                    reason=ai_reply.get("fallback_reason"),
+                ),
+            )
 
         advice = self.get_personalized_advice(
             diagnostic_results=context.topic_scores,
@@ -610,6 +708,7 @@ class MentorService:
                     f"with {context.completed_steps}/{len(context.steps)} steps completed."
                 ),
                 f"Recommended next actions: {' '.join(advice['recommendations'][:3])}",
+                f"Teaching mode: {context.cognitive_model.get('teaching_style', 'Blend concept explanation with practice.')}",
                 f"You asked: '{normalized[:240]}'",
             ]
         )
@@ -629,7 +728,10 @@ class MentorService:
                         for topic_id, score in sorted(context.topic_scores.items(), key=lambda item: item[1], reverse=True)[:5]
                         if float(score) >= 75.0
                     ],
-                    "past_mistakes": [f"Recurring weakness in topic {topic_id}" for topic_id in weak_topics[:3]],
+                    "past_mistakes": [
+                        *context.cognitive_model.get("misunderstanding_patterns", [])[:2],
+                        *[f"Recurring weakness in topic {topic_id}" for topic_id in weak_topics[:2]],
+                    ],
                     "improvement_signals": [f"Completion rate is now {context.completion_rate:.1f}%."],
                     "preferred_learning_style": str(context.learning_profile.get("profile_type", "balanced")),
                     "learning_speed": float(context.learning_profile.get("speed", 0.0) or 0.0),
@@ -650,12 +752,15 @@ class MentorService:
             "reply": reply,
             "advisor_type": str(advice["advisor_type"]),
             "used_ai": False,
+            **self._fallback_metadata("rule_based_fallback" if ai_enabled else None),
             "suggested_focus_topics": weak_topics[:5],
             "why_recommended": [
                 "Low-scoring topics and missing foundations were prioritized first.",
                 f"Current roadmap completion is {context.completion_rate:.1f}% with {context.overdue_steps} overdue steps.",
+                *[str(item) for item in context.cognitive_model.get("adaptive_actions", [])[:2]],
             ],
             "provider": None,
+            "latency_ms": None,
             "next_checkin_date": None,
             "session_summary": session_summary,
             "memory_summary": memory_summary,

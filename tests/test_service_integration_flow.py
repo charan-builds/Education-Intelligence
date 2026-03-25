@@ -47,11 +47,23 @@ class _Roadmap:
     id: int
     user_id: int
     goal_id: int
+    test_id: int
+    status: str
+    error_message: str | None
     generated_at: datetime
     steps: list = field(default_factory=list)
 
 
 class _Session:
+    def add(self, _obj):
+        return None
+
+    async def flush(self):
+        return None
+
+    async def delete(self, _obj):
+        return None
+
     async def execute(self, _stmt):
         class _Result:
             @staticmethod
@@ -165,11 +177,35 @@ class _RoadmapRepo:
         self.next_id = 1
         self.next_step_id = 1
 
-    async def create_roadmap(self, user_id, goal_id, generated_at):
-        roadmap = _Roadmap(id=self.next_id, user_id=user_id, goal_id=goal_id, generated_at=generated_at)
+    async def get_by_identity(self, *, user_id, goal_id, test_id, tenant_id):
+        if tenant_id != 1:
+            return None
+        return next(
+            (r for r in self.roadmaps if r.user_id == user_id and r.goal_id == goal_id and r.test_id == test_id),
+            None,
+        )
+
+    async def create_roadmap(self, user_id, goal_id, test_id, generated_at, status="generating", error_message=None):
+        roadmap = _Roadmap(
+            id=self.next_id,
+            user_id=user_id,
+            goal_id=goal_id,
+            test_id=test_id,
+            status=status,
+            error_message=error_message,
+            generated_at=generated_at,
+        )
         self.next_id += 1
         self.roadmaps.append(roadmap)
         return roadmap
+
+    async def mark_status(self, roadmap, *, status, error_message=None):
+        roadmap.status = status
+        roadmap.error_message = error_message
+        return roadmap
+
+    async def clear_steps(self, roadmap):
+        roadmap.steps.clear()
 
     async def add_step(
         self,
@@ -180,6 +216,8 @@ class _RoadmapRepo:
         difficulty="medium",
         priority=1,
         progress_status="pending",
+        step_type="core",
+        rationale=None,
     ):
         roadmap = next(r for r in self.roadmaps if r.id == roadmap_id)
         roadmap.steps.append(
@@ -194,6 +232,11 @@ class _RoadmapRepo:
             }
         )
         self.next_step_id += 1
+
+    async def get_roadmap_for_user(self, *, roadmap_id, user_id, tenant_id):
+        if tenant_id != 1:
+            return None
+        return next((r for r in self.roadmaps if r.id == roadmap_id and r.user_id == user_id), None)
 
     async def list_user_roadmaps(self, user_id, tenant_id, limit, offset):
         if tenant_id != 1:
@@ -214,16 +257,16 @@ def test_end_to_end_service_flow_with_tenant_scope():
         auth.tenant_repository = tenant_repo
 
         user = await auth.register(
-            tenant_id=1,
             email="student@platform.local",
             password="secret123",
-            role=UserRole.student,
         )
-        token, logged = await auth.login(email="student@platform.local", password="secret123")
+        token, refresh_token, logged = await auth.login(email="student@platform.local", password="secret123")
 
         assert user.id == logged.id
         assert isinstance(token, str)
         assert token
+        assert isinstance(refresh_token, str)
+        assert refresh_token
 
         diagnostic_repo = _DiagnosticRepo()
         topic_repo = _TopicRepo()
@@ -243,7 +286,8 @@ def test_end_to_end_service_flow_with_tenant_scope():
             ],
         )
 
-        scores = await diagnostic.get_result(test.id, user.id, 1)
+        result = await diagnostic.get_result(test.id, user.id, 1)
+        scores = result["topic_scores"]
         assert 101 in scores and 102 in scores
 
         roadmap_repo = _RoadmapRepo()
@@ -254,11 +298,16 @@ def test_end_to_end_service_flow_with_tenant_scope():
 
         created = await roadmap.generate(user_id=user.id, tenant_id=1, goal_id=1, test_id=test.id)
         assert created.user_id == user.id
+        assert created.test_id == test.id
+        assert created.status == "ready"
         assert len(created.steps) >= 1
 
         own_roadmaps = await roadmap.list_for_user(user.id, 1, limit=20, offset=0)
         foreign_roadmaps = await roadmap.list_for_user(user.id, 999, limit=20, offset=0)
         assert len(own_roadmaps) == 1
         assert foreign_roadmaps == []
+
+        duplicate = await roadmap.ensure_generation_requested(user.id, 1, goal_id=1, test_id=test.id)
+        assert duplicate.id == created.id
 
     asyncio.run(_run())

@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CheckCircle2, Clock3, Sparkles, Target } from "lucide-react";
+import { BookOpenText, CheckCircle2, Clock3, Sparkles, Target } from "lucide-react";
 
 import SurfaceCard from "@/components/ui/SurfaceCard";
 
@@ -43,6 +43,17 @@ export default function ProgressStoryTimeline({ items }: ProgressStoryTimelinePr
         </div>
       }
     >
+      <div className="mb-5 rounded-[24px] border border-white/70 bg-[linear-gradient(135deg,rgba(255,255,255,0.92),rgba(255,247,237,0.76))] px-4 py-4">
+        <div className="flex items-center gap-3">
+          <div className="rounded-[16px] bg-slate-950 p-2 text-white">
+            <BookOpenText className="h-4 w-4 text-amber-300" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Story mode</p>
+            <p className="mt-1 text-sm leading-6 text-slate-700">Every milestone is framed like a chapter beat so progress feels legible, cumulative, and rewarding.</p>
+          </div>
+        </div>
+      </div>
       <div className="space-y-4">
         {items.map((item, index) => {
           const tone = toneStyles[item.tone];

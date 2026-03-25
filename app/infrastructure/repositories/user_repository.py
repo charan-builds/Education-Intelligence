@@ -64,6 +64,22 @@ class UserRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def list_by_tenant_and_roles(
+        self,
+        tenant_id: int,
+        roles: list[UserRole],
+        limit: int = 50,
+    ) -> list[User]:
+        if not roles:
+            return []
+        result = await self.session.execute(
+            select(User)
+            .where(User.tenant_id == tenant_id, User.role.in_(roles))
+            .order_by(User.id.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def count_by_tenant(self, tenant_id: int) -> int:
         result = await self.session.execute(select(func.count(User.id)).where(User.tenant_id == tenant_id))
         return int(result.scalar_one())

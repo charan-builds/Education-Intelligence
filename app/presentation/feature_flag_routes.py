@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import get_current_user
 from app.core.feature_flags import FeatureFlagService, SUPPORTED_FEATURE_FLAGS, is_supported_feature_flag
 from app.core.logging import get_logger
+from app.core.authorization import require_permission
+from app.application.services.audit_log_service import AuditLogService
 from app.infrastructure.database import get_db_session
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.feature_flag_schema import (
@@ -32,11 +34,8 @@ async def list_feature_flags(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("feature_flags:read")),
 ):
-    if current_user.role.value not in {"admin", "super_admin"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
     scoped_tenant_id: int
     if current_user.role.value == "super_admin":
         scoped_tenant_id = int(tenant_id if tenant_id is not None else current_user.tenant_id)
@@ -86,10 +85,8 @@ async def list_feature_flags(
 @limiter.limit("60/minute", key_func=rate_limit_key_by_user)
 async def feature_flag_catalog(
     request: Request,
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("feature_flags:read")),
 ):
-    if current_user.role.value not in {"admin", "super_admin"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     payload = FeatureFlagCatalogResponse(items=sorted(SUPPORTED_FEATURE_FLAGS))
     payload_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str)
     etag = f'W/"{hashlib.sha256(payload_json.encode("utf-8")).hexdigest()}"'
@@ -120,10 +117,8 @@ async def update_feature_flag(
     flag_name: str,
     payload: FeatureFlagUpdateRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission("feature_flags:update")),
 ):
-    if current_user.role.value not in {"admin", "super_admin"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if not is_supported_feature_flag(flag_name):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported feature flag")
 
@@ -134,10 +129,14 @@ async def update_feature_flag(
 
     service = FeatureFlagService(db)
     previous_state = await service.is_enabled(flag_name=flag_name, tenant_id=scoped_tenant_id)
-    if payload.enabled:
-        row = await service.enable_feature(flag_name=flag_name, tenant_id=scoped_tenant_id)
-    else:
-        row = await service.disable_feature(flag_name=flag_name, tenant_id=scoped_tenant_id)
+    row = await service.configure_feature(
+        flag_name=flag_name,
+        tenant_id=scoped_tenant_id,
+        enabled=payload.enabled,
+        rollout_percentage=payload.rollout_percentage,
+        audience_filter=payload.audience_filter,
+        experiment_key=payload.experiment_key,
+    )
 
     logger.info(
         "feature_flag_updated",
@@ -150,9 +149,25 @@ async def update_feature_flag(
                 "feature_name": flag_name,
                 "previous_enabled": previous_state,
                 "new_enabled": bool(row.enabled),
+                "rollout_percentage": int(row.rollout_percentage),
+                "experiment_key": row.experiment_key,
                 "path": "/ops/feature-flags/{flag_name}",
                 "method": "POST",
             }
         },
+    )
+    await AuditLogService(db).record(
+        tenant_id=scoped_tenant_id,
+        user_id=int(current_user.id),
+        action="feature_flag_updated",
+        resource=flag_name,
+        metadata={
+            "actor_role": str(current_user.role.value),
+            "previous_enabled": previous_state,
+            "new_enabled": bool(row.enabled),
+            "rollout_percentage": int(row.rollout_percentage),
+            "experiment_key": row.experiment_key,
+        },
+        commit=True,
     )
     return row

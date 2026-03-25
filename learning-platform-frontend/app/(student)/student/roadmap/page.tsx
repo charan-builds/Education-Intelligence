@@ -7,6 +7,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import ProgressLineChart from "@/components/charts/ProgressLineChart";
 import PageHeader from "@/components/layouts/PageHeader";
+import ImmersiveQuestBoard from "@/components/student/ImmersiveQuestBoard";
+import InteractiveChallengeLab from "@/components/student/InteractiveChallengeLab";
 import RoadmapFlow from "@/components/student/RoadmapFlow";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
@@ -15,7 +17,7 @@ import SurfaceCard from "@/components/ui/SurfaceCard";
 import StatusPill from "@/components/ui/StatusPill";
 import { useToast } from "@/components/providers/ToastProvider";
 import { useAuth } from "@/hooks/useAuth";
-import { normalizeRoadmapStatus, useStudentDashboard } from "@/hooks/useDashboard";
+import { normalizeRoadmapGenerationStatus, normalizeRoadmapStatus, useStudentDashboard } from "@/hooks/useDashboard";
 import { updateRoadmapStep } from "@/services/roadmapService";
 
 export default function StudentRoadmapPage() {
@@ -38,11 +40,39 @@ export default function StudentRoadmapPage() {
         description: "Your step progress has been synced with the backend.",
         variant: "success",
       });
-      if (user?.user_id) {
-        await queryClient.invalidateQueries({ queryKey: ["dashboard", "student", "roadmap", user.user_id] });
-      }
+      await queryClient.invalidateQueries({ queryKey: ["dashboard", "student", "roadmap"] });
     },
   });
+
+  const level = Math.max(1, Math.floor(dashboard.kpis.xp / 250) + 1);
+  const activeQuestTopic = dashboard.weakTopics[0]?.name ?? dashboard.topicMap.get(dashboard.steps[0]?.topic_id ?? 0) ?? "Foundations";
+  const quests = [
+    {
+      id: "quest-current",
+      title: `Recover ${activeQuestTopic}`,
+      description: "Resolve the highest-leverage concept gap to unlock cleaner downstream progress.",
+      reward: "+120 XP and momentum boost",
+      status: "active" as const,
+    },
+    {
+      id: "quest-streak",
+      title: "Keep the streak shield alive",
+      description: `Stay active for ${Math.max(3, dashboard.kpis.streakDays + 1)} days to stabilize your learning rhythm.`,
+      reward: "Streak badge",
+      status: dashboard.kpis.streakDays >= 3 ? "completed" as const : "active" as const,
+    },
+    {
+      id: "quest-chapter",
+      title: "Unlock the next chapter",
+      description: "Complete the active mission chain to move into the next progression band.",
+      reward: "Chapter unlock",
+      status: dashboard.kpis.inProgress > 0 ? "active" as const : "locked" as const,
+    },
+  ];
+  const challengeSteps = dashboard.steps
+    .slice(0, 4)
+    .map((step) => dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`);
+  const roadmapState = normalizeRoadmapGenerationStatus(dashboard.roadmap?.status);
 
   return (
     <div className="space-y-6">
@@ -61,7 +91,16 @@ export default function StudentRoadmapPage() {
         }
       />
 
-      {dashboard.steps.length === 0 ? (
+      {roadmapState !== "ready" ? (
+        <EmptyState
+          title={roadmapState === "failed" ? "Roadmap generation failed" : "Roadmap is being prepared"}
+          description={
+            roadmapState === "failed"
+              ? dashboard.roadmapErrorMessage ?? "We could not build your roadmap from the latest diagnostic yet."
+              : "Your diagnostic is complete and the roadmap is still generating. This page will become available as soon as it is ready."
+          }
+        />
+      ) : dashboard.steps.length === 0 ? (
         <EmptyState
           title="No roadmap available"
           description="Complete a diagnostic and generate a roadmap before tracking topics here."
@@ -101,6 +140,8 @@ export default function StudentRoadmapPage() {
             <MetricCard title="In progress" value={dashboard.kpis.inProgress} tone="warning" icon={<PlayCircle className="h-5 w-5" />} />
           </div>
 
+          <ImmersiveQuestBoard level={level} xp={dashboard.kpis.xp} streakDays={dashboard.kpis.streakDays} quests={quests} />
+
           <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
             <RoadmapFlow
               steps={dashboard.steps}
@@ -114,9 +155,13 @@ export default function StudentRoadmapPage() {
             />
           </div>
 
+          {challengeSteps.length >= 2 ? (
+            <InteractiveChallengeLab chapterTitle="Chapter sequencing" chapterSteps={challengeSteps} />
+          ) : null}
+
           <SurfaceCard
-            title="Step planner"
-            description="Update individual roadmap steps and jump into topic learning pages."
+            title="Mission planner"
+            description="Update individual roadmap missions, claim progress, and jump into topic learning pages."
           >
             <div className="space-y-3">
               {dashboard.steps.map((step) => {
@@ -138,7 +183,14 @@ export default function StudentRoadmapPage() {
                           />
                         </div>
                         <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">
-                          Priority {step.priority} • {step.phase ?? "Learning phase"} • {step.estimated_time_hours}h • {step.difficulty}
+                          Quest {step.priority} • {step.phase ?? "Learning phase"} • {step.estimated_time_hours}h • {step.difficulty}
+                        </p>
+                        <p className="mt-2 text-xs uppercase tracking-[0.2em] text-slate-400">
+                          {status === "completed"
+                            ? "Achievement captured"
+                            : status === "in_progress"
+                              ? "Mission underway"
+                              : "Ready to launch"}
                         </p>
                       </div>
                       <div className="flex flex-wrap gap-2">

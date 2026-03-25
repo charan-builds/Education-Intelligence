@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { motion } from "framer-motion";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import SurfaceCard from "@/components/ui/SurfaceCard";
@@ -36,6 +37,7 @@ export default function MasteryPieChart({
                 outerRadius={105}
                 paddingAngle={2}
                 nameKey="name"
+                animationDuration={900}
               >
                 {data.map((entry, index) => (
                   <Cell key={`${entry.name}-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
@@ -54,7 +56,14 @@ export default function MasteryPieChart({
         </div>
         <div className="space-y-3">
           {data.map((entry, index) => (
-            <div key={entry.name} className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/70">
+            <motion.div
+              initial={{ opacity: 0, x: -8 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, amount: 0.2 }}
+              transition={{ duration: 0.25, delay: index * 0.04 }}
+              key={entry.name}
+              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/70"
+            >
               <span
                 className="h-3 w-3 rounded-full"
                 style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
@@ -63,7 +72,7 @@ export default function MasteryPieChart({
                 <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{entry.name}</p>
               </div>
               <span className="text-sm text-slate-600 dark:text-slate-400">{entry.value}</span>
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>

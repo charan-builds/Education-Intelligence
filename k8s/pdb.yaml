@@ -19,3 +19,14 @@ spec:
   selector:
     matchLabels:
       app: frontend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: celery-worker
+  namespace: learning-platform
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: celery-worker

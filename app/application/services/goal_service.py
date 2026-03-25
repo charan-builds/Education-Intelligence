@@ -13,52 +13,28 @@ class GoalService:
         self.topic_repository = TopicRepository(session)
 
     async def _repo_get_by_name(self, tenant_id: int, name: str):
-        try:
-            return await self.repository.get_by_name(tenant_id, name)
-        except TypeError:
-            return await self.repository.get_by_name(name)
+        return await self.repository.get_by_name(tenant_id, name)
 
     async def _repo_get_by_id(self, tenant_id: int, goal_id: int):
-        try:
-            return await self.repository.get_by_id(tenant_id, goal_id)
-        except TypeError:
-            return await self.repository.get_by_id(goal_id)
+        return await self.repository.get_by_id(tenant_id, goal_id)
 
     async def _repo_list_all(self, tenant_id: int, limit: int, offset: int, cursor_id: int | None):
-        try:
-            return await self.repository.list_all(tenant_id=tenant_id, limit=limit, offset=offset, cursor_id=cursor_id)
-        except TypeError:
-            return await self.repository.list_all(limit=limit, offset=offset, cursor_id=cursor_id)
+        return await self.repository.list_all(tenant_id=tenant_id, limit=limit, offset=offset, cursor_id=cursor_id)
 
     async def _repo_count_all(self, tenant_id: int):
-        try:
-            return await self.repository.count_all(tenant_id=tenant_id)
-        except TypeError:
-            return await self.repository.count_all()
+        return await self.repository.count_all(tenant_id=tenant_id)
 
     async def _repo_list_topic_links(self, tenant_id: int, goal_id: int | None):
-        try:
-            return await self.repository.list_topic_links(tenant_id=tenant_id, goal_id=goal_id)
-        except TypeError:
-            return await self.repository.list_topic_links(goal_id=goal_id)
+        return await self.repository.list_topic_links(tenant_id=tenant_id, goal_id=goal_id)
 
     async def _repo_get_topic_link(self, tenant_id: int, goal_id: int, topic_id: int):
-        try:
-            return await self.repository.get_topic_link(tenant_id, goal_id, topic_id)
-        except TypeError:
-            return await self.repository.get_topic_link(goal_id, topic_id)
+        return await self.repository.get_topic_link(tenant_id, goal_id, topic_id)
 
     async def _repo_get_topic_link_by_id(self, tenant_id: int, link_id: int):
-        try:
-            return await self.repository.get_topic_link_by_id(tenant_id, link_id)
-        except TypeError:
-            return await self.repository.get_topic_link_by_id(link_id)
+        return await self.repository.get_topic_link_by_id(tenant_id, link_id)
 
     async def _topic_repo_get_topic(self, tenant_id: int, topic_id: int):
-        try:
-            return await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
-        except TypeError:
-            return await self.topic_repository.get_topic(topic_id)
+        return await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
 
     async def list_goals_page(self, tenant_id: int = 1, limit: int = 20, offset: int = 0, cursor: str | None = None) -> dict:
         try:
@@ -85,10 +61,7 @@ class GoalService:
         normalized_name = name.strip()
         if await self._repo_get_by_name(tenant_id, normalized_name) is not None:
             raise ConflictError("Goal name already exists")
-        try:
-            goal = await self.repository.create_goal(tenant_id, normalized_name, description.strip())
-        except TypeError:
-            goal = await self.repository.create_goal(normalized_name, description.strip())
+        goal = await self.repository.create_goal(tenant_id, normalized_name, description.strip())
         await self.session.commit()
         return goal
 

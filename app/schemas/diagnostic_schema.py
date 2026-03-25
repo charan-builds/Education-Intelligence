@@ -1,10 +1,12 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.schemas.roadmap_schema import RoadmapResponse
 
 
 class DiagnosticStartRequest(BaseModel):
-    goal_id: int
+    goal_id: int = Field(gt=0)
 
 
 class DiagnosticStartResponse(BaseModel):
@@ -18,28 +20,62 @@ class DiagnosticStartResponse(BaseModel):
 
 
 class AnswerPayload(BaseModel):
-    question_id: int
-    user_answer: str
+    question_id: int = Field(gt=0)
+    user_answer: str = Field(min_length=1, max_length=5000)
     score: float | None = None
-    time_taken: float
+    time_taken: float = Field(ge=0, le=7200)
+
+    @field_validator("user_answer")
+    @classmethod
+    def _validate_user_answer(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("user_answer must not be blank")
+        return normalized
+
+
+class DiagnosticAnswerRequest(BaseModel):
+    test_id: int = Field(gt=0)
+    question_id: int = Field(gt=0)
+    user_answer: str = Field(min_length=1, max_length=5000)
+    time_taken: float = Field(ge=0, le=7200)
+
+    @field_validator("user_answer")
+    @classmethod
+    def _validate_answer_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("user_answer must not be blank")
+        return normalized
+
+
+class DiagnosticAnswerResponse(BaseModel):
+    test_id: int
+    question_id: int
+    answered_count: int
+    completed_at: datetime | None
 
 
 class DiagnosticSubmitRequest(BaseModel):
-    test_id: int
-    answers: list[AnswerPayload]
+    test_id: int = Field(gt=0)
 
 
 class DiagnosticResultResponse(BaseModel):
     test_id: int
     topic_scores: dict[int, float]
+    roadmap: RoadmapResponse | None = None
+
+
+class DiagnosticResumeResponse(DiagnosticStartResponse):
+    answered_count: int = 0
 
 
 class DiagnosticNextQuestionRequest(BaseModel):
-    goal_id: int
-    previous_answers: list[AnswerPayload] = []
+    test_id: int = Field(gt=0)
 
 
 class DiagnosticQuestionResponse(BaseModel):
+    test_id: int
     id: int
     topic_id: int
     difficulty: int

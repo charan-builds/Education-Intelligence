@@ -8,6 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.exceptions import NotFoundError
+from app.application.services.analytics_service import AnalyticsService
+from app.application.services.cognitive_modeling_service import CognitiveModelingService
+from app.application.services.retention_service import RetentionService
 from app.domain.engines.learning_profile_engine import LearningProfileEngine
 from app.domain.engines.predictive_intelligence_engine import PredictiveIntelligenceEngine
 from app.domain.engines.weakness_modeling_engine import WeaknessModelingEngine
@@ -25,17 +28,28 @@ from app.domain.models.topic_prerequisite import TopicPrerequisite
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User, UserRole
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
-from app.application.services.retention_service import RetentionService
 
 
 class LearningIntelligenceService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.roadmap_repository = RoadmapRepository(session)
+        self.analytics_service = AnalyticsService(session)
         self.retention_service = RetentionService(session)
         self.learning_profile_engine = LearningProfileEngine()
+        self.cognitive_modeling_service = CognitiveModelingService()
         self.predictive_engine = PredictiveIntelligenceEngine()
         self.weakness_engine = WeaknessModelingEngine()
+
+    @staticmethod
+    def _event_minutes(metadata_json: str | None) -> float:
+        if not metadata_json:
+            return 0.0
+        try:
+            payload = json.loads(metadata_json)
+        except json.JSONDecodeError:
+            return 0.0
+        return float(payload.get("minutes", payload.get("duration_minutes", 0.0)) or 0.0)
 
     async def _topic_name_map(self, tenant_id: int) -> dict[int, str]:
         result = await self.session.execute(select(Topic.id, Topic.name).where(Topic.tenant_id == tenant_id))
@@ -208,6 +222,7 @@ class LearningIntelligenceService:
             select(LearningEvent)
             .where(LearningEvent.user_id == user_id, LearningEvent.tenant_id == tenant_id)
             .order_by(LearningEvent.created_at.desc())
+            .limit(64)
         )
         learning_events = learning_events_result.scalars().all()
 
@@ -240,17 +255,15 @@ class LearningIntelligenceService:
             elif day < cursor:
                 break
 
+        events_by_day: dict = defaultdict(list)
+        for event in learning_events:
+            events_by_day[event.created_at.date()].append(event)
+
         velocity_points: list[dict] = []
         for offset in range(6, -1, -1):
             day = today - timedelta(days=offset)
-            day_events = [event for event in learning_events if event.created_at.date() == day]
-            day_minutes = 0.0
-            for event in day_events:
-                try:
-                    payload = json.loads(event.metadata_json or "{}")
-                except json.JSONDecodeError:
-                    payload = {}
-                day_minutes += float(payload.get("minutes", payload.get("duration_minutes", 0.0)) or 0.0)
+            day_events = events_by_day.get(day, [])
+            day_minutes = sum(self._event_minutes(event.metadata_json) for event in day_events)
             velocity_points.append(
                 {
                     "label": day.strftime("%a"),
@@ -342,6 +355,20 @@ class LearningIntelligenceService:
             accuracies=[float(item["score"]) for item in heatmap] or [50.0],
             difficulty_distribution={"easy": 2, "medium": 4, "hard": max(1, len(heatmap) // 3)},
         )
+        cognitive_model = self.cognitive_modeling_service.build_model(
+            topic_scores={int(score.topic_id): float(score.score) for score in topic_scores},
+            response_times=[max(12.0, point["minutes"]) for point in velocity_points if point["minutes"] > 0],
+            accuracies=[float(item["score"]) for item in heatmap],
+            learning_profile={
+                "profile_type": profile.profile_type,
+                "confidence": profile.confidence,
+                "speed": profile.speed,
+                "accuracy": profile.accuracy,
+                "consistency": profile.consistency,
+                "stamina": profile.stamina,
+            },
+            past_mistakes=[],
+        )
 
         return {
             "tenant_id": tenant_id,
@@ -368,6 +395,7 @@ class LearningIntelligenceService:
                 "consistency": profile.consistency,
                 "stamina": profile.stamina,
             },
+            "cognitive_model": cognitive_model,
             "mentor_suggestions": [
                 {
                     "id": int(item.id),
@@ -415,21 +443,25 @@ class LearningIntelligenceService:
             by_topic[int(row.topic_id)].append(float(row.score))
 
         students_result = await self.session.execute(
-            select(User).where(User.tenant_id == tenant_id, User.role == UserRole.student).order_by(User.email.asc())
+            select(User.id, User.display_name, User.email, User.experience_points)
+            .where(User.tenant_id == tenant_id, User.role == UserRole.student)
+            .order_by(User.email.asc())
         )
-        students = students_result.scalars().all()
+        students = students_result.all()
+        roadmap_progress = {
+            int(item["user_id"]): item
+            for item in await self.analytics_service._roadmap_progress_rows(tenant_id)
+        }
 
         roadmap_rows = []
         for student in students:
-            roadmap = await self.roadmap_repository.get_latest_roadmap_for_user(user_id=int(student.id), tenant_id=tenant_id)
-            steps = roadmap.steps if roadmap else []
-            total_steps = len(steps)
-            completed_steps = sum(1 for step in steps if str(step.progress_status).lower() == "completed")
-            completion_percent = round((completed_steps / total_steps) * 100, 2) if total_steps else 0.0
+            user_id = int(student.id)
+            progress = roadmap_progress.get(user_id, {})
+            completion_percent = float(progress.get("completion_percent", 0.0))
             avg_score = round(
-                sum(float(score.score) for score in by_user.get(int(student.id), [])) / max(len(by_user.get(int(student.id), [])), 1),
+                sum(float(score.score) for score in by_user.get(user_id, [])) / max(len(by_user.get(user_id, [])), 1),
                 2,
-            ) if by_user.get(int(student.id)) else 0.0
+            ) if by_user.get(user_id) else 0.0
             risk_level = "low"
             if completion_percent < 35 or avg_score < 55:
                 risk_level = "critical"
@@ -438,7 +470,7 @@ class LearningIntelligenceService:
 
             roadmap_rows.append(
                 {
-                    "user_id": int(student.id),
+                    "user_id": user_id,
                     "name": student.display_name or student.email.split("@")[0],
                     "email": student.email,
                     "completion_percent": completion_percent,

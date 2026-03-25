@@ -5,10 +5,12 @@ import json
 from fastapi.responses import JSONResponse
 
 from app.application.services.audit_log_service import AuditLogService
+from app.core.authorization import require_permission
 from app.core.config import get_settings
-from app.core.dependencies import get_current_user
+from app.infrastructure.database import get_db_session
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.audit_schema import AuditFeatureNamesResponse, AuditLogEventsResponse, AuditLogMeta
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/ops/audit", tags=["ops"])
 settings = get_settings()
@@ -26,10 +28,9 @@ async def list_feature_flag_audit_logs(
     until: datetime | None = Query(default=None),
     feature_name: str | None = Query(default=None, min_length=1, max_length=128),
     order: str = Query(default="desc", pattern="^(desc|asc)$"),
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_permission("audit_logs:read")),
 ):
-    if current_user.role.value not in {"admin", "super_admin"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if since is not None and until is not None and since > until:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid time range: since > until")
     if since is not None and until is None:
@@ -46,14 +47,12 @@ async def list_feature_flag_audit_logs(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    items = AuditLogService().list_feature_flag_events(
+    items = await AuditLogService(db).list_events(
         tenant_id=scoped_tenant_id,
         limit=limit + 1,
         offset=offset,
-        since=since,
-        until=until,
-        feature_name=feature_name,
-        order=order,
+        action="feature_flag_updated",
+        resource=feature_name if feature_name else None,
     )
     has_more = len(items) > limit
     page_items = items[:limit]
@@ -101,10 +100,9 @@ async def export_feature_flag_audit_logs(
     until: datetime | None = Query(default=None),
     feature_name: str | None = Query(default=None, min_length=1, max_length=128),
     order: str = Query(default="desc", pattern="^(desc|asc)$"),
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_permission("audit_logs:read")),
 ):
-    if current_user.role.value not in {"admin", "super_admin"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if since is not None and until is not None and since > until:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid time range: since > until")
     if since is not None and until is None:
@@ -121,14 +119,9 @@ async def export_feature_flag_audit_logs(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    csv_text, has_more = AuditLogService().export_feature_flag_events_csv(
+    csv_text, has_more = await AuditLogService(db).export_csv(
         tenant_id=scoped_tenant_id,
         limit=limit,
-        offset=offset,
-        since=since,
-        until=until,
-        feature_name=feature_name,
-        order=order,
     )
     lines = [line for line in csv_text.splitlines() if line.strip()]
     row_count = max(0, len(lines) - 1)  # exclude header
@@ -168,10 +161,9 @@ async def list_feature_flag_audit_names(
     tenant_id: int | None = Query(default=None, ge=1),
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_permission("audit_logs:read")),
 ):
-    if current_user.role.value not in {"admin", "super_admin"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if since is not None and until is not None and since > until:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid time range: since > until")
     if since is not None and until is None:
@@ -188,11 +180,8 @@ async def list_feature_flag_audit_names(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    items = AuditLogService().list_feature_names(
-        tenant_id=scoped_tenant_id,
-        since=since,
-        until=until,
-    )
+    records = await AuditLogService(db).list_events(tenant_id=scoped_tenant_id, limit=1000)
+    items = sorted({str(item.get("resource")) for item in records if item.get("action") == "feature_flag_updated" and item.get("resource")})
     payload = AuditFeatureNamesResponse(items=items)
     payload_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str)
     etag = f'W/"{hashlib.sha256(payload_json.encode("utf-8")).hexdigest()}"'

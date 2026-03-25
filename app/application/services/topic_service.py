@@ -16,56 +16,31 @@ class TopicService:
         self.feature_flag_service = FeatureFlagService(session)
 
     async def _repo_get_topic(self, topic_id: int, tenant_id: int):
-        try:
-            return await self.repository.get_topic(topic_id, tenant_id=tenant_id)
-        except TypeError:
-            return await self.repository.get_topic(topic_id)
+        return await self.repository.get_topic(topic_id, tenant_id=tenant_id)
 
     async def _repo_get_topic_by_name(self, tenant_id: int, name: str):
-        try:
-            return await self.repository.get_topic_by_name(tenant_id, name)
-        except TypeError:
-            return await self.repository.get_topic_by_name(name)
+        return await self.repository.get_topic_by_name(tenant_id, name)
 
     async def _repo_list_questions_for_topic(self, topic_id: int, tenant_id: int):
-        try:
-            return await self.repository.list_questions_for_topic(topic_id, tenant_id=tenant_id)
-        except TypeError:
-            return await self.repository.list_questions_for_topic(topic_id)
+        return await self.repository.list_questions_for_topic(topic_id, tenant_id=tenant_id)
 
     async def _repo_list_questions(self, *, limit: int, offset: int, tenant_id: int, topic_id: int | None, question_type: str | None, search: str | None):
-        try:
-            return await self.repository.list_questions(
-                limit=limit,
-                offset=offset,
-                tenant_id=tenant_id,
-                topic_id=topic_id,
-                question_type=question_type,
-                search=search,
-            )
-        except TypeError:
-            return await self.repository.list_questions(
-                limit=limit,
-                offset=offset,
-                topic_id=topic_id,
-                question_type=question_type,
-                search=search,
-            )
+        return await self.repository.list_questions(
+            limit=limit,
+            offset=offset,
+            tenant_id=tenant_id,
+            topic_id=topic_id,
+            question_type=question_type,
+            search=search,
+        )
 
     async def _repo_count_questions(self, *, tenant_id: int, topic_id: int | None, question_type: str | None, search: str | None):
-        try:
-            return await self.repository.count_questions(
-                tenant_id=tenant_id,
-                topic_id=topic_id,
-                question_type=question_type,
-                search=search,
-            )
-        except TypeError:
-            return await self.repository.count_questions(
-                topic_id=topic_id,
-                question_type=question_type,
-                search=search,
-            )
+        return await self.repository.count_questions(
+            tenant_id=tenant_id,
+            topic_id=topic_id,
+            question_type=question_type,
+            search=search,
+        )
 
     async def list_topics_page(self, limit: int, offset: int, tenant_id: int = 1) -> dict:
         items = await self.repository.get_topics(tenant_id=tenant_id)
@@ -153,18 +128,13 @@ class TopicService:
         normalized_name = name.strip()
         if await self._repo_get_topic_by_name(tenant_id, normalized_name) is not None:
             raise ConflictError("Topic name already exists")
-        try:
-            topic = await self.repository.create_topic(
-                tenant_id=tenant_id,
-                name=normalized_name,
-                description=description.strip(),
-            )
-        except TypeError:
-            topic = await self.repository.create_topic(
-                name=normalized_name,
-                description=description.strip(),
-            )
+        topic = await self.repository.create_topic(
+            tenant_id=tenant_id,
+            name=normalized_name,
+            description=description.strip(),
+        )
         await self.repository.session.commit()
+        await self.repository.invalidate_topics_cache(tenant_id)
         return topic
 
     async def update_topic(self, topic_id: int, tenant_id: int = 1, *, name: str | None = None, description: str | None = None):
@@ -184,6 +154,7 @@ class TopicService:
 
         updated = await self.repository.update_topic(topic, **updates)
         await self.repository.session.commit()
+        await self.repository.invalidate_topics_cache(tenant_id)
         return updated
 
     async def delete_topic(self, topic_id: int, tenant_id: int = 1) -> None:
@@ -194,14 +165,16 @@ class TopicService:
             raise ValidationError("Cannot delete a topic that still has questions")
         await self.repository.delete_topic(topic)
         await self.repository.session.commit()
+        await self.repository.invalidate_topics_cache(tenant_id)
 
     async def list_prerequisites_page(self, limit: int, offset: int, tenant_id: int = 1, topic_id: int | None = None) -> dict:
-        try:
-            items = await self.repository.list_prerequisite_links(limit=limit, offset=offset, topic_id=topic_id, tenant_id=tenant_id)
-            total = await self.repository.count_prerequisite_links(topic_id=topic_id, tenant_id=tenant_id)
-        except TypeError:
-            items = await self.repository.list_prerequisite_links(limit=limit, offset=offset, topic_id=topic_id)
-            total = await self.repository.count_prerequisite_links(topic_id=topic_id)
+        items = await self.repository.list_prerequisite_links(
+            limit=limit,
+            offset=offset,
+            topic_id=topic_id,
+            tenant_id=tenant_id,
+        )
+        total = await self.repository.count_prerequisite_links(topic_id=topic_id, tenant_id=tenant_id)
         next_offset = offset + limit if (offset + limit) < total else None
         return {
             "items": items,
@@ -223,10 +196,11 @@ class TopicService:
         if topic is None or prerequisite is None:
             raise NotFoundError("Topic not found")
 
-        try:
-            prerequisite_link = await self.repository.get_prerequisite_link(topic_id, prerequisite_topic_id, tenant_id=tenant_id)
-        except TypeError:
-            prerequisite_link = await self.repository.get_prerequisite_link(topic_id, prerequisite_topic_id)
+        prerequisite_link = await self.repository.get_prerequisite_link(
+            topic_id,
+            prerequisite_topic_id,
+            tenant_id=tenant_id,
+        )
         if prerequisite_link is not None:
             raise ConflictError("Prerequisite link already exists")
 
@@ -252,10 +226,7 @@ class TopicService:
         return link
 
     async def delete_prerequisite(self, prerequisite_id: int, tenant_id: int = 1) -> None:
-        try:
-            link = await self.repository.get_prerequisite_link_by_id(prerequisite_id, tenant_id=tenant_id)
-        except TypeError:
-            link = await self.repository.get_prerequisite_link_by_id(prerequisite_id)
+        link = await self.repository.get_prerequisite_link_by_id(prerequisite_id, tenant_id=tenant_id)
         if link is None:
             raise NotFoundError("Prerequisite link not found")
         await self.repository.delete_prerequisite_link(link)

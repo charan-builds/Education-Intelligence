@@ -88,39 +88,55 @@ class LLMClient:
     ) -> dict[str, Any]:
         client = self.clients[provider.name]
         started = time.perf_counter()
-        response = await client.responses.create(
-            model=provider.model,
-            input=[
-                {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
-                {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
-            ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "ai_service_response",
-                    "schema": {
-                        "type": "object",
-                        "additionalProperties": True,
-                    },
-                    "strict": False,
-                }
-            },
-            temperature=self.settings.ai_temperature,
-            max_output_tokens=max_output_tokens,
-        )
-        latency_ms = round((time.perf_counter() - started) * 1000, 2)
-        output_text = getattr(response, "output_text", "") or ""
-        if not output_text:
-            raise ValueError("Empty model response")
-        data = json.loads(output_text)
-        data["_provider"] = provider.name
-        data["_model"] = provider.model
-        data["_latency_ms"] = latency_ms
-        logger.info(
-            "llm_request_completed",
-            extra={"log_data": {"provider": provider.name, "model": provider.model, "latency_ms": latency_ms}},
-        )
-        return data
+        try:
+            response = await client.responses.create(
+                model=provider.model,
+                input=[
+                    {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]},
+                    {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
+                ],
+                text={
+                    "format": {
+                        "type": "json_schema",
+                        "name": "ai_service_response",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": True,
+                        },
+                        "strict": False,
+                    }
+                },
+                temperature=self.settings.ai_temperature,
+                max_output_tokens=max_output_tokens,
+            )
+            latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            output_text = getattr(response, "output_text", "") or ""
+            if not output_text:
+                raise ValueError("Empty model response")
+            data = json.loads(output_text)
+            data["_provider"] = provider.name
+            data["_model"] = provider.model
+            data["_latency_ms"] = latency_ms
+            logger.info(
+                "llm_request_completed",
+                extra={"log_data": {"provider": provider.name, "model": provider.model, "latency_ms": latency_ms}},
+            )
+            return data
+        except Exception as exc:
+            latency_ms = round((time.perf_counter() - started) * 1000, 2)
+            logger.warning(
+                "llm_request_failed",
+                extra={
+                    "log_data": {
+                        "provider": provider.name,
+                        "model": provider.model,
+                        "latency_ms": latency_ms,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                },
+            )
+            raise
 
     @retry(
         retry=retry_if_exception_type((RateLimitError, APIConnectionError, APITimeoutError)),
@@ -154,4 +170,5 @@ class LLMClient:
                 )
                 failures.append({"provider": provider.name, "error": str(exc)})
 
+        logger.error("llm_all_providers_failed", extra={"log_data": {"failures": failures}})
         raise RuntimeError(f"All LLM providers failed: {failures}")

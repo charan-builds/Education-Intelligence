@@ -315,13 +315,29 @@ async def _seed_student_activity(
         diagnostic.completed_at = diagnostic_completed
 
     roadmap = (
-        await session.execute(select(Roadmap).where(Roadmap.user_id == user.id, Roadmap.goal_id == selected_goal.id))
+        await session.execute(
+            select(Roadmap).where(
+                Roadmap.user_id == user.id,
+                Roadmap.goal_id == selected_goal.id,
+                Roadmap.test_id == diagnostic.id,
+            )
+        )
     ).scalar_one_or_none()
     if roadmap is None:
-        roadmap = Roadmap(user_id=user.id, goal_id=selected_goal.id, generated_at=diagnostic_completed + timedelta(hours=3))
+        roadmap = Roadmap(
+            user_id=user.id,
+            goal_id=selected_goal.id,
+            test_id=diagnostic.id,
+            status="ready",
+            error_message=None,
+            generated_at=diagnostic_completed + timedelta(hours=3),
+        )
         session.add(roadmap)
         await session.flush()
     else:
+        roadmap.test_id = diagnostic.id
+        roadmap.status = "ready"
+        roadmap.error_message = None
         roadmap.generated_at = diagnostic_completed + timedelta(hours=3)
 
     all_questions = (

@@ -29,6 +29,66 @@ groups:
           summary: "High API latency"
           description: "P95 API latency is above 1.5s for 10 minutes."
 
+      - alert: SlowQueriesDetected
+        expr: increase(db_slow_queries_total[10m]) > 20
+        for: 10m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Database slow query volume elevated"
+          description: "More than 20 slow queries were detected in 10 minutes."
+
+      - alert: WebsocketBackpressureDetected
+        expr: increase(websocket_backpressure_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Realtime backpressure detected"
+          description: "One or more websocket messages were dropped due to backpressure in the last 10 minutes."
+
+      - alert: EventProcessingLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(event_processing_duration_seconds_bucket[10m])) by (le, task_name)) > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Background event processing latency elevated"
+          description: "P95 event processing latency is above 5 seconds for one or more tasks."
+
+      - alert: BackupHeartbeatMissing
+        expr: time() - learning_platform_backup_last_success_timestamp_seconds > 93600
+        for: 15m
+        labels:
+          severity: critical
+          service: learning-platform
+        annotations:
+          summary: "Database backup heartbeat missing"
+          description: "No successful database backup heartbeat has been recorded in the last 26 hours."
+
+      - alert: RestoreDrillStale
+        expr: time() - learning_platform_restore_last_success_timestamp_seconds > 1209600
+        for: 30m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Restore drill is stale"
+          description: "No successful restore verification has been recorded in the last 14 days."
+
+      - alert: BackupArtifactTooSmall
+        expr: learning_platform_backup_last_size_bytes < 100000
+        for: 15m
+        labels:
+          severity: warning
+          service: learning-platform
+        annotations:
+          summary: "Backup artifact unusually small"
+          description: "The most recent backup artifact size is below the expected threshold."
+
   - name: learning-platform-outbox-alerts
     rules:
       - alert: OutboxDispatchSuccessRatioLow

@@ -31,7 +31,10 @@ class CommunityService:
 
         topic_lookup = {
             topic.id: topic.name
-            for topic in await self.topic_repository.list_topics_by_ids([item.topic_id for item in items])
+            for topic in await self.topic_repository.list_topics_by_ids(
+                [item.topic_id for item in items],
+                tenant_id=tenant_id,
+            )
         }
         member_counts = await self.repository.count_members_for_communities(tenant_id, [item.id for item in items])
         thread_counts = await self.repository.count_threads_for_communities(tenant_id, [item.id for item in items])

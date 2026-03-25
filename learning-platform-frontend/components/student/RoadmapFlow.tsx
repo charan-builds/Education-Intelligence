@@ -22,6 +22,7 @@ export default function RoadmapFlow({ steps, topics, weakTopicIds = [] }: Roadma
     const graphTopics = steps.map((step) => ({
       id: step.topic_id,
       name: topics.find((topic) => topic.id === step.topic_id)?.name ?? `Topic ${step.topic_id}`,
+      status: step.progress_status === "completed" ? "mastered" : step.progress_status === "in_progress" ? "in_progress" : "ready",
     }));
 
     const prerequisites = steps.slice(1).map((step, index) => ({
@@ -38,12 +39,13 @@ export default function RoadmapFlow({ steps, topics, weakTopicIds = [] }: Roadma
   return (
     <SurfaceCard
       title="Interactive skill tree"
-      description="An animated dependency graph that turns the roadmap into a visual progression system."
+      description="An animated chapter map that turns the roadmap into a visible progression world."
     >
       <TopicGraph
         topics={graph.graphTopics}
         prerequisites={graph.prerequisites}
         weakTopicIds={weakTopicIds}
+        highlightedPathIds={steps.filter((step) => step.progress_status !== "pending").map((step) => step.topic_id)}
         heightClassName="h-[420px]"
       />
     </SurfaceCard>

@@ -8,13 +8,14 @@ import Logo from "@/components/brand/Logo";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { useAuth } from "@/hooks/useAuth";
+import { normalizeAppPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 export default function AuthPage() {
   const router = useRouter();
   const { isAuthenticated, isReady, login, role } = useAuth();
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("Admin@123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState<string | null>(null);
@@ -22,7 +23,7 @@ export default function AuthPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rawNextPath = params.get("next");
-    setNextPath(rawNextPath && rawNextPath.startsWith("/") ? rawNextPath : null);
+    setNextPath(rawNextPath && rawNextPath.startsWith("/") ? normalizeAppPath(rawNextPath) : null);
   }, []);
 
   useEffect(() => {
@@ -57,7 +58,7 @@ export default function AuthPage() {
             Sign in to your Learning Intelligence workspace
           </h1>
           <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600 dark:text-slate-300">
-            The frontend authenticates against FastAPI with JWT, respects tenant scope, and routes each user to the correct role workspace automatically.
+            The frontend authenticates against FastAPI with secure server-managed sessions, respects tenant scope, and routes each user to the correct role workspace automatically.
           </p>
           <div className="mt-8 grid gap-4 md:grid-cols-3">
             {[

@@ -36,6 +36,9 @@ class RoadmapResponse(BaseModel):
     id: int
     user_id: int
     goal_id: int
+    test_id: int
+    status: str
+    error_message: str | None = None
     generated_at: datetime
     steps: list[RoadmapStepResponse]
 

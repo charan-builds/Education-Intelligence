@@ -1,20 +1,32 @@
 from fastapi import Depends, HTTPException, Query, Request, status
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import AuthenticationError, decode_access_token
+from app.core.auth_context import AuthContext
+from app.core.security import (
+    ACCESS_TOKEN_COOKIE_NAME,
+    AuthenticationError,
+    decode_access_token,
+    get_token_from_headers_and_cookies,
+)
 from app.infrastructure.database import get_db_session
 from app.infrastructure.repositories.user_repository import UserRepository
 from app.schemas.common_schema import PaginationParams
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
 
 async def get_current_user(
     request: Request,
-    token: str = Depends(oauth2_scheme),
     db: AsyncSession = Depends(get_db_session),
-):
+ ) -> AuthContext:
+    token = get_token_from_headers_and_cookies(
+        request.headers,
+        request.cookies,
+        cookie_name=ACCESS_TOKEN_COOKIE_NAME,
+    )
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+        )
     try:
         payload = decode_access_token(token)
         user_id = int(payload["sub"])
@@ -42,9 +54,15 @@ async def get_current_user(
 
     request.state.actor_tenant_id = actor_tenant_id
     request.state.tenant_id = effective_tenant_id
-    request.state.user = user
-    user.tenant_id = effective_tenant_id
-    return user
+    auth_context = AuthContext(
+        user=user,
+        actor_user_id=int(user.id),
+        actor_tenant_id=actor_tenant_id,
+        effective_tenant_id=effective_tenant_id,
+    )
+    request.state.user = auth_context
+    request.state.auth_context = auth_context
+    return auth_context
 
 
 def require_roles(*roles: str):

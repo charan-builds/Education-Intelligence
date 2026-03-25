@@ -94,3 +94,68 @@ export type AutonomousAgentResponse = {
   next_best_topic_id?: number | null;
   cycle_summary: string;
 };
+
+export type HybridMentorMatch = {
+  mentor_id: number;
+  display_name: string;
+  email: string;
+  role: string;
+  match_score: number;
+  availability: string;
+  specialties: string[];
+  reasons: string[];
+  ai_handoff_summary: string;
+};
+
+export type HybridLearnerProfile = {
+  user_id: number;
+  tenant_id: number;
+  completion_rate: number;
+  learning_style: string;
+  session_intensity: string;
+  weak_topics: string[];
+  strong_topics: string[];
+  human_support_needed: boolean;
+  summary: string;
+};
+
+export type HybridCollaborationBrief = {
+  session_goal: string;
+  ai_role: string;
+  human_role: string;
+  shared_context: string[];
+  handoff_notes: string[];
+  escalation_triggers: string[];
+};
+
+export type HybridSupportChannel = {
+  channel_type: string;
+  title: string;
+  description: string;
+  href: string;
+  realtime_enabled: boolean;
+  why: string;
+};
+
+export type HybridMentorshipOverview = {
+  learner_profile: HybridLearnerProfile;
+  mentor_matches: HybridMentorMatch[];
+  collaboration_brief: HybridCollaborationBrief;
+  live_support_channels: HybridSupportChannel[];
+};
+
+export type HybridSessionPlanRequest = {
+  learner_id?: number | null;
+  mentor_id?: number | null;
+  topic_id?: number | null;
+};
+
+export type HybridSessionPlanResponse = {
+  mentor_id?: number | null;
+  mentor_name: string;
+  session_title: string;
+  agenda: string[];
+  ai_prep_notes: string[];
+  mentor_focus: string[];
+  follow_up_actions: string[];
+};

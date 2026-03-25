@@ -14,11 +14,42 @@ class RoadmapRepository(BaseRepository):
     def __init__(self, session: AsyncSession):
         super().__init__(session)
 
-    async def create_roadmap(self, user_id: int, goal_id: int, generated_at: datetime) -> Roadmap:
-        roadmap = Roadmap(user_id=user_id, goal_id=goal_id, generated_at=generated_at)
+    async def create_roadmap(
+        self,
+        user_id: int,
+        goal_id: int,
+        test_id: int,
+        generated_at: datetime,
+        status: str = "generating",
+        error_message: str | None = None,
+    ) -> Roadmap:
+        roadmap = Roadmap(
+            user_id=user_id,
+            goal_id=goal_id,
+            test_id=test_id,
+            generated_at=generated_at,
+            status=status,
+            error_message=error_message,
+        )
         self.session.add(roadmap)
         await self.session.flush()
         return roadmap
+
+    async def get_by_identity(self, *, user_id: int, goal_id: int, test_id: int, tenant_id: int) -> Roadmap | None:
+        stmt = (
+            select(Roadmap)
+            .options(selectinload(Roadmap.steps))
+            .join(Roadmap.user)
+            .where(
+                Roadmap.user_id == user_id,
+                Roadmap.goal_id == goal_id,
+                Roadmap.test_id == test_id,
+                tenant_user_scope(Roadmap.user, tenant_id),
+            )
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def add_step(
         self,
@@ -62,6 +93,17 @@ class RoadmapRepository(BaseRepository):
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def mark_status(self, roadmap: Roadmap, *, status: str, error_message: str | None = None) -> Roadmap:
+        roadmap.status = status
+        roadmap.error_message = error_message
+        await self.session.flush()
+        return roadmap
+
+    async def clear_steps(self, roadmap: Roadmap) -> None:
+        for step in list(roadmap.steps):
+            await self.session.delete(step)
+        await self.session.flush()
 
     async def list_user_roadmaps(
         self,

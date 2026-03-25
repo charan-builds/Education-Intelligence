@@ -9,6 +9,7 @@ type ActivityItem = {
   title: string;
   subtitle: string;
   tone?: string;
+  tag?: string;
 };
 
 type ActivityFeedProps = {
@@ -48,7 +49,14 @@ export default function ActivityFeed({
           >
             <span className={`mt-1.5 h-2.5 w-2.5 rounded-full shadow-sm ${toneColor(item.tone)}`} />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.title}</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.title}</p>
+                {item.tag ? (
+                  <span className="rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-slate-700 dark:bg-slate-950/70 dark:text-slate-400">
+                    {item.tag}
+                  </span>
+                ) : null}
+              </div>
               <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-400">{item.subtitle}</p>
             </div>
           </motion.div>

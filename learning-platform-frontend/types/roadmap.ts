@@ -17,6 +17,9 @@ export type Roadmap = {
   id: number;
   user_id: number;
   goal_id: number;
+  test_id: number;
+  status: "generating" | "ready" | "failed" | string;
+  error_message?: string | null;
   generated_at: string;
   steps: RoadmapStep[];
 };

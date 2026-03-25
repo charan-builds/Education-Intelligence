@@ -19,8 +19,15 @@ class DiagnosticRepository:
         await self.session.flush()
         return test
 
-    async def get_test_for_user(self, test_id: int, user_id: int, tenant_id: int) -> DiagnosticTest | None:
-        result = await self.session.execute(
+    async def get_test_for_user(
+        self,
+        test_id: int,
+        user_id: int,
+        tenant_id: int,
+        *,
+        for_update: bool = False,
+    ) -> DiagnosticTest | None:
+        stmt = (
             select(DiagnosticTest)
             .join(DiagnosticTest.user)
             .where(
@@ -29,6 +36,43 @@ class DiagnosticRepository:
                 tenant_user_scope(DiagnosticTest.user, tenant_id),
             )
         )
+        if for_update:
+            stmt = stmt.with_for_update()
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_latest_open_test_for_user(self, *, user_id: int, goal_id: int, tenant_id: int) -> DiagnosticTest | None:
+        result = await self.session.execute(
+            select(DiagnosticTest)
+            .join(DiagnosticTest.user)
+            .where(
+                DiagnosticTest.user_id == user_id,
+                DiagnosticTest.goal_id == goal_id,
+                DiagnosticTest.completed_at.is_(None),
+                tenant_user_scope(DiagnosticTest.user, tenant_id),
+            )
+            .order_by(DiagnosticTest.id.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_answers_for_test(self, *, test_id: int) -> list[UserAnswer]:
+        result = await self.session.execute(
+            select(UserAnswer).where(UserAnswer.test_id == test_id).order_by(UserAnswer.id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_answer_for_test_question(
+        self,
+        *,
+        test_id: int,
+        question_id: int,
+        for_update: bool = False,
+    ) -> UserAnswer | None:
+        stmt = select(UserAnswer).where(UserAnswer.test_id == test_id, UserAnswer.question_id == question_id)
+        if for_update:
+            stmt = stmt.with_for_update()
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def add_answer(
@@ -49,6 +93,30 @@ class DiagnosticRepository:
         self.session.add(answer)
         await self.session.flush()
         return answer
+
+    async def upsert_answer(
+        self,
+        *,
+        test_id: int,
+        question_id: int,
+        user_answer: str,
+        score: float,
+        time_taken: float,
+    ) -> UserAnswer:
+        existing = await self.get_answer_for_test_question(test_id=test_id, question_id=question_id)
+        if existing is not None:
+            existing.user_answer = user_answer
+            existing.score = score
+            existing.time_taken = time_taken
+            await self.session.flush()
+            return existing
+        return await self.add_answer(
+            test_id=test_id,
+            question_id=question_id,
+            user_answer=user_answer,
+            score=score,
+            time_taken=time_taken,
+        )
 
     async def complete_test(self, test: DiagnosticTest, completed_at: datetime) -> DiagnosticTest:
         test.completed_at = completed_at

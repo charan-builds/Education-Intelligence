@@ -1,4 +1,4 @@
-from sqlalchemy import Float, ForeignKey, Text
+from sqlalchemy import Float, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.models.base import Base
@@ -6,6 +6,7 @@ from app.domain.models.base import Base
 
 class UserAnswer(Base):
     __tablename__ = "user_answers"
+    __table_args__ = (UniqueConstraint("test_id", "question_id", name="uq_user_answers_test_question"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     test_id: Mapped[int] = mapped_column(ForeignKey("diagnostic_tests.id", ondelete="CASCADE"), index=True)

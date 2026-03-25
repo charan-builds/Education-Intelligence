@@ -13,6 +13,7 @@ spec:
       labels:
         app: api
     spec:
+      terminationGracePeriodSeconds: 45
       containers:
         - name: api
           image: ghcr.io/your-org/learning-platform-api:latest
@@ -31,12 +32,18 @@ spec:
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 10
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
             initialDelaySeconds: 20
             periodSeconds: 20
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "sleep 15"]
           resources:
             requests:
               cpu: "250m"

@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { getCurrentUser, login as loginRequest, logout as logoutRequest } from "@/services/authService";
+import type { User } from "@/types/user";
 import { AUTH_CHANGED_EVENT } from "@/utils/authToken";
 import { canonicalizeRole } from "@/utils/roleRedirect";
 
@@ -27,23 +28,20 @@ type AuthContextValue = {
   role: string | null;
   login: (email: string, password: string) => Promise<AuthUser | null>;
   logout: () => void;
-  refresh: () => void;
+  refresh: () => Promise<void>;
   getUser: () => AuthUser | null;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function normalizeUser(payload: ReturnType<typeof getCurrentUser>): AuthUser | null {
+function normalizeUser(payload: User | null): AuthUser | null {
   if (!payload) {
     return null;
   }
 
-  const rawUserId = payload.user_id ?? payload.sub;
-  const parsedUserId = rawUserId !== undefined && rawUserId !== null ? Number(rawUserId) : null;
-
   return {
-    user_id: Number.isFinite(parsedUserId) ? parsedUserId : null,
-    tenant_id: payload.tenant_id !== undefined ? Number(payload.tenant_id) : null,
+    user_id: Number.isFinite(payload.id) ? payload.id : null,
+    tenant_id: Number.isFinite(payload.tenant_id) ? payload.tenant_id : null,
     role: canonicalizeRole(payload.role ? String(payload.role) : null),
   };
 }
@@ -52,18 +50,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
 
-  const refresh = () => {
+  const refresh = async () => {
+    const nextUser = normalizeUser(await getCurrentUser());
     startTransition(() => {
-      setUser(normalizeUser(getCurrentUser()));
+      setUser(nextUser);
       setIsReady(true);
     });
   };
 
   useEffect(() => {
-    refresh();
+    void refresh();
 
     function handleAuthChange() {
-      refresh();
+      void refresh();
     }
 
     if (typeof window === "undefined") {
@@ -79,14 +78,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    await loginRequest(email, password);
-    const nextUser = normalizeUser(getCurrentUser());
+    const session = await loginRequest(email, password);
+    const nextUser = normalizeUser(session.user);
     setUser(nextUser);
     return nextUser;
   };
 
   const logout = () => {
-    logoutRequest();
+    void logoutRequest();
     if (typeof window !== "undefined") {
       window.localStorage.removeItem("active_tenant_id");
     }

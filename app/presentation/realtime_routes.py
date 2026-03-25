@@ -1,16 +1,52 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.core.security import AuthenticationError, decode_access_token
+from app.application.services.mentor_service import MentorService
+from app.core.security import (
+    ACCESS_TOKEN_COOKIE_NAME,
+    AuthenticationError,
+    decode_access_token,
+    get_token_from_headers_and_cookies,
+)
+from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.repositories.community_repository import CommunityRepository
 from app.realtime.hub import realtime_hub
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 
+PRIVILEGED_REALTIME_ROLES = {"teacher", "mentor", "admin", "super_admin"}
+
+
+async def _can_join_community(*, tenant_id: int, user_id: int, role: str | None, community_id: int) -> bool:
+    if role in PRIVILEGED_REALTIME_ROLES:
+        return True
+    async with AsyncSessionLocal() as session:
+        membership = await CommunityRepository(session).get_member(tenant_id, community_id, user_id)
+        return membership is not None
+
+
+async def _can_join_thread(*, tenant_id: int, user_id: int, role: str | None, thread_id: int) -> bool:
+    async with AsyncSessionLocal() as session:
+        repository = CommunityRepository(session)
+        thread = await repository.get_thread(tenant_id, thread_id)
+        if thread is None:
+            return False
+        if role in PRIVILEGED_REALTIME_ROLES:
+            return True
+        membership = await repository.get_member(tenant_id, int(thread.community_id), user_id)
+        return membership is not None
+
 
 @router.websocket("/ws")
 async def realtime_websocket(websocket: WebSocket) -> None:
-    token = websocket.query_params.get("token")
+    token = get_token_from_headers_and_cookies(
+        websocket.headers,
+        websocket.cookies,
+        cookie_name=ACCESS_TOKEN_COOKIE_NAME,
+    )
     if not token:
         await websocket.close(code=4401)
         return
@@ -19,6 +55,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
         payload = decode_access_token(token)
         user_id = int(payload["sub"])
         tenant_id = int(payload.get("tenant_id", 1))
+        role = str(payload.get("role")) if payload.get("role") is not None else None
     except (AuthenticationError, KeyError, ValueError):
         await websocket.close(code=4401)
         return
@@ -27,15 +64,54 @@ async def realtime_websocket(websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_json()
+            if not isinstance(message, dict):
+                await websocket.send_json({"type": "error", "detail": "Invalid websocket payload"})
+                continue
             action = str(message.get("action") or "")
             if action == "subscribe.community":
-                community_id = int(message.get("community_id"))
+                raw_community_id = message.get("community_id")
+                if not isinstance(raw_community_id, int) or raw_community_id <= 0:
+                    await websocket.send_json({"type": "error", "detail": "Invalid community_id"})
+                    continue
+                community_id = raw_community_id
+                if not await _can_join_community(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    role=role,
+                    community_id=community_id,
+                ):
+                    await websocket.send_json({"type": "error", "detail": "Forbidden community subscription"})
+                    continue
                 await realtime_hub.subscribe_community(websocket, tenant_id=tenant_id, community_id=community_id)
             elif action == "subscribe.thread":
-                thread_id = int(message.get("thread_id"))
+                raw_thread_id = message.get("thread_id")
+                if not isinstance(raw_thread_id, int) or raw_thread_id <= 0:
+                    await websocket.send_json({"type": "error", "detail": "Invalid thread_id"})
+                    continue
+                thread_id = raw_thread_id
+                if not await _can_join_thread(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    role=role,
+                    thread_id=thread_id,
+                ):
+                    await websocket.send_json({"type": "error", "detail": "Forbidden thread subscription"})
+                    continue
                 await realtime_hub.subscribe_thread(websocket, tenant_id=tenant_id, thread_id=thread_id)
             elif action == "community.typing":
-                thread_id = int(message.get("thread_id"))
+                raw_thread_id = message.get("thread_id")
+                if not isinstance(raw_thread_id, int) or raw_thread_id <= 0:
+                    await websocket.send_json({"type": "error", "detail": "Invalid thread_id"})
+                    continue
+                thread_id = raw_thread_id
+                if not await _can_join_thread(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    role=role,
+                    thread_id=thread_id,
+                ):
+                    await websocket.send_json({"type": "error", "detail": "Forbidden typing event"})
+                    continue
                 await realtime_hub.send_thread(
                     tenant_id,
                     thread_id,
@@ -47,5 +123,52 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                 )
             elif action == "ping":
                 await websocket.send_json({"type": "pong"})
+            elif action == "mentor.chat":
+                message_text = str(message.get("message") or "").strip()
+                request_id = str(message.get("request_id") or "")
+                raw_requested_user_id = message.get("user_id", user_id)
+                raw_requested_tenant_id = message.get("tenant_id", tenant_id)
+                if not isinstance(raw_requested_user_id, int) or not isinstance(raw_requested_tenant_id, int):
+                    await websocket.send_json({"type": "error", "detail": "Invalid chat target"})
+                    continue
+                requested_user_id = raw_requested_user_id
+                requested_tenant_id = raw_requested_tenant_id
+                chat_history = list(message.get("chat_history") or [])
+                if not message_text or requested_user_id != user_id or requested_tenant_id != tenant_id:
+                    await websocket.send_json({"type": "error", "detail": "Forbidden mentor chat"})
+                    continue
+
+                await websocket.send_json({"type": "mentor.response.started", "request_id": request_id})
+                async with AsyncSessionLocal() as session:
+                    result = await MentorService(session=session).chat(
+                        message=message_text,
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        chat_history=chat_history,
+                    )
+
+                reply = str(result.get("reply") or "")
+                for index in range(12, len(reply) + 12, 12):
+                    await websocket.send_json(
+                        {
+                            "type": "mentor.response.chunk",
+                            "request_id": request_id,
+                            "content": reply[:index],
+                            "done": index >= len(reply),
+                        }
+                    )
+                    await asyncio.sleep(0.02)
+
+                await websocket.send_json(
+                    {
+                        "type": "mentor.response.ready",
+                        "request_id": request_id,
+                        "reply": reply,
+                        "used_ai": bool(result.get("used_ai")),
+                        "session_summary": result.get("session_summary", ""),
+                        "provider": result.get("provider"),
+                        "why_recommended": result.get("why_recommended", []),
+                    }
+                )
     except WebSocketDisconnect:
         await realtime_hub.disconnect(websocket, tenant_id=tenant_id, user_id=user_id)

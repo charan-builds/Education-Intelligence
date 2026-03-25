@@ -1,22 +1,17 @@
 import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 
-export type UserRole = "student" | "teacher" | "mentor" | "admin" | "super_admin";
+import { getRoleHomePath } from "@/utils/appRoutes";
 
-const ROLE_REDIRECT_MAP: Record<UserRole, string> = {
-  student: "/student/dashboard",
-  teacher: "/teacher/dashboard",
-  mentor: "/mentor/dashboard",
-  admin: "/admin/dashboard",
-  super_admin: "/super-admin/dashboard",
-};
+export type UserRole = "student" | "teacher" | "mentor" | "admin" | "super_admin";
 
 export function canonicalizeRole(role: string | null | undefined): UserRole | null {
   if (!role) {
     return null;
   }
 
-  if (role in ROLE_REDIRECT_MAP) {
-    return role as UserRole;
+  const normalized = role.replace("-", "_");
+  if (normalized === "super_admin" || normalized === "admin" || normalized === "teacher" || normalized === "mentor" || normalized === "student") {
+    return normalized;
   }
 
   return null;
@@ -31,7 +26,7 @@ export function getRoleRedirectPath(role: string | null | undefined): string {
   if (!normalized) {
     return "/";
   }
-  return ROLE_REDIRECT_MAP[normalized] ?? "/";
+  return getRoleHomePath(normalized);
 }
 
 export function roleHasAccess(

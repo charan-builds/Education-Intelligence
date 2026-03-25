@@ -58,6 +58,7 @@ def test_chat_uses_ai_when_feature_flag_enabled():
         result = await service.chat(message="How do I catch up?", user_id=7, tenant_id=3)
 
         assert result["used_ai"] is True
+        assert result["fallback_used"] is False
         assert result["advisor_type"] == "AIServiceClient"
         assert result["reply"] == "AI says focus on topic 11 this week."
         assert result["suggested_focus_topics"] == [11]
@@ -119,8 +120,52 @@ def test_chat_returns_memory_summary_when_ai_memory_updates_are_available():
         result = await service.chat(message="Help me improve.", user_id=7, tenant_id=3)
 
         assert result["used_ai"] is True
+        assert result["fallback_used"] is False
         assert result["session_summary"] == "Reviewed Topic 11 with targeted coaching."
         assert result["memory_summary"]["preferred_learning_style"] == "practice_focused"
         assert result["memory_summary"]["weak_topics_history"] == ["Topic 11"]
+
+    asyncio.run(_run())
+
+
+def test_chat_surfaces_fallback_metadata_when_ai_call_fails():
+    async def _run():
+        service = MentorService()
+
+        async def fake_is_enabled(_feature_name: str, _tenant_id: int) -> bool:
+            return True
+
+        async def fake_load_user_context(*, user_id: int, tenant_id: int | None = None):
+            return LearnerMentorContext(
+                tenant_id=3,
+                steps=[],
+                completed_steps=0,
+                completion_rate=20.0,
+                overdue_steps=1,
+                topic_scores={11: 52.0},
+                learning_profile={"profile_type": "practice_focused", "confidence": 0.9},
+                missing_foundations=[11],
+                cognitive_model={"adaptive_actions": ["Review topic 11"], "teaching_style": "Use short drills."},
+            )
+
+        async def fake_ai_response(**_kwargs):
+            return {
+                "reply": None,
+                "fallback_used": True,
+                "fallback_reason": "RateLimitError",
+                "provider": None,
+                "latency_ms": None,
+            }
+
+        service.feature_flag_service = SimpleNamespace(is_enabled=fake_is_enabled)
+        service._load_user_context = fake_load_user_context  # type: ignore[method-assign]
+        service._try_ai_mentor_response = fake_ai_response  # type: ignore[method-assign]
+
+        result = await service.chat(message="Help me improve.", user_id=7, tenant_id=3)
+
+        assert result["used_ai"] is False
+        assert result["fallback_used"] is True
+        assert result["fallback_reason"] == "rule_based_fallback"
+        assert "Recommended next actions" in result["reply"]
 
     asyncio.run(_run())

@@ -9,6 +9,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 const TENANT_SCOPE_EVENT = "tenant-scope-changed";
 const STORAGE_KEY = "active_tenant_id";
@@ -36,6 +37,7 @@ function emitTenantScopeChanged(): void {
 }
 
 export function TenantProvider({ children }: PropsWithChildren) {
+  const queryClient = useQueryClient();
   const [activeTenantScope, setActiveTenantScopeState] = useState<string | null>(null);
 
   useEffect(() => {
@@ -70,6 +72,7 @@ export function TenantProvider({ children }: PropsWithChildren) {
       window.localStorage.setItem(STORAGE_KEY, tenantId);
     }
 
+    void queryClient.clear();
     emitTenantScopeChanged();
     startTransition(() => {
       setActiveTenantScopeState(readTenantScope());

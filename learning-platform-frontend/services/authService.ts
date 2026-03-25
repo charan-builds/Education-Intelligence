@@ -1,67 +1,46 @@
-import { jwtDecode } from "jwt-decode";
-
 import { apiClient } from "@/services/apiClient";
 import type { User } from "@/types/user";
-import { clearAccessToken, getAccessToken, storeAccessToken } from "@/utils/authToken";
+import { notifyAuthChanged } from "@/utils/authToken";
 
-export type AuthTokenResponse = {
-  access_token: string;
-  token_type?: string;
+export type AuthSessionResponse = {
+  authenticated: boolean;
+  token_type: string;
+  access_token_expires_in: number;
+  refresh_token_expires_in?: number | null;
+  user: User;
 };
 
-export type CurrentUser = {
-  sub?: string;
-  tenant_id?: number;
-  role?: string;
-  exp?: number;
-  [key: string]: unknown;
-};
-
-export async function login(email: string, password: string): Promise<AuthTokenResponse> {
-  const { data } = await apiClient.post<AuthTokenResponse>("/auth/login", {
+export async function login(email: string, password: string): Promise<AuthSessionResponse> {
+  const { data } = await apiClient.post<AuthSessionResponse>("/auth/login", {
     email,
     password,
   });
-
-  if (data.access_token) {
-    storeAccessToken(data.access_token);
-  }
-
+  notifyAuthChanged();
   return data;
 }
 
-export async function register(
-  email: string,
-  password: string,
-  tenant_id: number,
-  role: string,
-): Promise<User> {
+export async function register(email: string, password: string, invite_token?: string | null): Promise<User> {
   const { data } = await apiClient.post<User>("/auth/register", {
     email,
     password,
-    tenant_id,
-    role,
+    invite_token,
   });
   return data;
 }
 
-export function getCurrentUser(): CurrentUser | null {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const token = getAccessToken();
-  if (!token) {
-    return null;
-  }
-
+export async function getCurrentUser(): Promise<User | null> {
   try {
-    return jwtDecode<CurrentUser>(token);
+    const { data } = await apiClient.get<User>("/users/me");
+    return data;
   } catch {
     return null;
   }
 }
 
-export function logout(): void {
-  clearAccessToken();
+export async function logout(): Promise<void> {
+  try {
+    await apiClient.post("/auth/logout");
+  } finally {
+    notifyAuthChanged();
+  }
 }

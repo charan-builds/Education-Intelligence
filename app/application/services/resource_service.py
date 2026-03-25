@@ -16,16 +16,10 @@ class ResourceService:
         self.goal_repository = GoalRepository(session)
 
     async def _get_topic(self, tenant_id: int, topic_id: int):
-        try:
-            return await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
-        except TypeError:
-            return await self.topic_repository.get_topic(topic_id)
+        return await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
 
     async def _get_goal(self, tenant_id: int, goal_id: int):
-        try:
-            return await self.goal_repository.get_by_id(tenant_id, goal_id)
-        except TypeError:
-            return await self.goal_repository.get_by_id(goal_id)
+        return await self.goal_repository.get_by_id(tenant_id, goal_id)
 
     async def _validate_resource_scope(self, *, tenant_id: int, topic_id: int, goal_id: int | None) -> None:
         topic = await self._get_topic(tenant_id, topic_id)

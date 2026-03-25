@@ -102,7 +102,9 @@ class OutboxRepository:
             event.status = "dead"
             event.available_at = now.replace(microsecond=0)
             return
-        event.available_at = (now + timedelta(seconds=retry_delay_seconds)).replace(microsecond=0)
+        exponential_delay = retry_delay_seconds * (2 ** max(event.attempts - 1, 0))
+        event.status = "pending"
+        event.available_at = (now + timedelta(seconds=exponential_delay)).replace(microsecond=0)
 
     async def delete_dispatched_older_than(self, days: int) -> int:
         threshold = datetime.now(timezone.utc) - timedelta(days=days)

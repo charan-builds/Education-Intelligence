@@ -86,6 +86,66 @@ cache_operations_total = Counter(
     ["operation", "result"],
 )
 
+ai_requests_total = Counter(
+    "ai_requests_total",
+    "AI request outcomes by endpoint, provider, and outcome",
+    ["endpoint", "provider", "outcome"],
+)
+
+ai_request_latency_seconds = Histogram(
+    "ai_request_latency_seconds",
+    "AI request latency in seconds by endpoint and provider",
+    ["endpoint", "provider"],
+)
+
+learning_events_total = Counter(
+    "learning_events_total",
+    "Learning event ingestion outcomes",
+    ["event_type", "result"],
+)
+
+websocket_connections_active = Gauge(
+    "websocket_connections_active",
+    "Active websocket connections by tenant",
+    ["tenant_id"],
+)
+
+websocket_messages_total = Counter(
+    "websocket_messages_total",
+    "Websocket message delivery totals",
+    ["direction", "result"],
+)
+
+websocket_backpressure_total = Counter(
+    "websocket_backpressure_total",
+    "Websocket backpressure drops",
+    ["tenant_id"],
+)
+
+db_query_duration_seconds = Histogram(
+    "db_query_duration_seconds",
+    "Database query duration in seconds",
+    ["operation"],
+)
+
+db_slow_queries_total = Counter(
+    "db_slow_queries_total",
+    "Database slow query detections",
+    ["operation"],
+)
+
+event_processing_duration_seconds = Histogram(
+    "event_processing_duration_seconds",
+    "Event and background task processing duration in seconds",
+    ["task_name", "status"],
+)
+
+circuit_breaker_state = Gauge(
+    "circuit_breaker_state",
+    "Circuit breaker state by dependency",
+    ["dependency"],
+)
+
 metrics_router = APIRouter()
 
 

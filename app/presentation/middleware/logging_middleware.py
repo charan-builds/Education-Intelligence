@@ -7,12 +7,14 @@ from starlette.responses import Response
 
 from app.core.logging import get_logger
 from app.core.metrics import error_count, request_duration, total_requests
+from app.core.tracing import get_tracer
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         self.logger = get_logger()
+        self.tracer = get_tracer("app.request")
 
     @staticmethod
     def _extract_context(request: Request) -> tuple[int | None, int | None]:
@@ -32,11 +34,19 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         tenant_id, user_id = self._extract_context(request)
 
         try:
-            response: Response = await call_next(request)
+            if self.tracer is not None:
+                with self.tracer.start_as_current_span(f"{request.method} {request.url.path}") as span:
+                    span.set_attribute("http.method", request.method)
+                    span.set_attribute("http.path", request.url.path)
+                    span.set_attribute("request.id", request_id)
+                    response = await call_next(request)
+            else:
+                response = await call_next(request)
             duration_ms = round((time.perf_counter() - start_time) * 1000)
-            endpoint = request.url.path
+            endpoint = getattr(getattr(request.scope.get("route"), "path", None), "strip", lambda: request.url.path)()
             method = request.method
             status_code = str(response.status_code)
+            tenant_id, user_id = self._extract_context(request)
 
             total_requests.labels(endpoint=endpoint, method=method, status_code=status_code).inc()
             request_duration.labels(endpoint=endpoint, method=method, status_code=status_code).observe(
@@ -61,9 +71,10 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as exc:
             duration_ms = round((time.perf_counter() - start_time) * 1000)
-            endpoint = request.url.path
+            endpoint = getattr(getattr(request.scope.get("route"), "path", None), "strip", lambda: request.url.path)()
             method = request.method
             status_code = "500"
+            tenant_id, user_id = self._extract_context(request)
             total_requests.labels(endpoint=endpoint, method=method, status_code=status_code).inc()
             request_duration.labels(endpoint=endpoint, method=method, status_code=status_code).observe(
                 duration_ms / 1000

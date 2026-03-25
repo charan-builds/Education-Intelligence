@@ -7,14 +7,67 @@ import RecommendationPanel from "@/components/dashboard/RecommendationPanel";
 import ProgressLineChart from "@/components/charts/ProgressLineChart";
 import MasteryPieChart from "@/components/charts/MasteryPieChart";
 import PageHeader from "@/components/layouts/PageHeader";
+import ImmersiveQuestBoard from "@/components/student/ImmersiveQuestBoard";
+import InteractiveChallengeLab from "@/components/student/InteractiveChallengeLab";
 import ProgressStoryTimeline from "@/components/student/ProgressStoryTimeline";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
-import { useStudentDashboard } from "@/hooks/useDashboard";
+import EmptyState from "@/components/ui/EmptyState";
+import { normalizeRoadmapGenerationStatus, useStudentDashboard } from "@/hooks/useDashboard";
 
 export default function StudentProgressPage() {
   const dashboard = useStudentDashboard();
   const topWeakTopic = dashboard.weakTopics[0];
+  const level = Math.max(1, Math.floor(dashboard.kpis.xp / 250) + 1);
+  const progressQuests = [
+    {
+      id: "progress-main",
+      title: topWeakTopic ? `Master ${topWeakTopic.name}` : "Push the next chapter",
+      description: "The platform translates analytics into a visible mission with a clear reward arc.",
+      reward: "+150 XP",
+      status: "active" as const,
+    },
+    {
+      id: "progress-finish",
+      title: "Close one more milestone",
+      description: "A single completed step shifts the entire journey map and adds visual momentum.",
+      reward: "Milestone celebration",
+      status: dashboard.kpis.completed > 0 ? "completed" as const : "active" as const,
+    },
+    {
+      id: "progress-unlock",
+      title: "Unlock advanced chapter",
+      description: "Sustain momentum to move from foundations to more specialized learning arcs.",
+      reward: "Chapter unlock",
+      status: dashboard.kpis.completionPercent >= 60 ? "completed" as const : "locked" as const,
+    },
+  ];
+  const challengeSteps = dashboard.weakTopics.slice(0, 4).map((topic) => topic.name);
+  const roadmapState = normalizeRoadmapGenerationStatus(dashboard.roadmap?.status);
+
+  if (roadmapState !== "ready") {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Progress"
+          title={roadmapState === "failed" ? "Progress is blocked" : "Progress unlocks after roadmap creation"}
+          description={
+            roadmapState === "failed"
+              ? "The learner journey paused because roadmap generation failed."
+              : "We are building the roadmap now so progress can reflect a real plan instead of an empty shell."
+          }
+        />
+        <EmptyState
+          title={roadmapState === "failed" ? "Roadmap failed to generate" : "Roadmap is still generating"}
+          description={
+            roadmapState === "failed"
+              ? dashboard.roadmapErrorMessage ?? "Retry roadmap generation from the diagnostic result page."
+              : "Return in a moment or open the roadmap page to watch the generation status."
+          }
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -64,21 +117,23 @@ export default function StudentProgressPage() {
         <MetricCard title="Weak topics" value={dashboard.kpis.weakTopicCount} />
       </div>
 
+      <ImmersiveQuestBoard level={level} xp={dashboard.kpis.xp} streakDays={dashboard.kpis.streakDays} quests={progressQuests} />
+
       <ProgressStoryTimeline
         items={[
           {
-            title: `${dashboard.kpis.completed} steps completed`,
-            description: "Closed steps create the feeling of real advancement and visible learning velocity.",
+            title: `Chapter 1: ${dashboard.kpis.completed} milestones conquered`,
+            description: "Closed steps are presented like completed chapters so progress feels cumulative and memorable.",
             tone: "complete",
           },
           {
-            title: `${dashboard.kpis.inProgress} active focus areas`,
-            description: "Current work is framed as active missions rather than generic in-progress content.",
+            title: `Chapter 2: ${dashboard.kpis.inProgress} active missions`,
+            description: "Current work is framed as active quests rather than generic in-progress content.",
             tone: "active",
           },
           {
-            title: topWeakTopic ? `${topWeakTopic.name} is the next inflection point` : "The next inflection point is ready",
-            description: "The platform can point to a specific concept that will most improve confidence and progress.",
+            title: topWeakTopic ? `Chapter 3: recover ${topWeakTopic.name}` : "Chapter 3 is ready to unlock",
+            description: "The platform points to the next narrative beat that will produce the strongest visible improvement.",
             tone: "upcoming",
           },
         ]}
@@ -86,16 +141,20 @@ export default function StudentProgressPage() {
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <ProgressLineChart
-          title="Roadmap completion"
-          description="A stepwise view of completion as you move through the roadmap."
+          title="Journey completion"
+          description="An animated view of how each study push fills the broader adventure arc."
           data={dashboard.charts.progressLine}
         />
         <MasteryPieChart
-          title="Status distribution"
-          description="How your roadmap currently splits across completed, active, and pending work."
+          title="Chapter distribution"
+          description="How the journey currently splits across conquered, active, and waiting stages."
           data={dashboard.charts.masteryPie}
         />
       </div>
+
+      {challengeSteps.length >= 2 ? (
+        <InteractiveChallengeLab chapterTitle="Weak-topic recovery sequence" chapterSteps={challengeSteps} />
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <ActivityFeed items={dashboard.recentActivity} />

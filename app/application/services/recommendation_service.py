@@ -1,5 +1,6 @@
 from app.core.config import get_settings
-from app.domain.engines.ml_recommendation_engine import MLRecommendationEngine
+from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
+from app.domain.engines.ml_recommendation_engine import MLRecommendationEngine, RankedTopicRecommendation
 from app.domain.engines.recommendation_engine import RecommendationEngine
 from app.domain.engines.rule_engine import RuleEngine
 from app.infrastructure.clients.ai_service_client import AIServiceClient
@@ -14,6 +15,7 @@ def build_recommendation_engine(engine_name: str) -> RecommendationEngine:
 class RecommendationService:
     def __init__(self, engine: RecommendationEngine | None = None):
         self.ai_service_client = AIServiceClient()
+        self.ai_circuit_breaker = CircuitBreaker("ai_recommendation_service")
         if engine is not None:
             self.engine = engine
             return
@@ -23,6 +25,36 @@ class RecommendationService:
 
     def classify_topics(self, topic_scores: dict[int, float]) -> dict[int, str]:
         return {topic_id: self.engine.classify_topic(score) for topic_id, score in topic_scores.items()}
+
+    def rank_topics(
+        self,
+        *,
+        topic_scores: dict[int, float],
+        prerequisite_edges: list[tuple[int, int]],
+        learning_profile: dict | None = None,
+        goal: dict | None = None,
+    ) -> list[RankedTopicRecommendation]:
+        if isinstance(self.engine, MLRecommendationEngine):
+            return self.engine.rank_topics(
+                topic_scores=topic_scores,
+                prerequisite_edges=prerequisite_edges,
+                learning_profile=learning_profile,
+                goal=goal,
+            )
+        ordered_ids = self.engine.recommend_roadmap_steps(
+            topic_scores=topic_scores,
+            prerequisite_edges=prerequisite_edges,
+            learning_profile=learning_profile,
+            goal=goal,
+        )
+        return [
+            RankedTopicRecommendation(
+                topic_id=topic_id,
+                priority_score=float(max(0.0, 100.0 - topic_scores.get(topic_id, 100.0))),
+                explanation="Rule engine fallback prioritized this topic from weak mastery and prerequisites.",
+            )
+            for topic_id in ordered_ids
+        ]
 
     def weak_topics_with_foundations(
         self,
@@ -60,13 +92,15 @@ class RecommendationService:
         if ml_enabled:
             try:
                 goal_name = str((goal or {}).get("goal_name") or (goal or {}).get("goal_id") or "default_goal")
-                ai_response = await self.ai_service_client.predict_learning_path(
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                    goal=goal_name,
-                    topic_scores=topic_scores,
-                    prerequisites=prerequisite_edges,
-                    learning_profile=learning_profile or {},
+                ai_response = await self.ai_circuit_breaker.call(
+                    lambda: self.ai_service_client.predict_learning_path(
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        goal=goal_name,
+                        topic_scores=topic_scores,
+                        prerequisites=prerequisite_edges,
+                        learning_profile=learning_profile or {},
+                    )
                 )
                 raw_steps = ai_response.get("recommended_steps", [])
                 if isinstance(raw_steps, list):
@@ -77,7 +111,7 @@ class RecommendationService:
                     ]
                     if ai_topics:
                         return ai_topics
-            except Exception:
+            except (CircuitBreakerOpenError, Exception):
                 pass
 
         return self.weak_topics_with_foundations(

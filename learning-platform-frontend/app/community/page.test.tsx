@@ -72,6 +72,23 @@ vi.mock("@/hooks/useAuth", () => ({
   }),
 }));
 
+vi.mock("@/components/providers/RealtimeProvider", () => ({
+  useRealtime: () => ({
+    subscribeCommunity: vi.fn(),
+    subscribeThread: vi.fn(),
+    sendTyping: vi.fn(),
+    typingByThread: {},
+    activeUsers: 0,
+  }),
+}));
+
+vi.mock("@/hooks/useTenantScope", () => ({
+  useTenantScope: () => ({
+    activeTenantScope: null,
+    clearActiveTenantScope: vi.fn(),
+  }),
+}));
+
 vi.mock("@/services/communityService", () => ({
   getCommunities: getCommunitiesMock,
   getBadges: getBadgesMock,

@@ -6,6 +6,7 @@ export type DiagnosticAnswerPayload = {
 };
 
 export type DiagnosticQuestion = {
+  test_id: number;
   id: number;
   topic_id: number;
   difficulty: number;
@@ -21,9 +22,19 @@ export type DiagnosticSession = {
   goal_id: number;
   started_at: string;
   completed_at: string | null;
+  answered_count?: number;
+};
+
+export type DiagnosticAnswerResponse = {
+  test_id: number;
+  question_id: number;
+  answered_count: number;
+  completed_at: string | null;
 };
 
 export type DiagnosticResult = {
   test_id: number;
   topic_scores: Record<number, number>;
+  roadmap: Roadmap | null;
 };
+import type { Roadmap } from "@/types/roadmap";

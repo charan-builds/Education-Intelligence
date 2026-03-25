@@ -3,11 +3,6 @@ import { NextRequest } from "next/server";
 
 import { middleware } from "@/middleware";
 
-function createToken(payload: Record<string, unknown>): string {
-  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  return `header.${encoded}.signature`;
-}
-
 describe("middleware", () => {
   it("redirects unauthenticated protected requests to auth", () => {
     const request = new NextRequest("http://localhost:3000/student/dashboard");
@@ -17,11 +12,17 @@ describe("middleware", () => {
     expect(response?.headers.get("location")).toContain("/auth");
   });
 
-  it("redirects users away from dashboards outside their role", () => {
-    const token = createToken({ role: "student", exp: Math.floor(Date.now() / 1000) + 3600 });
+  it("allows protected requests when an auth cookie is present", () => {
     const request = new NextRequest("http://localhost:3000/admin/dashboard", {
-      headers: { cookie: `access_token=${token}` },
+      headers: { cookie: "access_token=session-cookie" },
     });
+    const response = middleware(request);
+
+    expect(response?.status).toBe(200);
+  });
+
+  it("redirects legacy routes to canonical role paths", () => {
+    const request = new NextRequest("http://localhost:3000/dashboard/student");
     const response = middleware(request);
 
     expect(response?.status).toBe(307);

@@ -26,6 +26,7 @@ import { getTenants } from "@/services/tenantService";
 import { getQuestions, getTopics } from "@/services/topicService";
 import { getUsers } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenantScope } from "@/hooks/useTenantScope";
 
 export function normalizeRoadmapStatus(status: string): "completed" | "in_progress" | "pending" {
   const normalized = status.toLowerCase();
@@ -38,14 +39,28 @@ export function normalizeRoadmapStatus(status: string): "completed" | "in_progre
   return "pending";
 }
 
+export function normalizeRoadmapGenerationStatus(status: string | null | undefined): "generating" | "ready" | "failed" {
+  if ((status ?? "").toLowerCase() === "failed") {
+    return "failed";
+  }
+  if ((status ?? "").toLowerCase() === "ready") {
+    return "ready";
+  }
+  return "generating";
+}
+
 export function useStudentDashboard() {
   const { user } = useAuth();
+  const { activeTenantScope } = useTenantScope();
+  const tenantScope = activeTenantScope ?? String(user?.tenant_id ?? "current");
   const dashboardQuery = useQuery({
-    queryKey: ["dashboard", "student", "intelligence"],
+    queryKey: ["dashboard", "student", "intelligence", tenantScope],
     queryFn: getStudentDashboard,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
   const roadmapQuery = useQuery({
-    queryKey: ["dashboard", "student", "roadmap", user?.user_id],
+    queryKey: ["dashboard", "student", "roadmap", tenantScope, user?.user_id],
     queryFn: async () => {
       if (!user?.user_id) {
         throw new Error("Missing user id");
@@ -53,16 +68,24 @@ export function useStudentDashboard() {
       return getUserRoadmap(user.user_id);
     },
     enabled: Boolean(user?.user_id),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      const roadmap = query.state.data?.items?.[0];
+      return roadmap && normalizeRoadmapGenerationStatus(roadmap.status) === "generating" ? 2500 : false;
+    },
   });
   const topicsQuery = useQuery({
-    queryKey: ["dashboard", "student", "topics"],
+    queryKey: ["dashboard", "student", "topics", tenantScope],
     queryFn: getTopics,
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
   return useMemo(() => {
     const payload = dashboardQuery.data;
     const roadmap = roadmapQuery.data?.items?.[0] ?? null;
+    const roadmapStatus = normalizeRoadmapGenerationStatus(roadmap?.status);
     const steps = [...(roadmap?.steps ?? [])].sort((a, b) => a.priority - b.priority);
     const topicMap = new Map((topicsQuery.data?.items ?? []).map((topic) => [topic.id, topic.name]));
     const weakTopics = (payload?.weak_topics ?? []).map((item) => ({
@@ -83,6 +106,8 @@ export function useStudentDashboard() {
         topicsQuery,
       },
       roadmap,
+      roadmapStatus,
+      roadmapErrorMessage: roadmap?.error_message ?? null,
       steps,
       topicMap,
       kpis: {
@@ -124,6 +149,13 @@ export function useStudentDashboard() {
       },
       weakTopics,
       leaderboard,
+      cognitiveModel: payload?.cognitive_model ?? {
+        confusion_level: "low",
+        confusion_signals: [],
+        misunderstanding_patterns: [],
+        teaching_style: "Blend concept explanation with practice.",
+        adaptive_actions: [],
+      },
       mentorSuggestions: payload?.mentor_suggestions ?? [],
       retention: payload?.retention ?? {
         tenant_id: 0,
@@ -140,11 +172,27 @@ export function useStudentDashboard() {
         message: item.message,
         severity: item.is_ai_generated ? "success" : "warning",
       })),
-      recommendations: (payload?.mentor_suggestions ?? []).map((item) => `${item.title}: ${item.message}`),
+      recommendations: (payload?.mentor_suggestions ?? []).map((item) => ({
+        title: item.title,
+        message: item.message,
+        why: item.why,
+        confidenceLabel: item.is_ai_generated ? "AI generated" : "Platform rule",
+        tone: item.is_ai_generated ? "success" : "default",
+        href: item.topic_id ? `/student/topics/${item.topic_id}` : "/student/roadmap",
+        ctaLabel: item.topic_id ? "Open topic" : "Open roadmap",
+      })),
       recentActivity: (payload?.recent_activity ?? []).map((item) => ({
         title: item.event_type.replaceAll("_", " "),
-        subtitle: item.topic_id ? `Topic ${item.topic_id}` : "Platform activity",
-        tone: "info",
+        subtitle: item.topic_id
+          ? `${topicMap.get(item.topic_id) ?? `Topic ${item.topic_id}`} updated in the learning graph`
+          : "New platform signal captured",
+        tone:
+          item.event_type === "topic_completed"
+            ? "completed"
+            : item.event_type === "question_answered"
+              ? "in_progress"
+              : "info",
+        tag: item.topic_id ? "Topic signal" : "System",
       })),
       heatmap: payload?.weak_topic_heatmap ?? [],
     };
@@ -152,12 +200,14 @@ export function useStudentDashboard() {
 }
 
 export function useTeacherDashboard() {
+  const { activeTenantScope } = useTenantScope();
+  const tenantScope = activeTenantScope ?? "current";
   const teacherDashboardQuery = useQuery({
-    queryKey: ["dashboard", "teacher", "intelligence"],
+    queryKey: ["dashboard", "teacher", "intelligence", tenantScope],
     queryFn: getTeacherDashboard,
   });
   const retentionQuery = useQuery({
-    queryKey: ["dashboard", "teacher", "retention"],
+    queryKey: ["dashboard", "teacher", "retention", tenantScope],
     queryFn: getRetentionAnalytics,
   });
 
@@ -221,53 +271,73 @@ export function useTeacherDashboard() {
       },
       retentionTopics: retention?.weak_retention_topics ?? [],
       recommendations: [
-        `${riskSegments.critical} learners need immediate intervention.`,
-        `${payload?.weak_topic_clusters[0]?.topic_name ?? "Top weak topic"} is the weakest cluster.`,
-        `${retention?.due_review_count ?? 0} spaced reviews are currently due across the tenant.`,
+        {
+          title: "Immediate intervention queue",
+          message: `${riskSegments.critical} learners currently need direct intervention.`,
+          why: "This count reflects the highest urgency cohort and should anchor the demo narrative around measurable need.",
+          confidenceLabel: "Urgent",
+          tone: "warning" as const,
+        },
+        {
+          title: "Weakest cluster",
+          message: `${payload?.weak_topic_clusters[0]?.topic_name ?? "Top weak topic"} is the largest shared mastery gap right now.`,
+          why: "Showing a single weakest cluster helps investors understand how the system converts raw analytics into action.",
+          confidenceLabel: "Cohort signal",
+          tone: "default" as const,
+        },
+        {
+          title: "Retention workload",
+          message: `${retention?.due_review_count ?? 0} spaced reviews are currently due across the tenant.`,
+          why: "Review pressure is a strong proxy for churn risk and product stickiness.",
+          confidenceLabel: "Retention",
+          tone: "success" as const,
+        },
       ],
     };
   }, [retentionQuery.data, teacherDashboardQuery]);
 }
 
 export function useAdminDashboard() {
+  const { activeTenantScope } = useTenantScope();
+  const tenantScope = activeTenantScope ?? "current";
   const usersQuery = useQuery({
-    queryKey: ["dashboard", "admin", "users"],
+    queryKey: ["dashboard", "admin", "users", tenantScope],
     queryFn: getUsers,
   });
   const topicsQuery = useQuery({
-    queryKey: ["dashboard", "admin", "topics"],
+    queryKey: ["dashboard", "admin", "topics", tenantScope],
     queryFn: getTopics,
   });
   const questionsQuery = useQuery({
-    queryKey: ["dashboard", "admin", "questions"],
+    queryKey: ["dashboard", "admin", "questions", tenantScope],
     queryFn: () => getQuestions({ limit: 25, offset: 0 }),
   });
   const goalsQuery = useQuery({
-    queryKey: ["dashboard", "admin", "goals"],
+    queryKey: ["dashboard", "admin", "goals", tenantScope],
     queryFn: getGoals,
   });
   const communitiesQuery = useQuery({
-    queryKey: ["dashboard", "admin", "communities"],
+    queryKey: ["dashboard", "admin", "communities", tenantScope],
     queryFn: () => getCommunities({ limit: 10, offset: 0 }),
   });
   const threadsQuery = useQuery({
-    queryKey: ["dashboard", "admin", "threads"],
+    queryKey: ["dashboard", "admin", "threads", tenantScope],
     queryFn: () => getDiscussionThreads({ limit: 10, offset: 0 }),
   });
   const overviewQuery = useQuery({
-    queryKey: ["dashboard", "admin", "overview"],
+    queryKey: ["dashboard", "admin", "overview", tenantScope],
     queryFn: getAnalyticsOverview,
   });
   const roadmapProgressQuery = useQuery({
-    queryKey: ["dashboard", "admin", "roadmap-progress"],
+    queryKey: ["dashboard", "admin", "roadmap-progress", tenantScope],
     queryFn: getRoadmapProgressSummary,
   });
   const featureFlagsQuery = useQuery({
-    queryKey: ["dashboard", "admin", "feature-flags"],
+    queryKey: ["dashboard", "admin", "feature-flags", tenantScope],
     queryFn: () => getFeatureFlags({ limit: 20, offset: 0 }),
   });
   const featureCatalogQuery = useQuery({
-    queryKey: ["dashboard", "admin", "feature-flags-catalog"],
+    queryKey: ["dashboard", "admin", "feature-flags-catalog", tenantScope],
     queryFn: getFeatureFlagCatalog,
   });
 
@@ -331,8 +401,10 @@ export function useAdminDashboard() {
 }
 
 export function useSuperAdminDashboard() {
+  const { activeTenantScope } = useTenantScope();
+  const tenantScope = activeTenantScope ?? "current";
   const platformOverviewQuery = useQuery({
-    queryKey: ["dashboard", "super-admin", "platform-overview"],
+    queryKey: ["dashboard", "super-admin", "platform-overview", tenantScope],
     queryFn: getPlatformAnalyticsOverview,
     refetchInterval: 60_000,
   });
@@ -460,10 +532,15 @@ export function useMentorWorkspace() {
       return getUserRoadmap(user.user_id);
     },
     enabled: Boolean(user?.user_id),
+    refetchInterval: (query) => {
+      const roadmap = query.state.data?.items?.[0];
+      return roadmap && normalizeRoadmapGenerationStatus(roadmap.status) === "generating" ? 2500 : false;
+    },
   });
 
   return useMemo(() => {
     const roadmap = roadmapQuery.data?.items?.[0] ?? null;
+    const roadmapStatus = normalizeRoadmapGenerationStatus(roadmap?.status);
     const steps = [...(roadmap?.steps ?? [])].sort((a, b) => a.priority - b.priority);
     const aiMentorEnabled = (featureFlagsQuery.data?.items ?? []).some(
       (flag) => flag.feature_name === "ai_mentor_enabled" && flag.enabled,
@@ -505,8 +582,17 @@ export function useMentorWorkspace() {
           },
         ],
       },
-      suggestions: suggestionsQuery.data?.suggestions ?? [],
+      suggestions: (suggestionsQuery.data?.suggestions ?? []).map((item, index) => ({
+        title: `Mentor suggestion ${index + 1}`,
+        message: item,
+        why: "This prompt is preloaded to accelerate the mentor conversation during the demo.",
+        confidenceLabel: "Ready to use",
+        tone: "success" as const,
+      })),
       notifications: notificationsQuery.data?.notifications ?? [],
+      roadmap,
+      roadmapStatus,
+      roadmapErrorMessage: roadmap?.error_message ?? null,
       agent: agentQuery.data
         ? {
             ...agentQuery.data,
@@ -520,7 +606,13 @@ export function useMentorWorkspace() {
           gap: Number(gap),
         }))
         .sort((a, b) => b.gap - a.gap),
-      recommendedFocus: progressAnalysisQuery.data?.recommended_focus ?? [],
+      recommendedFocus: (progressAnalysisQuery.data?.recommended_focus ?? []).map((item, index) => ({
+        title: `Focus area ${index + 1}`,
+        message: item,
+        why: "Recommended focus comes from current topic-improvement gaps and weekly progress analysis.",
+        confidenceLabel: "Progress signal",
+        tone: "default" as const,
+      })),
     };
   }, [agentQuery.data, featureFlagsQuery, notificationsQuery, progressAnalysisQuery, roadmapQuery, suggestionsQuery]);
 }

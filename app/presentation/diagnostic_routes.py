@@ -3,14 +3,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.diagnostic_service import DiagnosticService
 from app.application.services.outbox_service import OutboxService
+from app.application.services.roadmap_service import RoadmapService
 from app.core.dependencies import get_current_user
 from app.infrastructure.database import get_db_session
 from app.infrastructure.jobs.dispatcher import enqueue_job
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.diagnostic_schema import (
+    DiagnosticAnswerRequest,
+    DiagnosticAnswerResponse,
     DiagnosticNextQuestionRequest,
     DiagnosticQuestionResponse,
     DiagnosticResultResponse,
+    DiagnosticResumeResponse,
     DiagnosticStartRequest,
     DiagnosticStartResponse,
     DiagnosticSubmitRequest,
@@ -31,6 +35,46 @@ async def start_diagnostic(
     return await DiagnosticService(db).start_test(current_user.id, payload.goal_id, current_user.tenant_id)
 
 
+@router.get("/{test_id}", response_model=DiagnosticResumeResponse)
+async def get_diagnostic_session(
+    test_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    test, answers = await DiagnosticService(db).get_or_resume_test(
+        test_id=test_id,
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+    )
+    return {
+        "id": test.id,
+        "user_id": test.user_id,
+        "goal_id": test.goal_id,
+        "started_at": test.started_at,
+        "completed_at": test.completed_at,
+        "answered_count": len(answers),
+    }
+
+
+@router.post("/answer", response_model=DiagnosticAnswerResponse)
+@limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
+@limiter.limit("100/minute", key_func=rate_limit_key_by_user)
+async def answer_diagnostic_question(
+    request: Request,
+    payload: DiagnosticAnswerRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    return await DiagnosticService(db).answer_question(
+        test_id=payload.test_id,
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        question_id=payload.question_id,
+        user_answer=payload.user_answer,
+        time_taken=payload.time_taken,
+    )
+
+
 @router.post("/submit", response_model=DiagnosticStartResponse)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
@@ -40,24 +84,35 @@ async def submit_diagnostic(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    test = await DiagnosticService(db).submit_answers(
+    test = await DiagnosticService(db).finalize_test(
         test_id=payload.test_id,
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
-        answers=[a.model_dump() for a in payload.answers],
+    )
+    await RoadmapService(db).ensure_generation_requested(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        goal_id=test.goal_id,
+        test_id=payload.test_id,
     )
     queued = enqueue_job(
-        "jobs.analyze_diagnostic",
-        args=[payload.test_id, current_user.id, current_user.tenant_id],
+        "jobs.generate_roadmap",
+        args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
     )
     if not queued:
         await OutboxService(db).add_task_event(
-            task_name="jobs.analyze_diagnostic",
-            args=[payload.test_id, current_user.id, current_user.tenant_id],
+            task_name="jobs.generate_roadmap",
+            args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
             tenant_id=current_user.tenant_id,
         )
         await db.commit()
-    return test
+    return {
+        "id": test.id,
+        "user_id": test.user_id,
+        "goal_id": test.goal_id,
+        "started_at": test.started_at,
+        "completed_at": test.completed_at,
+    }
 
 
 @router.get("/result", response_model=DiagnosticResultResponse)
@@ -66,19 +121,35 @@ async def diagnostic_result(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    scores = await DiagnosticService(db).get_result(test_id, current_user.id, current_user.tenant_id)
-    return DiagnosticResultResponse(test_id=test_id, topic_scores=scores)
+    result = await DiagnosticService(db).get_result(test_id, current_user.id, current_user.tenant_id)
+    return DiagnosticResultResponse(**result)
 
 
-@router.post("/next-question", response_model=DiagnosticQuestionResponse | None)
+@router.get("/next/{test_id}", response_model=DiagnosticQuestionResponse | None)
+async def diagnostic_next_question_for_test(
+    test_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    question = await DiagnosticService(db).get_next_question(
+        test_id=test_id,
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+    )
+    if question is None:
+        return None
+    return DiagnosticQuestionResponse(**question)
+
+
+@router.post("/next-question", response_model=DiagnosticQuestionResponse | None, deprecated=True)
 async def diagnostic_next_question(
     payload: DiagnosticNextQuestionRequest,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    question = await DiagnosticService(db).select_next_question(
-        goal_id=payload.goal_id,
-        previous_answers=[answer.model_dump() for answer in payload.previous_answers],
+    question = await DiagnosticService(db).get_next_question(
+        test_id=payload.test_id,
+        user_id=current_user.id,
         tenant_id=current_user.tenant_id,
     )
     if question is None:

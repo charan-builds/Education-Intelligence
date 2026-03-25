@@ -13,15 +13,19 @@ class TopicRepository:
         self.session = session
         self.cache_service = CacheService()
 
-    async def list_topics(self, tenant_id: int | None = None) -> list[Topic]:
-        stmt = select(Topic).order_by(Topic.id)
-        if tenant_id is not None:
-            stmt = stmt.where(Topic.tenant_id == tenant_id)
+    @staticmethod
+    def _require_tenant_id(tenant_id: int | None) -> int:
+        if tenant_id is None:
+            raise ValueError("tenant_id is required")
+        return tenant_id
+
+    async def list_topics(self, tenant_id: int) -> list[Topic]:
+        stmt = select(Topic).where(Topic.tenant_id == self._require_tenant_id(tenant_id)).order_by(Topic.id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_topics(self, tenant_id: int, ttl: int = 300) -> list[dict]:
-        cache_key = f"tenant:{tenant_id}:topics"
+        cache_key = await self.cache_service.build_tenant_versioned_key("topics", tenant_id=tenant_id)
         cached = await self.cache_service.get(cache_key)
         if isinstance(cached, list):
             return cached
@@ -35,10 +39,11 @@ class TopicRepository:
         await self.cache_service.set(cache_key, payload, ttl=ttl)
         return payload
 
-    async def get_topic(self, topic_id: int, tenant_id: int | None = None) -> Topic | None:
-        stmt = select(Topic).where(Topic.id == topic_id)
-        if tenant_id is not None:
-            stmt = stmt.where(Topic.tenant_id == tenant_id)
+    async def invalidate_topics_cache(self, tenant_id: int) -> None:
+        await self.cache_service.bump_namespace_version(f"topics:tenant:{tenant_id}")
+
+    async def get_topic(self, topic_id: int, tenant_id: int) -> Topic | None:
+        stmt = select(Topic).where(Topic.id == topic_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -46,12 +51,10 @@ class TopicRepository:
         result = await self.session.execute(select(Topic).where(Topic.tenant_id == tenant_id, Topic.name == name))
         return result.scalar_one_or_none()
 
-    async def list_topics_by_ids(self, topic_ids: list[int], tenant_id: int | None = None) -> list[Topic]:
+    async def list_topics_by_ids(self, topic_ids: list[int], tenant_id: int) -> list[Topic]:
         if not topic_ids:
             return []
-        stmt = select(Topic).where(Topic.id.in_(topic_ids))
-        if tenant_id is not None:
-            stmt = stmt.where(Topic.tenant_id == tenant_id)
+        stmt = select(Topic).where(Topic.id.in_(topic_ids), Topic.tenant_id == self._require_tenant_id(tenant_id))
         result = await self.session.execute(stmt.order_by(Topic.id))
         return list(result.scalars().all())
 
@@ -59,21 +62,23 @@ class TopicRepository:
         self,
         topic_id: int,
         prerequisite_topic_id: int,
-        tenant_id: int | None = None,
+        tenant_id: int,
     ) -> TopicPrerequisite | None:
         stmt = select(TopicPrerequisite).where(
             TopicPrerequisite.topic_id == topic_id,
             TopicPrerequisite.prerequisite_topic_id == prerequisite_topic_id,
         )
-        if tenant_id is not None:
-            stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(Topic.tenant_id == tenant_id)
+        stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(
+            Topic.tenant_id == self._require_tenant_id(tenant_id)
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_prerequisite_link_by_id(self, prerequisite_id: int, tenant_id: int | None = None) -> TopicPrerequisite | None:
+    async def get_prerequisite_link_by_id(self, prerequisite_id: int, tenant_id: int) -> TopicPrerequisite | None:
         stmt = select(TopicPrerequisite).where(TopicPrerequisite.id == prerequisite_id)
-        if tenant_id is not None:
-            stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(Topic.tenant_id == tenant_id)
+        stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(
+            Topic.tenant_id == self._require_tenant_id(tenant_id)
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -85,8 +90,9 @@ class TopicRepository:
         )
         if topic_id is not None:
             stmt = stmt.where(TopicPrerequisite.topic_id == topic_id)
-        if tenant_id is not None:
-            stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(Topic.tenant_id == tenant_id)
+        stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(
+            Topic.tenant_id == self._require_tenant_id(tenant_id)
+        )
         result = await self.session.execute(stmt.limit(limit).offset(offset))
         return list(result.scalars().all())
 
@@ -94,32 +100,27 @@ class TopicRepository:
         stmt = select(func.count(TopicPrerequisite.id))
         if topic_id is not None:
             stmt = stmt.where(TopicPrerequisite.topic_id == topic_id)
-        if tenant_id is not None:
-            stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(Topic.tenant_id == tenant_id)
+        stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(
+            Topic.tenant_id == self._require_tenant_id(tenant_id)
+        )
         result = await self.session.execute(stmt)
         return int(result.scalar_one())
 
-    async def list_topics_by_graph_prefix(self, graph_prefix: str, tenant_id: int | None = None) -> list[Topic]:
+    async def list_topics_by_graph_prefix(self, graph_prefix: str, tenant_id: int) -> list[Topic]:
         pattern = f"{graph_prefix}/%"
-        stmt = select(Topic).where(Topic.graph_path.like(pattern))
-        if tenant_id is not None:
-            stmt = stmt.where(Topic.tenant_id == tenant_id)
+        stmt = select(Topic).where(Topic.graph_path.like(pattern), Topic.tenant_id == self._require_tenant_id(tenant_id))
         result = await self.session.execute(stmt.order_by(Topic.depth.asc(), Topic.id.asc()))
         return list(result.scalars().all())
 
-    async def update_topic_index(self, topic_id: int, depth: int, graph_path: str, tenant_id: int | None = None) -> None:
-        stmt = update(Topic).where(Topic.id == topic_id)
-        if tenant_id is not None:
-            stmt = stmt.where(Topic.tenant_id == tenant_id)
+    async def update_topic_index(self, topic_id: int, depth: int, graph_path: str, tenant_id: int) -> None:
+        stmt = update(Topic).where(Topic.id == topic_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
         await self.session.execute(stmt.values(depth=depth, graph_path=graph_path))
 
-    async def get_prerequisite_edges(self, tenant_id: int | None = None) -> list[tuple[int, int]]:
+    async def get_prerequisite_edges(self, tenant_id: int) -> list[tuple[int, int]]:
         stmt = select(TopicPrerequisite.topic_id, TopicPrerequisite.prerequisite_topic_id)
-        if tenant_id is not None:
-            stmt = (
-                stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id)
-                .where(Topic.tenant_id == tenant_id)
-            )
+        stmt = stmt.join(Topic, Topic.id == TopicPrerequisite.topic_id).where(
+            Topic.tenant_id == self._require_tenant_id(tenant_id)
+        )
         result = await self.session.execute(stmt)
         return [(row[0], row[1]) for row in result.all()]
 
@@ -133,36 +134,54 @@ class TopicRepository:
         await self.session.delete(link)
 
     async def list_questions_for_goal(self, goal_id: int | None = None, tenant_id: int | None = None) -> list[Question]:
-        stmt = select(Question).order_by(Question.id)
+        stmt = (
+            select(Question)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .order_by(Question.id)
+        )
         if goal_id is not None:
             mapped_topic_ids = select(GoalTopic.topic_id).where(GoalTopic.goal_id == goal_id)
             stmt = stmt.where(Question.topic_id.in_(mapped_topic_ids))
-        if tenant_id is not None:
-            stmt = stmt.join(Topic, Topic.id == Question.topic_id).where(Topic.tenant_id == tenant_id)
         result = await self.session.execute(stmt)
         questions = list(result.scalars().all())
         if goal_id is not None and not questions:
-            fallback_stmt = select(Question).order_by(Question.id)
-            if tenant_id is not None:
-                fallback_stmt = fallback_stmt.join(Topic, Topic.id == Question.topic_id).where(Topic.tenant_id == tenant_id)
+            fallback_stmt = (
+                select(Question)
+                .join(Topic, Topic.id == Question.topic_id)
+                .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+                .order_by(Question.id)
+            )
             fallback = await self.session.execute(fallback_stmt)
             return list(fallback.scalars().all())
         return questions
 
-    async def get_question(self, question_id: int) -> Question | None:
-        result = await self.session.execute(select(Question).where(Question.id == question_id))
+    async def get_question(self, question_id: int, tenant_id: int | None = None) -> Question | None:
+        stmt = select(Question).where(Question.id == question_id)
+        if tenant_id is not None:
+            stmt = stmt.join(Topic, Topic.id == Question.topic_id).where(
+                Topic.tenant_id == self._require_tenant_id(tenant_id)
+            )
+        result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_questions_for_topic(self, topic_id: int, tenant_id: int | None = None) -> list[Question]:
+    async def list_questions_by_ids(self, *, tenant_id: int, question_ids: list[int]) -> list[Question]:
+        if not question_ids:
+            return []
         result = await self.session.execute(
-            (
-                select(Question)
-                .join(Topic, Topic.id == Question.topic_id)
-                .where(Question.topic_id == topic_id)
-                .where(Topic.tenant_id == tenant_id)
-                if tenant_id is not None
-                else select(Question).where(Question.topic_id == topic_id)
-            ).order_by(Question.id.asc())
+            select(Question)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(Question.id.in_(question_ids), Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .order_by(Question.id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def list_questions_for_topic(self, topic_id: int, tenant_id: int) -> list[Question]:
+        result = await self.session.execute(
+            select(Question)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(Question.topic_id == topic_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .order_by(Question.id.asc())
         )
         return list(result.scalars().all())
 

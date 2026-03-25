@@ -14,13 +14,16 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({
+    isAuthenticated: false,
+    isReady: true,
+    role: null,
     login: loginMock,
   }),
 }));
 
 describe("AuthPage", () => {
   it("redirects to the requested next path after login", async () => {
-    window.history.replaceState({}, "", "/auth?next=/roadmap/view");
+    window.history.replaceState({}, "", "/auth?next=/student/roadmap");
     const client = new QueryClient();
 
     render(
@@ -32,6 +35,6 @@ describe("AuthPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
 
     await waitFor(() => expect(loginMock).toHaveBeenCalled());
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/roadmap/view"));
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/student/roadmap"));
   });
 });

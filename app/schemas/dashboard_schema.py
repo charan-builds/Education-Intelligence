@@ -101,6 +101,7 @@ class StudentDashboardResponse(BaseModel):
     weak_topics: list[WeakTopicHeatmapItemResponse]
     weakness_clusters: list[dict] = []
     learning_profile: dict = {}
+    cognitive_model: dict = {}
     mentor_suggestions: list[MentorSuggestionCardResponse]
     retention: StudentRetentionSummaryResponse
     skill_graph: list[SkillGraphNodeResponse]

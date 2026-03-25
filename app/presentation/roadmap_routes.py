@@ -30,42 +30,22 @@ async def generate_roadmap(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    roadmap = await RoadmapService(db).generate(
+    roadmap = await RoadmapService(db).ensure_generation_requested(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         goal_id=payload.goal_id,
         test_id=payload.test_id,
     )
-    outbox_service = OutboxService(db)
-
-    roadmap_steps = [
-        {
-            "topic_id": int(step.topic_id),
-            "progress_status": str(step.progress_status),
-            "deadline": step.deadline.isoformat(),
-            "priority": int(step.priority),
-        }
-        for step in roadmap.steps
-    ]
-    queued_notify = enqueue_job(
-        "jobs.send_notifications",
-        kwargs={
-            "roadmap_steps": roadmap_steps,
-            "topic_scores": {},
-            "last_activity_at_iso": None,
-        },
+    queued_generate = enqueue_job(
+        "jobs.generate_roadmap",
+        args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
     )
-    if not queued_notify:
-        await outbox_service.add_task_event(
-            task_name="jobs.send_notifications",
-            kwargs={
-                "roadmap_steps": roadmap_steps,
-                "topic_scores": {},
-                "last_activity_at_iso": None,
-            },
+    if not queued_generate:
+        await OutboxService(db).add_task_event(
+            task_name="jobs.generate_roadmap",
+            args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
             tenant_id=current_user.tenant_id,
         )
-    if not queued_notify:
         await db.commit()
     return roadmap
 

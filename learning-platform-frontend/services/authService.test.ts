@@ -1,42 +1,52 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const postMock = vi.fn();
-const jwtDecodeMock = vi.fn();
+const getMock = vi.fn();
 
 vi.mock("@/services/apiClient", () => ({
   apiClient: {
     post: postMock,
+    get: getMock,
   },
-}));
-
-vi.mock("jwt-decode", () => ({
-  jwtDecode: jwtDecodeMock,
 }));
 
 describe("authService", () => {
   beforeEach(() => {
     postMock.mockReset();
-    jwtDecodeMock.mockReset();
+    getMock.mockReset();
     localStorage.clear();
-    document.cookie = "access_token=; Path=/; Max-Age=0";
   });
 
-  it("stores access token in localStorage and cookie on login", async () => {
-    postMock.mockResolvedValue({ data: { access_token: "header.payload.signature" } });
+  it("returns the session payload from login", async () => {
+    postMock.mockResolvedValue({
+      data: {
+        authenticated: true,
+        token_type: "cookie",
+        access_token_expires_in: 3600,
+        refresh_token_expires_in: 86400,
+        user: { id: 5, tenant_id: 7, email: "student@example.com", role: "student", created_at: "2026-03-24T00:00:00Z" },
+      },
+    });
     const { login } = await import("@/services/authService");
 
     const result = await login("student@example.com", "password");
 
-    expect(result.access_token).toBe("header.payload.signature");
-    expect(localStorage.getItem("access_token")).toBe("header.payload.signature");
-    expect(document.cookie).toContain("access_token=header.payload.signature");
+    expect(result.authenticated).toBe(true);
+    expect(result.user.role).toBe("student");
   });
 
-  it("decodes current user from stored token", async () => {
-    localStorage.setItem("access_token", "header.payload.signature");
-    jwtDecodeMock.mockReturnValue({ sub: "5", tenant_id: 7, role: "student" });
+  it("loads current user from the backend session endpoint", async () => {
+    getMock.mockResolvedValue({
+      data: { id: 5, tenant_id: 7, email: "student@example.com", role: "student", created_at: "2026-03-24T00:00:00Z" },
+    });
     const { getCurrentUser } = await import("@/services/authService");
 
-    expect(getCurrentUser()).toEqual({ sub: "5", tenant_id: 7, role: "student" });
+    await expect(getCurrentUser()).resolves.toEqual({
+      id: 5,
+      tenant_id: 7,
+      email: "student@example.com",
+      role: "student",
+      created_at: "2026-03-24T00:00:00Z",
+    });
   });
 });

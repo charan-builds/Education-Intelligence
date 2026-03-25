@@ -4,8 +4,8 @@ from fastapi import APIRouter, Body, Depends, Response, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.services.topic_service import TopicService
 from app.application.services.topic_knowledge_service import TopicKnowledgeService
+from app.application.services.topic_service import TopicService
 from app.core.dependencies import get_current_user, get_pagination_params, require_roles
 from app.infrastructure.database import get_db_session
 from app.schemas.common_schema import PaginationParams
@@ -24,10 +24,10 @@ from app.schemas.topic_schema import (
     TopicExplanationRequest,
     TopicExplanationResponse,
     TopicPageResponse,
-    TopicReasoningResponse,
     TopicPrerequisiteCreateRequest,
     TopicPrerequisitePageResponse,
     TopicPrerequisiteResponse,
+    TopicReasoningResponse,
     TopicSummaryResponse,
     TopicUpdateRequest,
 )
@@ -78,15 +78,11 @@ async def create_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        return await service.create_topic(
-            tenant_id=_current_user.tenant_id,
-            name=payload.name,
-            description=payload.description,
-        )
-    except TypeError:
-        return await service.create_topic(name=payload.name, description=payload.description)
+    return await TopicService(db).create_topic(
+        tenant_id=_current_user.tenant_id,
+        name=payload.name,
+        description=payload.description,
+    )
 
 
 @router.put("/{topic_id}", response_model=TopicSummaryResponse)
@@ -96,20 +92,12 @@ async def update_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        return await service.update_topic(
-            topic_id,
-            tenant_id=_current_user.tenant_id,
-            name=payload.name,
-            description=payload.description,
-        )
-    except TypeError:
-        return await service.update_topic(
-            topic_id,
-            name=payload.name,
-            description=payload.description,
-        )
+    return await TopicService(db).update_topic(
+        topic_id,
+        tenant_id=_current_user.tenant_id,
+        name=payload.name,
+        description=payload.description,
+    )
 
 
 @router.delete("/{topic_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -118,11 +106,7 @@ async def delete_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        await service.delete_topic(topic_id, tenant_id=_current_user.tenant_id)
-    except TypeError:
-        await service.delete_topic(topic_id)
+    await TopicService(db).delete_topic(topic_id, tenant_id=_current_user.tenant_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -135,24 +119,14 @@ async def list_questions(
     _current_user=Depends(get_current_user),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    service = TopicService(db)
-    try:
-        return await service.list_questions_page(
-            limit=pagination.limit,
-            offset=pagination.offset,
-            tenant_id=_current_user.tenant_id,
-            topic_id=topic_id,
-            question_type=question_type,
-            search=search,
-        )
-    except TypeError:
-        return await service.list_questions_page(
-            limit=pagination.limit,
-            offset=pagination.offset,
-            topic_id=topic_id,
-            question_type=question_type,
-            search=search,
-        )
+    return await TopicService(db).list_questions_page(
+        limit=pagination.limit,
+        offset=pagination.offset,
+        tenant_id=_current_user.tenant_id,
+        topic_id=topic_id,
+        question_type=question_type,
+        search=search,
+    )
 
 
 @router.get("/prerequisites", response_model=TopicPrerequisitePageResponse)
@@ -162,20 +136,12 @@ async def list_prerequisites(
     _current_user=Depends(get_current_user),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    service = TopicService(db)
-    try:
-        return await service.list_prerequisites_page(
-            limit=pagination.limit,
-            offset=pagination.offset,
-            tenant_id=_current_user.tenant_id,
-            topic_id=topic_id,
-        )
-    except TypeError:
-        return await service.list_prerequisites_page(
-            limit=pagination.limit,
-            offset=pagination.offset,
-            topic_id=topic_id,
-        )
+    return await TopicService(db).list_prerequisites_page(
+        limit=pagination.limit,
+        offset=pagination.offset,
+        tenant_id=_current_user.tenant_id,
+        topic_id=topic_id,
+    )
 
 
 @router.post("/prerequisites", response_model=TopicPrerequisiteResponse)
@@ -184,18 +150,11 @@ async def create_prerequisite(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        return await service.create_prerequisite(
-            topic_id=payload.topic_id,
-            prerequisite_topic_id=payload.prerequisite_topic_id,
-            tenant_id=_current_user.tenant_id,
-        )
-    except TypeError:
-        return await service.create_prerequisite(
-            topic_id=payload.topic_id,
-            prerequisite_topic_id=payload.prerequisite_topic_id,
-        )
+    return await TopicService(db).create_prerequisite(
+        topic_id=payload.topic_id,
+        prerequisite_topic_id=payload.prerequisite_topic_id,
+        tenant_id=_current_user.tenant_id,
+    )
 
 
 @router.delete("/prerequisites/{prerequisite_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -204,11 +163,7 @@ async def delete_prerequisite(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        await service.delete_prerequisite(prerequisite_id, tenant_id=_current_user.tenant_id)
-    except TypeError:
-        await service.delete_prerequisite(prerequisite_id)
+    await TopicService(db).delete_prerequisite(prerequisite_id, tenant_id=_current_user.tenant_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -218,28 +173,16 @@ async def create_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        return await service.create_question(
-            topic_id=payload.topic_id,
-            difficulty=payload.difficulty,
-            question_type=payload.question_type,
-            question_text=payload.question_text,
-            correct_answer=payload.correct_answer,
-            accepted_answers=payload.accepted_answers,
-            answer_options=payload.answer_options,
-            tenant_id=_current_user.tenant_id,
-        )
-    except TypeError:
-        return await service.create_question(
-            topic_id=payload.topic_id,
-            difficulty=payload.difficulty,
-            question_type=payload.question_type,
-            question_text=payload.question_text,
-            correct_answer=payload.correct_answer,
-            accepted_answers=payload.accepted_answers,
-            answer_options=payload.answer_options,
-        )
+    return await TopicService(db).create_question(
+        topic_id=payload.topic_id,
+        difficulty=payload.difficulty,
+        question_type=payload.question_type,
+        question_text=payload.question_text,
+        correct_answer=payload.correct_answer,
+        accepted_answers=payload.accepted_answers,
+        answer_options=payload.answer_options,
+        tenant_id=_current_user.tenant_id,
+    )
 
 
 @router.post("/questions/import", response_model=QuestionImportResponse)
@@ -248,11 +191,10 @@ async def import_questions(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        created = await service.import_questions([item.model_dump() for item in payload.items], tenant_id=_current_user.tenant_id)
-    except TypeError:
-        created = await service.import_questions([item.model_dump() for item in payload.items])
+    created = await TopicService(db).import_questions(
+        [item.model_dump() for item in payload.items],
+        tenant_id=_current_user.tenant_id,
+    )
     return QuestionImportResponse(created=created)
 
 
@@ -262,11 +204,7 @@ async def import_questions_csv(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    service = TopicService(db)
-    try:
-        created = await service.import_questions_csv(content, tenant_id=_current_user.tenant_id)
-    except TypeError:
-        created = await service.import_questions_csv(content)
+    created = await TopicService(db).import_questions_csv(content, tenant_id=_current_user.tenant_id)
     return QuestionImportResponse(created=created)
 
 
@@ -276,11 +214,7 @@ async def export_questions(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(get_current_user),
 ):
-    service = TopicService(db)
-    try:
-        items = await service.export_questions(tenant_id=_current_user.tenant_id, topic_id=topic_id)
-    except TypeError:
-        items = await service.export_questions(topic_id=topic_id)
+    items = await TopicService(db).export_questions(tenant_id=_current_user.tenant_id, topic_id=topic_id)
     return PlainTextResponse(
         content=json.dumps(items, indent=2),
         headers={"Content-Disposition": "attachment; filename=questions-export.json"},
@@ -293,11 +227,7 @@ async def export_questions_csv(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(get_current_user),
 ):
-    service = TopicService(db)
-    try:
-        content = await service.export_questions_csv(tenant_id=_current_user.tenant_id, topic_id=topic_id)
-    except TypeError:
-        content = await service.export_questions_csv(topic_id=topic_id)
+    content = await TopicService(db).export_questions_csv(tenant_id=_current_user.tenant_id, topic_id=topic_id)
     return PlainTextResponse(
         content=content,
         media_type="text/csv",

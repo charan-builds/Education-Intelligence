@@ -17,10 +17,18 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=True,
     beat_schedule={
         "process-outbox-events-every-minute": {
             "task": "jobs.process_outbox_events",
             "schedule": 60.0,
+            "kwargs": {"limit": 200},
+        },
+        "consume-kafka-events-every-10s": {
+            "task": "jobs.consume_kafka_events",
+            "schedule": 10.0,
             "kwargs": {"limit": 200},
         },
         "cleanup-outbox-events-daily": {
@@ -35,6 +43,21 @@ celery_app.conf.update(
             "task": "jobs.recover_stuck_outbox_events",
             "schedule": 300.0,
             "kwargs": {"limit": 500},
+        },
+        "generate-notifications-every-10m": {
+            "task": "jobs.generate_notifications",
+            "schedule": 600.0,
+            "kwargs": {"limit_users": 200},
+        },
+        "decay-skill-vectors-daily": {
+            "task": "jobs.decay_skill_vectors",
+            "schedule": 86400.0,
+            "kwargs": {"inactive_days": 21},
+        },
+        "refresh-precomputed-analytics-every-5m": {
+            "task": "jobs.refresh_precomputed_analytics",
+            "schedule": 300.0,
+            "kwargs": {"limit_users": 250},
         },
     },
 )

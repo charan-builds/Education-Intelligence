@@ -12,10 +12,13 @@ from ai_service.prompts import (
     explain_topic_prompt,
     generate_questions_prompt,
     mentor_chat_prompt,
+    multi_agent_synthesis_prompt,
     progress_prompt,
     roadmap_prompt,
+    specialist_agent_prompt,
 )
 from ai_service.schemas import (
+    AgentCollaborationOutput,
     LearningPathRequest,
     LearningPathResponse,
     LearningPathStep,
@@ -71,6 +74,163 @@ class AIOrchestrator:
             cleaned["topic"] = safe_topic_name(str(cleaned["topic"]))
         return cleaned
 
+    @staticmethod
+    def _agent_catalog() -> dict[str, str]:
+        return {
+            "mentor_agent": "Owns pedagogical clarity, prioritization, and tutoring tone.",
+            "content_generator_agent": "Owns explanations, exercises, and follow-up learning material.",
+            "analytics_agent": "Owns progress interpretation, weak-signal diagnosis, and measurement framing.",
+            "career_advisor_agent": "Owns role relevance, readiness framing, and career translation.",
+            "motivation_agent": "Owns encouragement, habit formation, and momentum recovery.",
+        }
+
+    @staticmethod
+    def _fallback_reason(failures: list[str]) -> str:
+        if not failures:
+            return "fallback_response_generated"
+        return "; ".join(failures[:3])[:300]
+
+    def _fallback_mentor_response(
+        self,
+        *,
+        payload: MentorResponseRequest,
+        specialist_outputs: list[AgentCollaborationOutput],
+        fallback_reason: str,
+    ) -> MentorResponse:
+        weak_topics = [
+            str(item.get("topic_name") or item.get("topic_id"))
+            for item in (payload.mentor_context.get("weak_topics") or [])
+        ][:5]
+        strong_topics = [
+            str(item.get("topic_name") or item.get("topic_id"))
+            for item in (payload.mentor_context.get("strong_topics") or [])
+        ][:5]
+        return MentorResponse(
+            user_id=payload.user_id,
+            tenant_id=payload.tenant_id,
+            response=(
+                "Focus first on your weakest topics, keep sessions short and consistent, "
+                "and finish one roadmap action before branching out."
+            ),
+            suggested_focus_topics=sorted(set(payload.weak_topics))[:5],
+            provider=None,
+            latency_ms=None,
+            fallback_used=True,
+            fallback_reason=fallback_reason,
+            next_checkin_date=date.today() + timedelta(days=7),
+            guidance=PromptSection(
+                explanation="Fallback mentor guidance was used because the primary LLM workflow was unavailable.",
+                suggestions=[
+                    "Review one weak topic.",
+                    "Finish one roadmap step.",
+                    "Write down one takeaway.",
+                    *[item.recommendations[0] for item in specialist_outputs if item.recommendations][:2],
+                ],
+                next_steps=["Come back after your next study session."],
+            ),
+            session_summary=f"Discussed '{payload.message[:120]}' with focus on {', '.join(weak_topics) if weak_topics else 'current weak topics'}.",
+            memory_update={
+                "learner_summary": "Learner benefits from concise, actionable tutoring with consistent progress check-ins.",
+                "weak_topics": weak_topics,
+                "strong_topics": strong_topics,
+                "past_mistakes": weak_topics[:3],
+                "improvement_signals": [f"Current completion is {payload.mentor_context.get('roadmap_progress', {}).get('completion_rate', 0)}%."],
+                "preferred_learning_style": str(payload.learning_profile.get("profile_type") or "balanced"),
+                "learning_speed": float(payload.mentor_context.get("user_profile", {}).get("learning_speed") or 0.0),
+                "session_summary": f"Learner asked: {payload.message[:120]}",
+            },
+            routed_agents=[item.agent_name for item in specialist_outputs],
+            orchestrator_summary="Fallback multi-agent collaboration combined deterministic mentor, analytics, and motivation signals.",
+            agent_outputs=specialist_outputs,
+        )
+
+    def _route_agents(self, payload: MentorResponseRequest) -> list[str]:
+        routed = ["mentor_agent"]
+        message = payload.message.lower()
+        mentor_context = payload.mentor_context or {}
+        weak_topics = payload.weak_topics or []
+        roadmap_progress = mentor_context.get("roadmap_progress") or {}
+        completion_rate = float(roadmap_progress.get("completion_rate") or 0.0)
+
+        if any(term in message for term in ["question", "quiz", "explain", "content", "example", "practice"]):
+            routed.append("content_generator_agent")
+        if weak_topics or completion_rate < 55 or any(term in message for term in ["progress", "weak", "improve", "stuck"]):
+            routed.append("analytics_agent")
+        if any(term in message for term in ["job", "career", "resume", "interview", "role"]):
+            routed.append("career_advisor_agent")
+        if completion_rate < 40 or any(term in message for term in ["motivate", "burnout", "overwhelmed", "discipline", "focus"]):
+            routed.append("motivation_agent")
+
+        return list(dict.fromkeys(routed))
+
+    async def _run_specialist_agents(self, payload: MentorResponseRequest, context: dict[str, Any]) -> list[AgentCollaborationOutput]:
+        routed_agents = self._route_agents(payload)
+        catalog = self._agent_catalog()
+        outputs: list[AgentCollaborationOutput] = []
+
+        if not self.llm.enabled:
+            weak_topics = [
+                str(item.get("topic_name") or item.get("topic_id"))
+                for item in (payload.mentor_context.get("weak_topics") or [])
+            ][:3]
+            for agent_name in routed_agents:
+                role = catalog[agent_name]
+                if agent_name == "analytics_agent":
+                    summary = f"Analytics sees the main pressure in {', '.join(weak_topics) if weak_topics else 'current weak topics'}."
+                    recommendations = ["Prioritize one weak topic first.", "Use progress signals to choose the next study block."]
+                elif agent_name == "career_advisor_agent":
+                    summary = "Career advisor maps the current learning work to future job-readiness outcomes."
+                    recommendations = ["Tie the next topic to a target role.", "Capture one resume-ready outcome from this study block."]
+                elif agent_name == "motivation_agent":
+                    summary = "Motivation agent recommends a small, confidence-building next action."
+                    recommendations = ["Do one short session today.", "Optimize for momentum before intensity."]
+                elif agent_name == "content_generator_agent":
+                    summary = "Content generator recommends explanation-first support plus follow-up practice."
+                    recommendations = ["Start with a simple explanation.", "Use 3 short practice questions right after."]
+                else:
+                    summary = "Mentor agent anchors the overall tutoring plan."
+                    recommendations = ["Focus the learner on the highest-leverage next topic."]
+                outputs.append(
+                    AgentCollaborationOutput(
+                        agent_name=agent_name,
+                        role=role,
+                        summary=summary,
+                        recommendations=recommendations,
+                    )
+                )
+            return outputs
+
+        for agent_name in routed_agents:
+            role = catalog[agent_name]
+            try:
+                data = await self.llm.generate_json(
+                    system_prompt=f"You are {agent_name}, a specialized sub-agent in a multi-agent learning platform.",
+                    user_prompt=specialist_agent_prompt(agent_name=agent_name, role=role, payload=context),
+                    max_output_tokens=700,
+                )
+                outputs.append(
+                    AgentCollaborationOutput(
+                        agent_name=agent_name,
+                        role=role,
+                        summary=str(data.get("summary") or ""),
+                        recommendations=[str(item) for item in data.get("recommendations", [])][:4],
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "specialist_agent_fallback_used",
+                    extra={"log_data": {"agent_name": agent_name, "error": str(exc)}},
+                )
+                outputs.append(
+                    AgentCollaborationOutput(
+                        agent_name=agent_name,
+                        role=role,
+                        summary=f"{agent_name} fallback guidance was used.",
+                        recommendations=["Use the highest-leverage next action and keep the plan concise."],
+                    )
+                )
+        return outputs
+
     async def mentor_chat(self, payload: MentorResponseRequest) -> MentorResponse:
         context = self._safe_context(payload.model_dump())
         cache_key = self.cache.make_key("mentor_chat", context)
@@ -78,50 +238,33 @@ class AIOrchestrator:
         if cached:
             return MentorResponse(**cached)
 
-        fallback_topics = sorted(set(payload.weak_topics))[:5]
+        specialist_outputs = await self._run_specialist_agents(payload, context)
         if not self.llm.enabled:
-            weak_topics = [
-                str(item.get("topic_name") or item.get("topic_id"))
-                for item in (payload.mentor_context.get("weak_topics") or [])
-            ][:5]
-            strong_topics = [
-                str(item.get("topic_name") or item.get("topic_id"))
-                for item in (payload.mentor_context.get("strong_topics") or [])
-            ][:5]
-            result = MentorResponse(
-                user_id=payload.user_id,
-                tenant_id=payload.tenant_id,
-                response=(
-                    "Focus first on your weakest topics, keep sessions short and consistent, "
-                    "and finish one roadmap action before branching out."
-                ),
-                suggested_focus_topics=fallback_topics,
-                provider=None,
-                next_checkin_date=date.today() + timedelta(days=7),
-                guidance=PromptSection(
-                    explanation="No LLM provider is configured, so fallback mentor guidance was used.",
-                    suggestions=["Review one weak topic.", "Finish one roadmap step.", "Write down one takeaway."],
-                    next_steps=["Come back after your next study session."],
-                ),
-                session_summary=f"Discussed '{payload.message[:120]}' with focus on {', '.join(weak_topics) if weak_topics else 'current weak topics'}.",
-                memory_update={
-                    "learner_summary": "Learner benefits from concise, actionable tutoring with consistent progress check-ins.",
-                    "weak_topics": weak_topics,
-                    "strong_topics": strong_topics,
-                    "past_mistakes": weak_topics[:3],
-                    "improvement_signals": [f"Current completion is {payload.mentor_context.get('roadmap_progress', {}).get('completion_rate', 0)}%."],
-                    "preferred_learning_style": str(payload.learning_profile.get("profile_type") or "balanced"),
-                    "learning_speed": float(payload.mentor_context.get("user_profile", {}).get("learning_speed") or 0.0),
-                    "session_summary": f"Learner asked: {payload.message[:120]}",
-                },
+            result = self._fallback_mentor_response(
+                payload=payload,
+                specialist_outputs=specialist_outputs,
+                fallback_reason="no_llm_provider_configured",
             )
             self.cache.set(cache_key, result.model_dump(mode="json"), ttl=120)
             return result
 
-        data = await self.llm.generate_json(
-            system_prompt="You are a safe, concise, high-quality learning mentor.",
-            user_prompt=mentor_chat_prompt(context),
-        )
+        try:
+            data = await self.llm.generate_json(
+                system_prompt="You are the orchestrator of a multi-agent tutoring system.",
+                user_prompt=multi_agent_synthesis_prompt(
+                    context,
+                    [item.model_dump(mode="json") for item in specialist_outputs],
+                ),
+            )
+        except Exception as exc:
+            logger.error("mentor_chat_synthesis_failed", extra={"log_data": {"error": str(exc)}})
+            result = self._fallback_mentor_response(
+                payload=payload,
+                specialist_outputs=specialist_outputs,
+                fallback_reason=self._fallback_reason([str(exc)]),
+            )
+            self.cache.set(cache_key, result.model_dump(mode="json"), ttl=120)
+            return result
         guidance = self._guidance(data)
         result = MentorResponse(
             user_id=payload.user_id,
@@ -131,6 +274,9 @@ class AIOrchestrator:
                 int(item) for item in data.get("suggested_focus_topics", []) if str(item).isdigit()
             ][:5],
             provider=str(data.get("_provider")) if data.get("_provider") else None,
+            latency_ms=float(data.get("_latency_ms")) if data.get("_latency_ms") is not None else None,
+            fallback_used=False,
+            fallback_reason=None,
             next_checkin_date=date.today() + timedelta(days=7),
             guidance=PromptSection(
                 explanation=guidance.explanation,
@@ -142,6 +288,9 @@ class AIOrchestrator:
             ),
             session_summary=str(data.get("session_summary") or ""),
             memory_update=data.get("memory_update") if isinstance(data.get("memory_update"), dict) else {},
+            routed_agents=[item.agent_name for item in specialist_outputs],
+            orchestrator_summary=str(data.get("orchestrator_summary") or ""),
+            agent_outputs=specialist_outputs,
         )
         self.cache.set(cache_key, result.model_dump(mode="json"), ttl=self.settings.ai_cache_ttl_seconds)
         return result

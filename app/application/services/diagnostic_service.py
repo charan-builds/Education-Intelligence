@@ -6,11 +6,14 @@ from app.core.feature_flags import FeatureFlagService
 from app.domain.engines.adaptive_testing_engine import AdaptiveTestingEngine
 from app.domain.engines.weakness_modeling_engine import WeaknessModelingEngine
 from app.application.services.learning_event_service import LearningEventService
+from app.application.services.ml_platform_service import MLPlatformService
 from app.application.services.retention_service import RetentionService
+from app.application.services.skill_vector_service import SkillVectorService
 from app.infrastructure.repositories.goal_repository import GoalRepository
 from app.infrastructure.repositories.diagnostic_repository import DiagnosticRepository
+from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
 from app.infrastructure.repositories.topic_repository import TopicRepository
-from app.application.exceptions import NotFoundError
+from app.application.exceptions import NotFoundError, ValidationError
 
 
 class DiagnosticService:
@@ -19,11 +22,14 @@ class DiagnosticService:
         self.diagnostic_repository = DiagnosticRepository(session)
         self.topic_repository = TopicRepository(session)
         self.goal_repository = GoalRepository(session)
+        self.roadmap_repository = RoadmapRepository(session)
         self.adaptive_engine = AdaptiveTestingEngine()
         self.weakness_engine = WeaknessModelingEngine()
         self.feature_flag_service = FeatureFlagService(session)
         self.learning_event_service = LearningEventService(session)
         self.retention_service = RetentionService(session)
+        self.skill_vector_service = SkillVectorService(session)
+        self.ml_platform_service = MLPlatformService(session)
 
     @staticmethod
     def _normalize_answer(value: str) -> str:
@@ -43,13 +49,121 @@ class DiagnosticService:
 
     async def start_test(self, user_id: int, goal_id: int, tenant_id: int = 1):
         try:
-            test = await self.diagnostic_repository.create_test(
+            goal = await self.goal_repository.get_by_id(tenant_id=tenant_id, goal_id=goal_id)
+            if goal is None:
+                raise NotFoundError("Goal not found")
+            existing = await self.diagnostic_repository.get_latest_open_test_for_user(
                 user_id=user_id,
                 goal_id=goal_id,
-                started_at=datetime.now(timezone.utc),
+                tenant_id=tenant_id,
             )
+            if existing is not None:
+                return existing
+            test = await self.diagnostic_repository.create_test(user_id=user_id, goal_id=goal_id, started_at=datetime.now(timezone.utc))
             await self.session.commit()
             return test
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def get_or_resume_test(self, *, test_id: int, user_id: int, tenant_id: int):
+        test = await self.diagnostic_repository.get_test_for_user(test_id, user_id, tenant_id)
+        if test is None:
+            raise NotFoundError("Test not found")
+        answers = await self.diagnostic_repository.list_answers_for_test(test_id=test.id)
+        return test, answers
+
+    async def get_next_question(self, *, test_id: int, user_id: int, tenant_id: int) -> dict | None:
+        test, answers = await self.get_or_resume_test(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
+        previous_answers = [
+            {
+                "question_id": answer.question_id,
+                "user_answer": answer.user_answer,
+                "time_taken": answer.time_taken,
+                "score": answer.score,
+            }
+            for answer in answers
+        ]
+        question = await self.select_next_question(
+            goal_id=test.goal_id,
+            previous_answers=previous_answers,
+            tenant_id=tenant_id,
+        )
+        if question is None:
+            return None
+        return {"test_id": test.id, **question}
+
+    async def answer_question(
+        self,
+        *,
+        test_id: int,
+        user_id: int,
+        tenant_id: int,
+        question_id: int,
+        user_answer: str,
+        time_taken: float,
+    ) -> dict:
+        try:
+            test = await self.diagnostic_repository.get_test_for_user(
+                test_id,
+                user_id,
+                tenant_id,
+                for_update=True,
+            )
+            if test is None:
+                raise NotFoundError("Test not found")
+            existing_answers = await self.diagnostic_repository.list_answers_for_test(test_id=test.id)
+            if test.completed_at is not None:
+                raise ValidationError("Diagnostic test already completed")
+
+            next_question = await self.get_next_question(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
+            if next_question is None:
+                raise ValidationError("Diagnostic is already complete")
+            if int(next_question["id"]) != int(question_id):
+                raise ValidationError("Question does not match the expected next diagnostic step")
+
+            question = await self.topic_repository.get_question(question_id, tenant_id)
+            if question is None:
+                raise NotFoundError(f"Question {question_id} not found")
+
+            score = self._score_answer(
+                question.correct_answer,
+                user_answer,
+                getattr(question, "accepted_answers", []),
+            )
+            await self.diagnostic_repository.upsert_answer(
+                test_id=test_id,
+                question_id=question_id,
+                user_answer=user_answer,
+                score=score,
+                time_taken=time_taken,
+            )
+            await self.learning_event_service.track_question_answered(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                topic_id=question.topic_id,
+                diagnostic_test_id=test_id,
+                question_id=question.id,
+                score=score,
+                time_taken=time_taken,
+                idempotency_key=f"diagnostic-answer:{tenant_id}:{user_id}:{test_id}:{question.id}",
+                commit=False,
+            )
+            await self.skill_vector_service.update_from_diagnostic_answer(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                topic_id=question.topic_id,
+                score=score,
+                time_taken_seconds=time_taken,
+                answered_at=datetime.now(timezone.utc),
+            )
+            await self.session.commit()
+            return {
+                "test_id": test_id,
+                "question_id": question_id,
+                "answered_count": len(existing_answers) + (0 if any(a.question_id == question_id for a in existing_answers) else 1),
+                "completed_at": test.completed_at,
+            }
         except Exception:
             await self.session.rollback()
             raise
@@ -62,36 +176,60 @@ class DiagnosticService:
         answers: list[dict],
     ):
         try:
-            test = await self.diagnostic_repository.get_test_for_user(test_id, user_id, tenant_id)
+            test = await self.diagnostic_repository.get_test_for_user(test_id, user_id, tenant_id, for_update=True)
             if not test:
                 raise NotFoundError("Test not found")
+            if test.completed_at is not None:
+                return test
+
+            question_ids = [int(answer["question_id"]) for answer in answers]
+            question_rows = await self.topic_repository.list_questions_by_ids(
+                tenant_id=tenant_id,
+                question_ids=question_ids,
+            )
+            questions_by_id = {int(question.id): question for question in question_rows}
 
             for answer in answers:
-                question = await self.topic_repository.get_question(answer["question_id"])
+                question = questions_by_id.get(int(answer["question_id"]))
                 if question is None:
                     raise NotFoundError(f"Question {answer['question_id']} not found")
+                existing_answer = await self.diagnostic_repository.get_answer_for_test_question(
+                    test_id=test_id,
+                    question_id=answer["question_id"],
+                    for_update=True,
+                )
                 score = self._score_answer(
                     question.correct_answer,
                     answer["user_answer"],
                     getattr(question, "accepted_answers", []),
                 )
-                await self.diagnostic_repository.add_answer(
+                await self.diagnostic_repository.upsert_answer(
                     test_id=test_id,
                     question_id=answer["question_id"],
                     user_answer=answer["user_answer"],
                     score=score,
                     time_taken=answer["time_taken"],
                 )
-                await self.learning_event_service.track_question_answered(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    topic_id=question.topic_id,
-                    diagnostic_test_id=test_id,
-                    question_id=question.id,
-                    score=score,
-                    time_taken=answer["time_taken"],
-                    commit=False,
-                )
+                if existing_answer is None:
+                    await self.learning_event_service.track_question_answered(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        topic_id=question.topic_id,
+                        diagnostic_test_id=test_id,
+                        question_id=question.id,
+                        score=score,
+                        time_taken=answer["time_taken"],
+                        idempotency_key=f"diagnostic-answer:{tenant_id}:{user_id}:{test_id}:{question.id}",
+                        commit=False,
+                    )
+                    await self.skill_vector_service.update_from_diagnostic_answer(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        topic_id=question.topic_id,
+                        score=score,
+                        time_taken_seconds=answer["time_taken"],
+                        answered_at=datetime.now(timezone.utc),
+                    )
 
             await self.diagnostic_repository.complete_test(test, datetime.now(timezone.utc))
             topic_scores = await self.diagnostic_repository.topic_scores_for_test(test_id, user_id, tenant_id)
@@ -109,16 +247,53 @@ class DiagnosticService:
                 user_id=user_id,
                 diagnostic_test_id=test_id,
                 goal_id=test.goal_id,
+                idempotency_key=f"diagnostic-complete:{tenant_id}:{user_id}:{test_id}",
                 commit=False,
             )
             await self.session.commit()
+            await self.ml_platform_service.build_feature_snapshot(user_id=user_id, tenant_id=tenant_id)
             return test
         except Exception:
             await self.session.rollback()
             raise
 
-    async def get_result(self, test_id: int, user_id: int, tenant_id: int) -> dict[int, float]:
-        return await self.diagnostic_repository.topic_scores_for_test(test_id, user_id, tenant_id)
+    async def finalize_test(self, *, test_id: int, user_id: int, tenant_id: int):
+        test, answers = await self.get_or_resume_test(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
+        if test.completed_at is not None:
+            return test
+        next_question = await self.get_next_question(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
+        if next_question is not None:
+            raise ValidationError("Diagnostic still has unanswered questions")
+        return await self.submit_answers(
+            test_id=test_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            answers=[
+                {
+                    "question_id": answer.question_id,
+                    "user_answer": answer.user_answer,
+                    "time_taken": answer.time_taken,
+                }
+                for answer in answers
+            ],
+        )
+
+    async def get_result(self, test_id: int, user_id: int, tenant_id: int) -> dict:
+        scores = await self.diagnostic_repository.topic_scores_for_test(test_id, user_id, tenant_id)
+        test = await self.diagnostic_repository.get_test_for_user(test_id, user_id, tenant_id)
+        if not test:
+            raise NotFoundError("Test not found")
+        roadmap = await self.roadmap_repository.get_by_identity(
+            user_id=user_id,
+            goal_id=test.goal_id,
+            test_id=test_id,
+            tenant_id=tenant_id,
+        )
+        return {
+            "test_id": test_id,
+            "topic_scores": scores,
+            "roadmap": roadmap,
+        }
 
     async def select_next_question(
         self,

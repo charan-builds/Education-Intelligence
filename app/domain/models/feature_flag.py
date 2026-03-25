@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.domain.models.base import Base
@@ -16,4 +16,7 @@ class FeatureFlag(Base):
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     feature_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rollout_percentage: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    audience_filter_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    experiment_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

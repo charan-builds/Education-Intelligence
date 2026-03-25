@@ -22,6 +22,30 @@ class AdaptiveSelectionResult:
     strategy: str
     weakness_topic_ids: list[int]
 
+    @property
+    def id(self) -> int:
+        return self.question.id
+
+    @property
+    def topic_id(self) -> int:
+        return self.question.topic_id
+
+    @property
+    def difficulty(self) -> int:
+        return self.question.difficulty
+
+    @property
+    def question_text(self) -> str:
+        return self.question.question_text
+
+    @property
+    def question_type(self) -> str:
+        return self.question.question_type
+
+    @property
+    def answer_options(self) -> list[str] | None:
+        return self.question.answer_options
+
 
 class AdaptiveTestingEngine:
     EASY = 1

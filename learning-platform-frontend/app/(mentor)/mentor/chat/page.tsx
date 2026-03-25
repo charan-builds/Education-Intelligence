@@ -1,7 +1,6 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useMutation } from "@tanstack/react-query";
 import { Copy, RefreshCw, Send, Sparkles } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
@@ -16,7 +15,6 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { useRealtime } from "@/components/providers/RealtimeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { useMentorWorkspace } from "@/hooks/useDashboard";
-import { chatWithMentor } from "@/services/mentorService";
 
 type ChatMessage = {
   id: number;
@@ -31,12 +29,14 @@ export default function MentorChatPage() {
   const { user } = useAuth();
   const workspace = useMentorWorkspace();
   const { toast } = useToast();
-  const { lastMentorChunk } = useRealtime();
+  const { lastMentorChunk, lastMentorReply, sendMentorMessage } = useRealtime();
   const searchParams = useSearchParams();
   const [input, setInput] = useState("");
   const [streamingId, setStreamingId] = useState<number | null>(null);
   const [draftResponse, setDraftResponse] = useState("");
   const [lastPrompt, setLastPrompt] = useState("");
+  const [pendingRequestId, setPendingRequestId] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 1,
@@ -68,77 +68,78 @@ export default function MentorChatPage() {
   }, [lastMentorChunk, messages, streamingId]);
 
   useEffect(() => {
+    if (!lastMentorReply || !pendingRequestId || !streamingId) {
+      return;
+    }
+    if (lastMentorReply.requestId !== pendingRequestId) {
+      return;
+    }
+    setMessages((current) =>
+      current.map((message) =>
+        message.id === streamingId
+          ? {
+              ...message,
+              text: lastMentorReply.reply,
+              metadata: lastMentorReply.usedAi
+                ? `AI-backed mentor reply • ${lastMentorReply.requestId}`
+                : `Rule-based fallback reply • ${lastMentorReply.requestId}`,
+              provider: lastMentorReply.provider ?? null,
+              whyRecommended: lastMentorReply.whyRecommended ?? [],
+            }
+          : message,
+      ),
+    );
+    setStreamingId(null);
+    setDraftResponse("");
+    setPendingRequestId(null);
+    setIsSending(false);
+    setInput("");
+  }, [lastMentorReply, pendingRequestId, streamingId]);
+
+  useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [draftResponse, messages]);
 
-  const chatMutation = useMutation({
-    mutationFn: chatWithMentor,
-    onSuccess: async (response, variables) => {
-      const learnerMessage = input.trim();
-      const requestId = variables.request_id ?? `mentor-${Date.now()}`;
-      const baseId = messages.length + 1;
-      setMessages((current) => {
-        return [
-          ...current,
-          { id: baseId, role: "learner", text: learnerMessage },
-          {
-            id: baseId + 1,
-            role: "mentor",
-            text: "",
-            metadata: requestId,
-            provider: response.provider,
-            whyRecommended: response.why_recommended ?? [],
-          },
-        ];
-      });
-      const newMentorId = baseId + 1;
-      setStreamingId(newMentorId);
-      setDraftResponse("");
-      window.setTimeout(() => {
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === newMentorId
-              ? {
-                  ...message,
-                  text: response.reply,
-                  metadata: response.used_ai ? `AI-backed mentor reply • ${requestId}` : `Rule-based fallback reply • ${requestId}`,
-                  provider: response.provider ?? null,
-                  whyRecommended: response.why_recommended ?? [],
-                }
-              : message,
-          ),
-        );
-        setStreamingId(null);
-        setDraftResponse("");
-      }, 650);
-      setLastPrompt(learnerMessage);
-      setInput("");
-    },
-    onError: () => {
-      toast({
-        title: "Mentor chat failed",
-        description: "The mentor endpoint could not return a response.",
-        variant: "error",
-      });
-    },
-  });
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canSend || !user?.user_id || !user?.tenant_id) {
+  function submitPrompt(prompt: string) {
+    if (!prompt.trim() || !user?.user_id || !user?.tenant_id || isSending) {
       return;
     }
-
-    await chatMutation.mutateAsync({
-      message: input.trim(),
-      user_id: user.user_id,
-      tenant_id: user.tenant_id,
-      request_id: `mentor-${Date.now()}`,
-      chat_history: messages.slice(-6).map((message) => ({
+    const learnerMessage = prompt.trim();
+    const requestId = `mentor-${Date.now()}`;
+    const baseId = messages.length + 1;
+    setMessages((current) => [
+      ...current,
+      { id: baseId, role: "learner", text: learnerMessage },
+      {
+        id: baseId + 1,
+        role: "mentor",
+        text: "",
+        metadata: requestId,
+      },
+    ]);
+    setStreamingId(baseId + 1);
+    setDraftResponse("");
+    setPendingRequestId(requestId);
+    setIsSending(true);
+    setLastPrompt(learnerMessage);
+    sendMentorMessage({
+      message: learnerMessage,
+      userId: user.user_id,
+      tenantId: user.tenant_id,
+      requestId,
+      chatHistory: messages.slice(-6).map((message) => ({
         role: message.role === "learner" ? "user" : "assistant",
         content: message.text,
       })),
     });
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!canSend) {
+      return;
+    }
+    submitPrompt(input);
   }
 
   async function handleCopy(text: string) {
@@ -147,15 +148,10 @@ export default function MentorChatPage() {
   }
 
   async function handleRegenerate() {
-    if (!lastPrompt || !user?.user_id || !user?.tenant_id || chatMutation.isPending) {
+    if (!lastPrompt || !user?.user_id || !user?.tenant_id || isSending) {
       return;
     }
-    setInput(lastPrompt);
-    await chatMutation.mutateAsync({
-      message: lastPrompt,
-      user_id: user.user_id,
-      tenant_id: user.tenant_id,
-    });
+    submitPrompt(lastPrompt);
   }
 
   return (
@@ -163,7 +159,7 @@ export default function MentorChatPage() {
       <PageHeader
         eyebrow="Mentor chat"
         title="Conversation workspace"
-        description="This chat sends messages to `/mentor/chat`, which now uses learner context plus the AI service when the tenant feature flag is enabled."
+        description="This workspace now streams mentor replies over the authenticated realtime channel, using learner context and AI assistance when the tenant feature flag allows it."
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -172,7 +168,7 @@ export default function MentorChatPage() {
           description="Mentor replies are AI-backed when enabled and fall back to deterministic guidance if the AI path is unavailable."
           actions={
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" onClick={handleRegenerate} disabled={!lastPrompt || chatMutation.isPending}>
+              <Button variant="secondary" onClick={handleRegenerate} disabled={!lastPrompt || isSending}>
                 <RefreshCw className="h-4 w-4" />
                 Regenerate
               </Button>
@@ -239,7 +235,7 @@ export default function MentorChatPage() {
               })}
             </AnimatePresence>
 
-            {chatMutation.isPending ? (
+            {isSending ? (
               <div className="mr-auto max-w-[88%]">
                 <SmartLoadingState
                   compact
@@ -264,8 +260,8 @@ export default function MentorChatPage() {
                   <Sparkles className="h-3.5 w-3.5 text-teal-600 dark:text-teal-300" />
                   Context-aware mentor chat
                 </div>
-                <Button type="submit" disabled={!canSend || chatMutation.isPending}>
-                  {chatMutation.isPending ? "Sending..." : "Send"}
+                <Button type="submit" disabled={!canSend || isSending}>
+                  {isSending ? "Sending..." : "Send"}
                   <Send className="h-4 w-4" />
                 </Button>
               </div>

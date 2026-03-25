@@ -31,6 +31,7 @@ class AIContextBuilder:
         roadmap_progress: dict,
         weak_topics: list[int],
         topic_scores: dict[int, float],
+        cognitive_model: dict | None = None,
     ) -> dict:
         user = await self.session.get(User, user_id)
 
@@ -41,7 +42,7 @@ class AIContextBuilder:
             select(LearningEvent)
             .where(LearningEvent.tenant_id == tenant_id, LearningEvent.user_id == user_id)
             .order_by(LearningEvent.created_at.desc())
-            .limit(8)
+            .limit(6)
         )
         events = events_result.scalars().all()
         recent_activity: list[dict] = []
@@ -65,7 +66,7 @@ class AIContextBuilder:
                 "topic_name": topic_names.get(int(topic_id), f"Topic {topic_id}"),
                 "score": round(float(topic_scores.get(topic_id, 0.0)), 2),
             }
-            for topic_id in weak_topics[:5]
+            for topic_id in weak_topics[:4]
         ]
         strong_topic_details = [
             {
@@ -73,7 +74,7 @@ class AIContextBuilder:
                 "topic_name": topic_names.get(int(topic_id), f"Topic {topic_id}"),
                 "score": round(float(score), 2),
             }
-            for topic_id, score in sorted(topic_scores.items(), key=lambda item: item[1], reverse=True)[:5]
+            for topic_id, score in sorted(topic_scores.items(), key=lambda item: item[1], reverse=True)[:3]
             if float(score) >= 75.0
         ]
 
@@ -96,9 +97,10 @@ class AIContextBuilder:
                 "learner_summary": memory_snapshot.learner_summary,
                 "weak_topics_history": memory_snapshot.weak_topics,
                 "strong_topics_history": memory_snapshot.strong_topics,
-                "past_mistakes": memory_snapshot.past_mistakes,
-                "improvement_signals": memory_snapshot.improvement_signals,
+                "past_mistakes": memory_snapshot.past_mistakes[:3],
+                "improvement_signals": memory_snapshot.improvement_signals[:3],
                 "last_session_summary": memory_snapshot.last_session_summary,
-                "recent_session_summaries": memory_snapshot.recent_session_summaries,
+                "recent_session_summaries": memory_snapshot.recent_session_summaries[:2],
             },
+            "cognitive_model": cognitive_model or {},
         }

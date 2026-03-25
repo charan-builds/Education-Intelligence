@@ -28,7 +28,7 @@ async def create_user(
 @router.get("", response_model=UserPageResponse)
 async def list_users(
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_roles("admin", "super_admin")),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
     return await UserService(db).list_users_page(
@@ -41,4 +41,4 @@ async def list_users(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user=Depends(get_current_user)):
-    return current_user
+    return current_user.user

@@ -1,6 +1,7 @@
 import { apiClient } from "@/services/apiClient";
 import type {
   DiagnosticAnswerPayload,
+  DiagnosticAnswerResponse,
   DiagnosticQuestion,
   DiagnosticResult,
   DiagnosticSession,
@@ -11,13 +12,22 @@ export async function startDiagnostic(goal_id: number): Promise<DiagnosticSessio
   return data;
 }
 
-export async function submitAnswers(
+export async function answerDiagnosticQuestion(
   test_id: number,
-  answers: DiagnosticAnswerPayload[],
-): Promise<DiagnosticSession> {
+  answer: DiagnosticAnswerPayload,
+): Promise<DiagnosticAnswerResponse> {
+  const { data } = await apiClient.post<DiagnosticAnswerResponse>("/diagnostic/answer", {
+    test_id,
+    question_id: answer.question_id,
+    user_answer: answer.user_answer,
+    time_taken: answer.time_taken,
+  });
+  return data;
+}
+
+export async function submitAnswers(test_id: number): Promise<DiagnosticSession> {
   const { data } = await apiClient.post<DiagnosticSession>("/diagnostic/submit", {
     test_id,
-    answers,
   });
   return data;
 }
@@ -30,12 +40,13 @@ export async function getDiagnosticResult(test_id: number): Promise<DiagnosticRe
 }
 
 export async function getNextDiagnosticQuestion(
-  goal_id: number,
-  previous_answers: DiagnosticAnswerPayload[],
+  test_id: number,
 ): Promise<DiagnosticQuestion | null> {
-  const { data } = await apiClient.post<DiagnosticQuestion | null>("/diagnostic/next-question", {
-    goal_id,
-    previous_answers,
-  });
+  const { data } = await apiClient.get<DiagnosticQuestion | null>(`/diagnostic/next/${test_id}`);
+  return data;
+}
+
+export async function getDiagnosticSession(test_id: number): Promise<DiagnosticSession> {
+  const { data } = await apiClient.get<DiagnosticSession>(`/diagnostic/${test_id}`);
   return data;
 }

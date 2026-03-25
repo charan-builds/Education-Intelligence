@@ -118,7 +118,7 @@ class AnalyticsService:
         return await self._roadmap_completion_rate(tenant_id)
 
     async def aggregated_metrics(self, tenant_id: int) -> dict:
-        cache_key = self.cache_service.build_key("analytics:overview", tenant_id=tenant_id)
+        cache_key = await self.cache_service.build_versioned_key("analytics:overview", tenant_id=tenant_id)
         async def _factory() -> dict:
             topic_distribution = await self.topic_mastery_distribution(tenant_id)
             diagnostic_rate = await self.diagnostic_completion_rate(tenant_id)
@@ -132,7 +132,7 @@ class AnalyticsService:
         return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
 
     async def topic_mastery_summary(self, tenant_id: int) -> dict:
-        cache_key = self.cache_service.build_key("analytics:topic-mastery", tenant_id=tenant_id)
+        cache_key = await self.cache_service.build_versioned_key("analytics:topic-mastery", tenant_id=tenant_id)
         async def _factory() -> dict:
             return {
                 "tenant_id": tenant_id,
@@ -198,8 +198,13 @@ class AnalyticsService:
             )
         return learners
 
-    async def roadmap_progress_summary(self, tenant_id: int) -> dict:
-        cache_key = self.cache_service.build_key("analytics:roadmap-progress", tenant_id=tenant_id)
+    async def roadmap_progress_summary(self, tenant_id: int, *, limit: int = 20, offset: int = 0) -> dict:
+        cache_key = await self.cache_service.build_versioned_key(
+            "analytics:roadmap-progress",
+            tenant_id=tenant_id,
+            limit=limit,
+            offset=offset,
+        )
         async def _factory() -> dict:
             learners = await self._roadmap_progress_rows(tenant_id)
             total_completion = sum(int(learner["completion_percent"]) for learner in learners)
@@ -208,6 +213,8 @@ class AnalyticsService:
             student_count = len(learners)
             average_completion = round(total_completion / student_count) if student_count > 0 else 0
             average_mastery = round(total_mastery / student_count) if student_count > 0 else 0
+            page_items = learners[offset : offset + limit]
+            next_offset = offset + limit if (offset + limit) < student_count else None
 
             return {
                 "tenant_id": tenant_id,
@@ -225,8 +232,15 @@ class AnalyticsService:
                         "completion_percent": int(learner["completion_percent"]),
                         "mastery_percent": int(learner["mastery_percent"]),
                     }
-                    for learner in learners
+                    for learner in page_items
                 ],
+                "meta": {
+                    "total": student_count,
+                    "limit": limit,
+                    "offset": offset,
+                    "next_offset": next_offset,
+                    "next_cursor": None,
+                },
             }
         return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
 

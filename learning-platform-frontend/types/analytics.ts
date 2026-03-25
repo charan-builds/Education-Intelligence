@@ -78,3 +78,42 @@ export type RetentionAnalytics = {
   retention_curve: RetentionCurvePoint[];
   weak_retention_topics: WeakRetentionTopic[];
 };
+
+export type SkillVectorItem = {
+  topic_id: number;
+  topic_name: string;
+  mastery_score: number;
+  confidence_score: number;
+  last_updated: string;
+};
+
+export type LearnerSkillVectorResponse = {
+  tenant_id: number;
+  user_id: number;
+  vectors: SkillVectorItem[];
+};
+
+export type WeakTopicInsight = {
+  topic_id: number;
+  topic_name: string;
+  mastery_score: number;
+  confidence_score: number;
+};
+
+export type LearningTrendPoint = {
+  label: string;
+  events: number;
+  minutes_spent: number;
+  completions: number;
+  retries: number;
+};
+
+export type LearnerIntelligenceOverview = {
+  tenant_id: number;
+  user_id: number;
+  mastery_avg: number;
+  confidence_avg: number;
+  learning_speed_seconds: number;
+  retry_count: number;
+  tracked_topics: number;
+};

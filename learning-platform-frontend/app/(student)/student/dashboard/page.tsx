@@ -38,7 +38,7 @@ import { useStudentDashboard } from "@/hooks/useDashboard";
 
 export default function StudentDashboardPage() {
   const dashboard = useStudentDashboard();
-  const { activeUsers, liveEvents } = useRealtime();
+  const { activeUsers, connectionStatus, liveEvents } = useRealtime();
   const isLoading = dashboard.queries.dashboardQuery.isLoading;
   const topWeakTopic = dashboard.weakTopics[0];
   const nextReview = dashboard.retention.due_reviews[0];
@@ -127,6 +127,18 @@ export default function StudentDashboardPage() {
             <StatusPill label={`${dashboard.kpis.completionPercent}% complete`} tone="success" />
             <StatusPill label={`${dashboard.kpis.streakDays} day streak`} tone="warning" />
             <StatusPill label={`${dashboard.kpis.focusScore} focus score`} tone="default" />
+            <StatusPill
+              label={
+                connectionStatus === "live"
+                  ? `${activeUsers} learners live`
+                  : connectionStatus === "reconnecting"
+                    ? "Reconnecting live sync"
+                    : connectionStatus === "connecting"
+                      ? "Connecting live sync"
+                      : "Live sync offline"
+              }
+              tone={connectionStatus === "live" ? "success" : connectionStatus === "offline" ? "danger" : "warning"}
+            />
             <StatusPill label={adaptiveUI.emotionalState.label} tone={adaptiveUI.emotionalState.tone === "supportive" ? "warning" : "default"} />
             <StatusPill label={`Level ${Math.max(1, Math.floor(dashboard.kpis.xp / 250) + 1)}`} tone="default" />
           </>
@@ -209,6 +221,55 @@ export default function StudentDashboardPage() {
 
             {adaptiveUI.visibleSections.demoMode ? <DemoModeShowcase steps={demoSteps} /> : null}
           </div>
+
+          <SurfaceCard
+            title="Cognitive model"
+            description="The platform now detects confusion, repeated misunderstanding patterns, and the teaching style most likely to help this learner."
+          >
+            <div className="grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
+              <div className="rounded-[28px] border border-slate-200 bg-white/70 p-5 dark:border-slate-700 dark:bg-slate-900/70">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Current teaching mode</p>
+                <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-100">
+                  {dashboard.cognitiveModel.confusion_level} confusion
+                </p>
+                <p className="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-400">
+                  {dashboard.cognitiveModel.teaching_style}
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-2xl bg-amber-50/80 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Confusion signals</p>
+                  <div className="mt-3 space-y-2 text-sm leading-7 text-amber-950">
+                    {(dashboard.cognitiveModel.confusion_signals.length
+                      ? dashboard.cognitiveModel.confusion_signals
+                      : ["No major confusion signals detected right now."]).map((item) => (
+                      <p key={item}>- {item}</p>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-2xl bg-indigo-50/80 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-700">Misunderstanding patterns</p>
+                  <div className="mt-3 space-y-2 text-sm leading-7 text-indigo-950">
+                    {(dashboard.cognitiveModel.misunderstanding_patterns.length
+                      ? dashboard.cognitiveModel.misunderstanding_patterns
+                      : ["No repeated misunderstanding pattern is dominant yet."]).map((item) => (
+                      <p key={item}>- {item}</p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 rounded-[24px] border border-emerald-200 bg-emerald-50/70 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Adaptive teaching plan</p>
+              <div className="mt-3 grid gap-2 text-sm leading-7 text-emerald-950 md:grid-cols-2">
+                {(dashboard.cognitiveModel.adaptive_actions.length
+                  ? dashboard.cognitiveModel.adaptive_actions
+                  : ["Keep alternating explanation and practice."]).map((item) => (
+                  <p key={item}>- {item}</p>
+                ))}
+              </div>
+            </div>
+          </SurfaceCard>
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <MetricCard
@@ -549,10 +610,18 @@ export default function StudentDashboardPage() {
                 />
                 <RecommendationPanel
                   title="Contextual guidance"
-                  description="Suggestions are now prioritized against your current state, not shown as a static list."
+                  description="Each recommendation includes the reason it surfaced now, so the next move feels obvious during the demo."
                   items={[
-                    adaptiveUI.nextBestAction.description,
-                    ...dashboard.mentorSuggestions.map((item) => `${item.message} Why: ${item.why}`),
+                    {
+                      title: adaptiveUI.nextBestAction.title,
+                      message: adaptiveUI.nextBestAction.description,
+                      why: "This is the current highest-leverage action based on weak topics, retention timing, and active roadmap state.",
+                      confidenceLabel: "Best next action",
+                      tone: "success" as const,
+                      href: "/student/roadmap",
+                      ctaLabel: "Open roadmap",
+                    },
+                    ...dashboard.recommendations,
                   ].slice(0, 4)}
                 />
               </div>

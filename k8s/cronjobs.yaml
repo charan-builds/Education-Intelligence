@@ -12,18 +12,75 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: db-backup
-              image: postgres:16-alpine
+              image: ghcr.io/your-org/learning-platform-backup:latest
               command:
                 - /bin/sh
                 - -c
                 - |
-                  pg_dump "$DATABASE_URL" | gzip > /backup/learning-platform-$(date +%F).sql.gz
+                  set -euo pipefail
+                  TS="$(date +%F-%H%M%S)"
+                  FILE="/tmp/learning-platform-${TS}.sql.gz"
+                  CHECKSUM="/tmp/learning-platform-${TS}.sha256"
+                  MANIFEST="/tmp/learning-platform-${TS}.manifest.json"
+                  pg_dump "$DATABASE_URL" | gzip > "${FILE}"
+                  sha256sum "${FILE}" > "${CHECKSUM}"
+                  printf '{"created_at":"%s","file":"%s"}\n' "${TS}" "$(basename "${FILE}")" > "${MANIFEST}"
+                  aws s3 cp "${FILE}" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+                  aws s3 cp "${CHECKSUM}" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+                  aws s3 cp "${MANIFEST}" "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/"
+                  if [ -n "${PUSHGATEWAY_URL:-}" ]; then
+                    cat <<EOF | curl --silent --show-error --fail --data-binary @- "${PUSHGATEWAY_URL%/}/metrics/job/db_backup/instance/$(hostname)"
+# TYPE learning_platform_backup_last_success_timestamp_seconds gauge
+learning_platform_backup_last_success_timestamp_seconds $(date +%s)
+# TYPE learning_platform_backup_last_size_bytes gauge
+learning_platform_backup_last_size_bytes $(wc -c < "${FILE}")
+EOF
+                  fi
               envFrom:
                 - secretRef:
                     name: learning-platform-secrets
-              volumeMounts:
-                - name: backup
-                  mountPath: /backup
-          volumes:
-            - name: backup
-              emptyDir: {}
+              env:
+                - name: BACKUP_PREFIX
+                  value: "db-backups"
+                - name: PUSHGATEWAY_URL
+                  value: "http://pushgateway:9091"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-restore-verify
+  namespace: learning-platform
+spec:
+  schedule: "0 5 * * 0"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: db-restore-verify
+              image: ghcr.io/your-org/learning-platform-backup:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -euo pipefail
+                  LATEST="$(aws s3 ls "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/" | awk '{print $4}' | grep -E '\.sql\.gz$' | sort | tail -n 1)"
+                  aws s3 cp "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/${LATEST}" /tmp/latest.sql.gz
+                  aws s3 cp "s3://${BACKUP_BUCKET}/${BACKUP_PREFIX}/${LATEST}.sha256" /tmp/latest.sql.gz.sha256
+                  sha256sum -c /tmp/latest.sql.gz.sha256
+                  gunzip -c /tmp/latest.sql.gz | psql "${RESTORE_VERIFY_DATABASE_URL}"
+                  if [ -n "${PUSHGATEWAY_URL:-}" ]; then
+                    cat <<EOF | curl --silent --show-error --fail --data-binary @- "${PUSHGATEWAY_URL%/}/metrics/job/db_restore_verify/instance/$(hostname)"
+# TYPE learning_platform_restore_last_success_timestamp_seconds gauge
+learning_platform_restore_last_success_timestamp_seconds $(date +%s)
+EOF
+                  fi
+              envFrom:
+                - secretRef:
+                    name: learning-platform-secrets
+              env:
+                - name: BACKUP_PREFIX
+                  value: "db-backups"
+                - name: PUSHGATEWAY_URL
+                  value: "http://pushgateway:9091"

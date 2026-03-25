@@ -4,7 +4,7 @@ metadata:
   name: celery-worker
   namespace: learning-platform
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
       app: celery-worker
@@ -17,12 +17,16 @@ spec:
         - name: celery-worker
           image: ghcr.io/your-org/learning-platform-api:latest
           imagePullPolicy: IfNotPresent
-          command: ["celery", "-A", "app.infrastructure.jobs.celery_app:celery_app", "worker", "--loglevel=info", "--pool=solo"]
+          command: ["celery", "-A", "app.infrastructure.jobs.celery_app:celery_app", "worker", "--loglevel=info", "--pool=prefork", "--concurrency=4"]
           envFrom:
             - configMapRef:
                 name: learning-platform-config
             - secretRef:
                 name: learning-platform-secrets
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sh", "-c", "celery -A app.infrastructure.jobs.celery_app:celery_app control cancel_consumer celery && sleep 15"]
           resources:
             requests:
               cpu: "250m"

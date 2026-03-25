@@ -10,15 +10,17 @@ import MasteryPieChart from "@/components/charts/MasteryPieChart";
 import ProgressLineChart from "@/components/charts/ProgressLineChart";
 import PageHeader from "@/components/layouts/PageHeader";
 import Button from "@/components/ui/Button";
+import EmptyState from "@/components/ui/EmptyState";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import StatusPill from "@/components/ui/StatusPill";
-import { useMentorWorkspace } from "@/hooks/useDashboard";
+import { normalizeRoadmapGenerationStatus, useMentorWorkspace } from "@/hooks/useDashboard";
 import { runAutonomousAgent } from "@/services/mentorInsightsService";
 
 export default function MentorDashboardPage() {
   const workspace = useMentorWorkspace();
   const queryClient = useQueryClient();
+  const roadmapState = normalizeRoadmapGenerationStatus(workspace.roadmap?.status);
 
   const runAgentMutation = useMutation({
     mutationFn: runAutonomousAgent,
@@ -60,15 +62,28 @@ export default function MentorDashboardPage() {
         <MetricCard title="Agent decisions" value={workspace.kpis.agentDecisions} icon={<Sparkles className="h-5 w-5" />} />
       </div>
 
-      <SurfaceCard
-        title="Autonomous agent"
-        description="This agent continuously observes learner state, decides the next intervention, and explains each action in plain language."
-        actions={
-          <Button onClick={() => runAgentMutation.mutate()} disabled={runAgentMutation.isPending}>
-            Run agent cycle
-          </Button>
-        }
-      >
+      {roadmapState !== "ready" ? (
+        <EmptyState
+          title={roadmapState === "failed" ? "Learner roadmap failed" : "Learner roadmap still generating"}
+          description={
+            roadmapState === "failed"
+              ? workspace.roadmapErrorMessage ?? "Mentor guidance will become fully available after roadmap generation succeeds."
+              : "Mentor guidance is waiting on the learner roadmap so recommendations stay grounded in the actual plan."
+          }
+        />
+      ) : null}
+
+      {roadmapState === "ready" ? (
+        <>
+          <SurfaceCard
+            title="Autonomous agent"
+            description="This agent continuously observes learner state, decides the next intervention, and explains each action in plain language."
+            actions={
+              <Button onClick={() => runAgentMutation.mutate()} disabled={runAgentMutation.isPending}>
+                Run agent cycle
+              </Button>
+            }
+          >
         <div className="grid gap-4 md:grid-cols-4">
           <MetricCard title="Risk level" value={workspace.agent?.observed_state.risk_level ?? "unknown"} tone="warning" />
           <MetricCard title="Focus score" value={Math.round(workspace.agent?.observed_state.focus_score ?? 0)} tone="default" />
@@ -116,47 +131,49 @@ export default function MentorDashboardPage() {
             ))}
           </div>
         </div>
-      </SurfaceCard>
+          </SurfaceCard>
 
-      <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        <ProgressLineChart
-          title="Weekly progress"
-          description="Completion percentages returned by mentor progress analysis."
-          data={workspace.charts.progressLine}
-        />
-        <MasteryPieChart
-          title="Mentor focus mix"
-          description="A mentor-friendly summary of pending support, focus topics, and completed roadmap work."
-          data={workspace.charts.masteryPie}
-        />
-      </div>
+          <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+            <ProgressLineChart
+              title="Weekly progress"
+              description="Completion percentages returned by mentor progress analysis."
+              data={workspace.charts.progressLine}
+            />
+            <MasteryPieChart
+              title="Mentor focus mix"
+              description="A mentor-friendly summary of pending support, focus topics, and completed roadmap work."
+              data={workspace.charts.masteryPie}
+            />
+          </div>
 
-      <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-        <RecommendationPanel items={workspace.suggestions.length > 0 ? workspace.suggestions : workspace.recommendedFocus} />
-        <ActivityFeed
-          title="Guidance alerts"
-          description="Mentor notifications generated from roadmap and progress signals."
-          items={workspace.notifications.map((item: { title: string; message: string; severity: string }) => ({
-            title: item.title,
-            subtitle: item.message,
-            tone: item.severity,
-          }))}
-        />
-      </div>
+          <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+            <RecommendationPanel items={workspace.suggestions.length > 0 ? workspace.suggestions : workspace.recommendedFocus} />
+            <ActivityFeed
+              title="Guidance alerts"
+              description="Mentor notifications generated from roadmap and progress signals."
+              items={workspace.notifications.map((item: { title: string; message: string; severity: string }) => ({
+                title: item.title,
+                subtitle: item.message,
+                tone: item.severity,
+              }))}
+            />
+          </div>
 
-      <SurfaceCard title="Weak topic recommendations" description="Use these focus areas when coaching the learner through their next study block.">
-        <div className="grid gap-3 md:grid-cols-2">
-          {workspace.focusTopics.map((item) => (
-            <div
-              key={item.topicId}
-              className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70"
-            >
-              <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Topic {item.topicId}</p>
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Improvement gap: {item.gap.toFixed(1)}</p>
+          <SurfaceCard title="Weak topic recommendations" description="Use these focus areas when coaching the learner through their next study block.">
+            <div className="grid gap-3 md:grid-cols-2">
+              {workspace.focusTopics.map((item) => (
+                <div
+                  key={item.topicId}
+                  className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70"
+                >
+                  <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Topic {item.topicId}</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Improvement gap: {item.gap.toFixed(1)}</p>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </SurfaceCard>
+          </SurfaceCard>
+        </>
+      ) : null}
     </div>
   );
 }

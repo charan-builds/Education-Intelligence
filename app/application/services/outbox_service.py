@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import contextlib
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.core.metrics import (
+    event_processing_duration_seconds,
     outbox_cleanup_removed_total,
     outbox_dead_total,
     outbox_dispatched_total,
@@ -13,6 +17,9 @@ from app.core.metrics import (
     outbox_queue_depth,
     outbox_recovered_total,
 )
+from app.events.event_envelope import EventEnvelope
+from app.events.kafka_topics import ANALYTICS_TOPIC, LEARNING_EVENTS_TOPIC, NOTIFICATIONS_TOPIC
+from app.infrastructure.repositories.dead_letter_repository import DeadLetterRepository
 from app.infrastructure.repositories.outbox_repository import OutboxRepository
 
 
@@ -20,7 +27,9 @@ class OutboxService:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repository = OutboxRepository(session)
+        self.dead_letter_repository = DeadLetterRepository(session)
         self.settings = get_settings()
+        self.logger = get_logger()
 
     async def add_task_event(
         self,
@@ -43,34 +52,165 @@ class OutboxService:
         await self.refresh_queue_depth_metrics()
         return int(row.id)
 
+    async def add_kafka_event(self, *, envelope: EventEnvelope) -> int:
+        row = await self.repository.create_event(
+            tenant_id=envelope.tenant_id,
+            event_type="kafka_message",
+            payload_json=json.dumps(envelope.to_dict(), separators=(",", ":"), sort_keys=True),
+        )
+        await self.refresh_queue_depth_metrics()
+        return int(row.id)
+
+    async def add_learning_event_message(
+        self,
+        *,
+        event_id: int,
+        tenant_id: int,
+        user_id: int,
+        event_type: str,
+        schema_version: str,
+        idempotency_key: str,
+    ) -> int:
+        return await self.add_kafka_event(
+            envelope=EventEnvelope(
+                topic=LEARNING_EVENTS_TOPIC,
+                event_name="learning_event.recorded",
+                schema_version=schema_version,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                partition_key=f"{tenant_id}:{user_id}",
+                idempotency_key=idempotency_key,
+                payload={
+                    "event_id": event_id,
+                    "event_type": event_type,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                },
+            )
+        )
+
+    async def add_notification_message(
+        self,
+        *,
+        notification_id: int,
+        tenant_id: int,
+        user_id: int,
+        notification_type: str,
+        idempotency_key: str,
+    ) -> int:
+        return await self.add_kafka_event(
+            envelope=EventEnvelope(
+                topic=NOTIFICATIONS_TOPIC,
+                event_name="notification.created",
+                schema_version="v1",
+                tenant_id=tenant_id,
+                user_id=user_id,
+                partition_key=f"{tenant_id}:{user_id}",
+                idempotency_key=idempotency_key,
+                payload={
+                    "notification_id": notification_id,
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "notification_type": notification_type,
+                },
+            )
+        )
+
+    async def add_analytics_message(
+        self,
+        *,
+        tenant_id: int,
+        snapshot_type: str,
+        window_start: str,
+        window_end: str,
+        subject_id: int | None = None,
+        idempotency_key: str,
+    ) -> int:
+        return await self.add_kafka_event(
+            envelope=EventEnvelope(
+                topic=ANALYTICS_TOPIC,
+                event_name="analytics.snapshot_refreshed",
+                schema_version="v1",
+                tenant_id=tenant_id,
+                user_id=subject_id,
+                partition_key=f"{tenant_id}:{snapshot_type}:{subject_id or 'tenant'}",
+                idempotency_key=idempotency_key,
+                payload={
+                    "tenant_id": tenant_id,
+                    "snapshot_type": snapshot_type,
+                    "subject_id": subject_id,
+                    "window_start": window_start,
+                    "window_end": window_end,
+                },
+            )
+        )
+
     async def flush_pending_events(self, *, limit: int = 100) -> int:
         import json
 
+        from app.application.services.kafka_producer_service import KafkaProducerService
         from app.infrastructure.jobs.celery_app import celery_app
 
         events = await self.repository.list_pending(limit=limit)
         sent = 0
+        kafka_producer: KafkaProducerService | None = None
         for event in events:
+            started_at = datetime.now(timezone.utc)
             try:
                 await self.repository.mark_processing(event)
                 payload = json.loads(event.payload_json)
-                task_name = str(payload.get("task_name"))
-                args = payload.get("args", [])
-                kwargs = payload.get("kwargs", {})
-                celery_app.send_task(task_name, args=args, kwargs=kwargs)
+                if event.event_type == "kafka_message":
+                    kafka_producer = kafka_producer or KafkaProducerService()
+                    envelope = EventEnvelope(**payload)
+                    kafka_producer.publish(envelope)
+                    task_name = f"kafka:{envelope.event_name}"
+                else:
+                    task_name = str(payload.get("task_name"))
+                    args = payload.get("args", [])
+                    kwargs = payload.get("kwargs", {})
+                    celery_app.send_task(task_name, args=args, kwargs=kwargs)
                 await self.repository.mark_dispatched(event)
                 outbox_dispatched_total.inc()
+                event_processing_duration_seconds.labels(task_name=task_name, status="dispatched").observe(
+                    max((datetime.now(timezone.utc) - started_at).total_seconds(), 0.0)
+                )
                 sent += 1
             except Exception as exc:
                 await self.repository.mark_failed(
                     event,
                     str(exc),
-                    retry_delay_seconds=self.settings.outbox_retry_delay_seconds,
+                    retry_delay_seconds=self.settings.outbox_retry_base_delay_seconds,
                     max_attempts=self.settings.outbox_max_attempts,
                 )
                 outbox_failed_total.inc()
+                task_name = "unknown"
+                with contextlib.suppress(Exception):
+                    task_name = str(json.loads(event.payload_json).get("task_name", "unknown"))
+                event_processing_duration_seconds.labels(task_name=task_name, status="failed").observe(
+                    max((datetime.now(timezone.utc) - started_at).total_seconds(), 0.0)
+                )
                 if event.status == "dead":
+                    await self.dead_letter_repository.create_event(
+                        tenant_id=event.tenant_id,
+                        source_event_id=int(event.id),
+                        source_type="outbox",
+                        event_type=event.event_type,
+                        payload_json=event.payload_json,
+                        error_message=str(exc),
+                        attempts=int(event.attempts),
+                    )
                     outbox_dead_total.inc()
+                    self.logger.error(
+                        "outbox event moved to dead letter queue",
+                        extra={
+                            "log_data": {
+                                "outbox_event_id": int(event.id),
+                                "tenant_id": event.tenant_id,
+                                "attempts": int(event.attempts),
+                                "error_message": str(exc)[:512],
+                            }
+                        },
+                    )
         await self.session.commit()
         await self.refresh_queue_depth_metrics()
         return sent
@@ -78,13 +218,14 @@ class OutboxService:
     async def cleanup_old_events(self) -> dict[str, int]:
         removed_dispatched = await self.repository.delete_dispatched_older_than(self.settings.outbox_cleanup_days)
         removed_dead = await self.repository.delete_dead_older_than(self.settings.outbox_cleanup_days)
+        removed_dlq = await self.dead_letter_repository.delete_older_than(days=self.settings.outbox_dead_letter_retention_days)
         await self.session.commit()
         if removed_dispatched:
             outbox_cleanup_removed_total.labels(status="dispatched").inc(removed_dispatched)
         if removed_dead:
             outbox_cleanup_removed_total.labels(status="dead").inc(removed_dead)
         await self.refresh_queue_depth_metrics()
-        return {"removed_dispatched": removed_dispatched, "removed_dead": removed_dead}
+        return {"removed_dispatched": removed_dispatched, "removed_dead": removed_dead, "removed_dlq": removed_dlq}
 
     async def list_events(
         self,

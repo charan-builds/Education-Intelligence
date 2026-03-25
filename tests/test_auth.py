@@ -3,7 +3,9 @@ import pytest
 from app.core.security import (
     AuthenticationError,
     create_access_token,
+    create_refresh_token_with_jti,
     decode_access_token,
+    decode_refresh_token,
     enforce_roles,
     hash_password,
     verify_password,
@@ -30,3 +32,12 @@ def test_enforce_roles_requires_explicit_mentor_membership():
 
     with pytest.raises(AuthenticationError):
         enforce_roles("mentor", {"teacher"})
+
+
+def test_refresh_token_round_trip_with_jti():
+    token = create_refresh_token_with_jti(
+        {"sub": "12", "tenant_id": 3, "role": "student"},
+        token_id="session-123",
+    )
+    payload = decode_refresh_token(token)
+    assert payload["jti"] == "session-123"

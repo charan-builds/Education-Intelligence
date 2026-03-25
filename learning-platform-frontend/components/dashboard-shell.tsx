@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useHealthCheck } from "@/hooks/use-health-check";
+import { appRoutes, normalizeAppPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 export default function DashboardShell() {
@@ -21,7 +22,7 @@ export default function DashboardShell() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const rawNextPath = params.get("next");
-    setNextPath(rawNextPath && rawNextPath.startsWith("/") ? rawNextPath : null);
+    setNextPath(rawNextPath && rawNextPath.startsWith("/") ? normalizeAppPath(rawNextPath) : null);
   }, []);
 
   const connectionLabel = useMemo(() => {
@@ -153,17 +154,17 @@ export default function DashboardShell() {
             {
               title: "Student Panel",
               description: "Diagnostic flow, roadmap progress, mentor insights, and next learning actions.",
-              href: "/dashboard/student",
+              href: appRoutes.student.dashboard,
             },
             {
               title: "Teacher Panel",
               description: "Student progress rollups, mastery snapshots, and instructional monitoring.",
-              href: "/dashboard/teacher",
+              href: appRoutes.teacher.dashboard,
             },
             {
               title: "Admin + Super Admin",
               description: "Users, tenants, topics, questions, goals, and graph curation in connected control panels.",
-              href: "/dashboard/admin",
+              href: appRoutes.admin.dashboard,
             },
           ].map((item) => (
             <article key={item.title} className="rounded-[24px] border border-white/70 bg-white/85 p-6 shadow-lg">

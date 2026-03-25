@@ -39,10 +39,8 @@ def test_auth_register_rolls_back_on_create_failure():
 
         with pytest.raises(RuntimeError):
             await service.register(
-                tenant_id=1,
                 email="x@y.com",
                 password="secure123",
-                role=UserRole.student,
             )
 
         assert session.rollback_called is True
@@ -90,9 +88,28 @@ def test_roadmap_generate_rolls_back_on_step_failure():
     class _RoadmapRepo:
         class _RM:
             id = 1
+            steps = []
+            status = "generating"
+            error_message = None
 
-        async def create_roadmap(self, user_id, goal_id, generated_at):
-            return self._RM()
+        def __init__(self):
+            self.roadmap = self._RM()
+
+        async def get_by_identity(self, *, user_id, goal_id, test_id, tenant_id):
+            return self.roadmap
+
+        async def create_roadmap(self, user_id, goal_id, test_id, generated_at, status="generating", error_message=None):
+            self.roadmap.status = status
+            self.roadmap.error_message = error_message
+            return self.roadmap
+
+        async def mark_status(self, roadmap, *, status, error_message=None):
+            roadmap.status = status
+            roadmap.error_message = error_message
+            return roadmap
+
+        async def clear_steps(self, roadmap):
+            return None
 
         async def add_step(
             self,
@@ -103,6 +120,8 @@ def test_roadmap_generate_rolls_back_on_step_failure():
             difficulty="medium",
             priority=1,
             progress_status="pending",
+            step_type="core",
+            rationale=None,
         ):
             raise RuntimeError("step insert failed")
 
@@ -111,11 +130,14 @@ def test_roadmap_generate_rolls_back_on_step_failure():
         service = RoadmapService(session)
         service.diagnostic_repository = _DiagRepo()
         service.topic_repository = _TopicRepo()
-        service.roadmap_repository = _RoadmapRepo()
+        repo = _RoadmapRepo()
+        service.roadmap_repository = repo
 
         with pytest.raises(RuntimeError):
             await service.generate(user_id=1, tenant_id=1, goal_id=1, test_id=1)
 
         assert session.rollback_called is True
+        assert repo.roadmap.status == "failed"
+        assert repo.roadmap.error_message == "step insert failed"
 
     asyncio.run(_run())
