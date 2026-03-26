@@ -28,6 +28,7 @@ from app.domain.models.notification import Notification
 from app.domain.models.mentor_suggestion import MentorSuggestion
 from app.domain.models.mentor_memory_profile import MentorMemoryProfile
 from app.domain.models.mentor_chat_message import MentorChatMessage
+from app.domain.models.mentor_message import MentorMessage
 from app.domain.models.mentor_session_memory import MentorSessionMemory
 from app.domain.models.outbox_event import OutboxEvent
 from app.domain.models.api_client import APIClient
@@ -83,6 +84,7 @@ __all__ = [
     "MentorSuggestion",
     "MentorMemoryProfile",
     "MentorChatMessage",
+    "MentorMessage",
     "MentorSessionMemory",
     "OutboxEvent",
     "APIClient",
