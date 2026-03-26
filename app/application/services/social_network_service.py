@@ -19,6 +19,7 @@ from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User, UserRole
 from app.infrastructure.repositories.community_repository import CommunityRepository
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant, user_has_tenant_role
 from app.infrastructure.repositories.user_repository import UserRepository
 
 
@@ -93,7 +94,7 @@ class SocialNetworkService:
             .select_from(latest_roadmap_ids)
             .join(User, User.id == latest_roadmap_ids.c.user_id)
             .outerjoin(RoadmapStep, RoadmapStep.roadmap_id == latest_roadmap_ids.c.roadmap_id)
-            .where(User.tenant_id == tenant_id)
+            .where(user_belongs_to_tenant(User, tenant_id))
             .group_by(latest_roadmap_ids.c.user_id)
         )
         values = {int(user_id): 0.0 for user_id in user_ids}
@@ -251,8 +252,13 @@ class SocialNetworkService:
         network_users_result = await self.session.execute(
             select(User)
             .where(
-                User.tenant_id == tenant_id,
-                User.role.in_([UserRole.student, UserRole.teacher, UserRole.mentor]),
+                user_has_tenant_role(
+                    User,
+                    tenant_id,
+                    UserRole.student.value,
+                    UserRole.teacher.value,
+                    UserRole.mentor.value,
+                ),
                 User.id != user_id,
             )
             .order_by(User.experience_points.desc(), User.id.asc())

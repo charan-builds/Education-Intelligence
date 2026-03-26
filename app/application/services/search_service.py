@@ -14,6 +14,7 @@ from app.domain.models.roadmap import Roadmap
 from app.domain.models.roadmap_step import RoadmapStep
 from app.domain.models.topic import Topic
 from app.domain.models.user import User
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
 from app.infrastructure.clients.search_client import SearchClient, SearchClientError
 
 
@@ -65,7 +66,7 @@ class SearchService:
                 .join(Roadmap, Roadmap.id == RoadmapStep.roadmap_id)
                 .join(User, User.id == Roadmap.user_id)
                 .where(
-                    User.tenant_id == tenant_id,
+                    user_belongs_to_tenant(User, tenant_id),
                     or_(Topic.name.ilike(pattern), RoadmapStep.rationale.ilike(pattern)),
                 )
                 .limit(limit)

@@ -19,7 +19,9 @@ class Tenant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    subdomain: Mapped[str | None] = mapped_column(String(63), nullable=True, unique=True, index=True)
     type: Mapped[TenantType] = mapped_column(SQLEnum(TenantType), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    user_roles = relationship("UserTenantRole", back_populates="tenant", cascade="all, delete-orphan")

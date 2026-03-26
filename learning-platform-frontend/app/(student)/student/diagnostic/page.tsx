@@ -60,6 +60,10 @@ export default function StudentDiagnosticPage() {
   const nextQuestionMutation = useMutation({
     mutationFn: (payload: { testId: number }) => getNextDiagnosticQuestion(payload.testId),
     onSuccess: (question) => {
+      if (question === null) {
+        router.replace(`${appRoutes.student.diagnosticResult}?test_id=${testId}`);
+        return;
+      }
       setCurrentQuestion(question);
       setQuestionStartedAt(Date.now());
     },
@@ -98,6 +102,10 @@ export default function StudentDiagnosticPage() {
     void getDiagnosticSession(testId)
       .then((session) => {
         const answeredCount = session.answered_count ?? 0;
+        if (session.completed_at) {
+          router.replace(`${appRoutes.student.diagnosticResult}?test_id=${session.id}`);
+          return null;
+        }
         if (answeredCount > 0) {
           setAnswers(Array.from({ length: answeredCount }).map((_, index) => ({
             question_id: -(index + 1),

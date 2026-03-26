@@ -7,7 +7,7 @@ from app.application.services.mentor_service import MentorService
 from app.domain.models.diagnostic_test import DiagnosticTest
 from app.domain.models.user import User, UserRole
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
-from app.infrastructure.repositories.tenant_scoping import tenant_user_scope
+from app.infrastructure.repositories.tenant_scoping import tenant_user_scope, user_belongs_to_tenant, user_has_tenant_role
 
 
 class DashboardService:
@@ -32,12 +32,14 @@ class DashboardService:
 
     async def admin_dashboard(self, *, tenant_id: int) -> dict:
         total_users_result = await self.session.execute(
-            select(func.count(User.id)).where(User.tenant_id == tenant_id)
+            select(func.count(func.distinct(User.id))).where(user_belongs_to_tenant(User, tenant_id))
         )
         total_users = int(total_users_result.scalar_one() or 0)
 
         active_learners_result = await self.session.execute(
-            select(func.count(User.id)).where(User.tenant_id == tenant_id, User.role == UserRole.student)
+            select(func.count(func.distinct(User.id))).where(
+                user_has_tenant_role(User, tenant_id, UserRole.student.value)
+            )
         )
         active_learners = int(active_learners_result.scalar_one() or 0)
 

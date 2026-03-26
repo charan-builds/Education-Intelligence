@@ -15,6 +15,8 @@ from app.domain.models.topic import Topic
 from app.domain.models.topic_prerequisite import TopicPrerequisite
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.topic_skill import TopicSkill
+from app.domain.models.user import User
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
 
 TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 MASTERY_THRESHOLD = 70.0
@@ -74,7 +76,7 @@ class TopicKnowledgeService:
         result = await self.session.execute(
             select(RoadmapStep.topic_id, RoadmapStep.progress_status)
             .join(Roadmap, Roadmap.id == RoadmapStep.roadmap_id)
-            .where(Roadmap.user_id == user_id, Roadmap.user.has(tenant_id=tenant_id))
+            .where(Roadmap.user_id == user_id, Roadmap.user.has(user_belongs_to_tenant(User, tenant_id)))
         )
         status_by_topic: dict[int, str] = {}
         for topic_id, progress_status in result.all():

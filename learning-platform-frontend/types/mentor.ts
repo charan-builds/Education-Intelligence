@@ -7,6 +7,7 @@ export type MentorChatRequest = {
 };
 
 export type MentorChatResponse = {
+  request_id?: string | null;
   reply: string;
   advisor_type: string;
   used_ai: boolean;
@@ -15,6 +16,15 @@ export type MentorChatResponse = {
   provider?: string | null;
   next_checkin_date: string | null;
   session_summary?: string;
+};
+
+export type MentorChatStatusResponse = {
+  request_id: string;
+  status: string;
+  channel: string;
+  reply?: string | null;
+  delivered: boolean;
+  acked: boolean;
 };
 
 export type MentorSuggestionsResponse = {

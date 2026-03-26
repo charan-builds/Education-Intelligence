@@ -15,6 +15,7 @@ from app.domain.models.roadmap import Roadmap
 from app.domain.models.roadmap_step import RoadmapStep
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User, UserRole
+from app.domain.models.user_tenant_role import UserTenantRole
 from app.domain.models.user_skill_vector import UserSkillVector
 from app.infrastructure.repositories.notification_repository import NotificationRepository
 from app.realtime.hub import realtime_hub
@@ -110,13 +111,13 @@ class NotificationService:
 
     async def generate_due_notifications(self, *, tenant_id: int | None = None, limit_users: int = 100) -> int:
         learners_stmt = (
-            select(User.id, User.tenant_id)
-            .where(User.role == UserRole.student)
-            .order_by(User.id.asc())
+            select(UserTenantRole.user_id, UserTenantRole.tenant_id)
+            .where(UserTenantRole.role == UserRole.student)
+            .order_by(UserTenantRole.user_id.asc())
             .limit(limit_users)
         )
         if tenant_id is not None:
-            learners_stmt = learners_stmt.where(User.tenant_id == tenant_id)
+            learners_stmt = learners_stmt.where(UserTenantRole.tenant_id == tenant_id)
         learners = (await self.session.execute(learners_stmt)).all()
         created = 0
         for user_id, learner_tenant_id in learners:

@@ -21,6 +21,7 @@ from app.application.services.learning_intelligence_service import LearningIntel
 from app.application.services.ml_platform_service import MLPlatformService
 from app.application.services.retention_service import RetentionService
 from app.application.services.skill_vector_service import SkillVectorService
+from app.application.services.notification_service import NotificationService
 
 
 class RoadmapService:
@@ -36,6 +37,7 @@ class RoadmapService:
         self.cache_service = CacheService()
         self.feature_flag_service = FeatureFlagService(session)
         self.learning_event_service = LearningEventService(session)
+        self.notification_service = NotificationService(session)
         self.retention_service = RetentionService(session)
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
@@ -87,10 +89,20 @@ class RoadmapService:
             tenant_id=tenant_id,
         )
 
-    async def ensure_generation_requested(self, user_id: int, tenant_id: int, goal_id: int, test_id: int):
+    async def ensure_generation_requested(
+        self,
+        user_id: int,
+        tenant_id: int,
+        goal_id: int,
+        test_id: int,
+    ) -> tuple[object, bool]:
         existing = await self.get_for_test(user_id=user_id, tenant_id=tenant_id, goal_id=goal_id, test_id=test_id)
         if existing is not None:
-            return existing
+            if existing.status in {"generating", "ready"}:
+                return existing, False
+            await self.roadmap_repository.mark_status(existing, status="generating", error_message=None)
+            await self.session.commit()
+            return existing, True
         try:
             roadmap = await self.roadmap_repository.create_roadmap(
                 user_id=user_id,
@@ -100,13 +112,13 @@ class RoadmapService:
                 status="generating",
             )
             await self.session.commit()
-            return roadmap
+            return roadmap, True
         except IntegrityError:
             await self.session.rollback()
             existing = await self.get_for_test(user_id=user_id, tenant_id=tenant_id, goal_id=goal_id, test_id=test_id)
             if existing is None:
                 raise
-            return existing
+            return existing, existing.status not in {"generating", "ready"}
         except Exception:
             await self.session.rollback()
             raise
@@ -118,6 +130,7 @@ class RoadmapService:
                 goal_id=goal_id,
                 test_id=test_id,
                 tenant_id=tenant_id,
+                for_update=True,
             )
             if roadmap is None:
                 roadmap = await self.roadmap_repository.create_roadmap(
@@ -128,6 +141,8 @@ class RoadmapService:
                     status="generating",
                 )
             elif roadmap.status == "ready" and roadmap.steps:
+                return roadmap
+            elif roadmap.status == "generating" and roadmap.steps:
                 return roadmap
             else:
                 await self.roadmap_repository.clear_steps(roadmap)
@@ -255,10 +270,29 @@ class RoadmapService:
 
             await self.roadmap_repository.mark_status(roadmap, status="ready", error_message=None)
             roadmap.generated_at = datetime.now(timezone.utc)
+            await self.learning_event_service.track_roadmap_generated(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                diagnostic_test_id=test_id,
+                goal_id=goal_id,
+                roadmap_id=int(roadmap.id),
+                idempotency_key=f"roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
+                commit=False,
+            )
             await self.session.commit()
             await self.cache_service.bump_namespace_version("analytics:overview")
             await self.cache_service.bump_namespace_version("analytics:topic-mastery")
             await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
+            await self.notification_service.create_notification(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                notification_type="roadmap_generated",
+                severity="info",
+                title="Roadmap ready",
+                message="Your latest roadmap is ready to review.",
+                action_url="/student/roadmap",
+                dedupe_key=f"roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
+            )
             loaded_roadmap = await self.roadmap_repository.get_roadmap_for_user(
                 roadmap_id=roadmap.id,
                 user_id=user_id,

@@ -118,22 +118,28 @@ class RealtimeHub:
     async def send_user(self, tenant_id: int, user_id: int, event: dict) -> None:
         room = self._user_room(tenant_id, user_id)
         await self._broadcast(room, event)
-        await distributed_realtime_bus.publish(room=room, event=event)
+        await self._publish_distributed(room=room, event=event)
 
     async def send_thread(self, tenant_id: int, thread_id: int, event: dict) -> None:
         room = self._thread_room(tenant_id, thread_id)
         await self._broadcast(room, event)
-        await distributed_realtime_bus.publish(room=room, event=event)
+        await self._publish_distributed(room=room, event=event)
 
     async def send_community(self, tenant_id: int, community_id: int, event: dict) -> None:
         room = self._community_room(tenant_id, community_id)
         await self._broadcast(room, event)
-        await distributed_realtime_bus.publish(room=room, event=event)
+        await self._publish_distributed(room=room, event=event)
 
     async def send_tenant(self, tenant_id: int, event: dict) -> None:
         room = self._tenant_room(tenant_id)
         await self._broadcast(room, event)
-        await distributed_realtime_bus.publish(room=room, event=event)
+        await self._publish_distributed(room=room, event=event)
+
+    async def _publish_distributed(self, *, room: str, event: dict) -> None:
+        try:
+            await asyncio.wait_for(distributed_realtime_bus.publish(room=room, event=event), timeout=0.5)
+        except Exception:
+            return
 
     async def broadcast_presence(self, tenant_id: int) -> None:
         active_users = await distributed_realtime_bus.aggregate_presence(tenant_id=tenant_id)

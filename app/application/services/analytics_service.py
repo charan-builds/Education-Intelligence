@@ -9,8 +9,10 @@ from app.domain.models.roadmap import Roadmap
 from app.domain.models.roadmap_step import RoadmapStep
 from app.domain.models.tenant import Tenant
 from app.domain.models.user import User, UserRole
+from app.domain.models.user_tenant_role import UserTenantRole
 from app.domain.models.user_answer import UserAnswer
 from app.infrastructure.cache.cache_service import CacheService
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
 
 
 class AnalyticsService:
@@ -18,17 +20,46 @@ class AnalyticsService:
         self.session = session
         self.cache_service = CacheService()
 
+    @staticmethod
+    def _current_completed_test_ids_subquery(tenant_id: int | None = None):
+        stmt = (
+            select(
+                DiagnosticTest.user_id.label("user_id"),
+                func.max(DiagnosticTest.id).label("test_id"),
+            )
+            .join(User, User.id == DiagnosticTest.user_id)
+            .where(DiagnosticTest.completed_at.is_not(None))
+            .group_by(DiagnosticTest.user_id)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(user_belongs_to_tenant(User, tenant_id))
+        return stmt.subquery()
+
+    @staticmethod
+    def _current_active_roadmap_ids_subquery(tenant_id: int | None = None):
+        stmt = (
+            select(
+                Roadmap.user_id.label("user_id"),
+                func.max(Roadmap.id).label("roadmap_id"),
+            )
+            .join(User, User.id == Roadmap.user_id)
+            .where(Roadmap.status.in_(["ready", "generating"]))
+            .group_by(Roadmap.user_id)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(user_belongs_to_tenant(User, tenant_id))
+        return stmt.subquery()
+
     async def _topic_mastery_distribution(self, tenant_id: int | None = None) -> dict[str, int]:
-        # Average score per topic, then bucket by mastery bands.
+        current_tests = self._current_completed_test_ids_subquery(tenant_id)
         topic_avg_subquery = (
             select(Question.topic_id.label("topic_id"), func.avg(UserAnswer.score).label("avg_score"))
             .join(UserAnswer, UserAnswer.question_id == Question.id)
             .join(DiagnosticTest, DiagnosticTest.id == UserAnswer.test_id)
             .join(User, User.id == DiagnosticTest.user_id)
+            .join(current_tests, current_tests.c.test_id == DiagnosticTest.id)
             .group_by(Question.topic_id)
         )
-        if tenant_id is not None:
-            topic_avg_subquery = topic_avg_subquery.where(User.tenant_id == tenant_id)
         topic_avg_subquery = topic_avg_subquery.subquery()
 
         result = await self.session.execute(
@@ -67,15 +98,19 @@ class AnalyticsService:
         return await self._topic_mastery_distribution(tenant_id)
 
     async def _diagnostic_completion_rate(self, tenant_id: int | None = None) -> float:
-        total_stmt = select(func.count(DiagnosticTest.id)).join(User, User.id == DiagnosticTest.user_id)
+        total_stmt = select(func.count(func.distinct(UserTenantRole.user_id))).where(UserTenantRole.role == UserRole.student)
         completed_stmt = (
-            select(func.count(DiagnosticTest.id))
+            select(func.count(func.distinct(DiagnosticTest.user_id)))
             .join(User, User.id == DiagnosticTest.user_id)
-            .where(DiagnosticTest.completed_at.is_not(None))
+            .join(UserTenantRole, UserTenantRole.user_id == User.id)
+            .where(DiagnosticTest.completed_at.is_not(None), UserTenantRole.role == UserRole.student)
         )
         if tenant_id is not None:
-            total_stmt = total_stmt.where(User.tenant_id == tenant_id)
-            completed_stmt = completed_stmt.where(User.tenant_id == tenant_id)
+            total_stmt = select(func.count(func.distinct(UserTenantRole.user_id))).where(
+                UserTenantRole.tenant_id == tenant_id,
+                UserTenantRole.role == UserRole.student,
+            )
+            completed_stmt = completed_stmt.where(UserTenantRole.tenant_id == tenant_id)
 
         total_result = await self.session.execute(total_stmt)
         completed_result = await self.session.execute(completed_stmt)
@@ -90,20 +125,23 @@ class AnalyticsService:
         return await self._diagnostic_completion_rate(tenant_id)
 
     async def _roadmap_completion_rate(self, tenant_id: int | None = None) -> float:
+        current_roadmaps = self._current_active_roadmap_ids_subquery(tenant_id)
         total_stmt = (
             select(func.count(RoadmapStep.id))
             .join(Roadmap, Roadmap.id == RoadmapStep.roadmap_id)
             .join(User, User.id == Roadmap.user_id)
+            .join(current_roadmaps, current_roadmaps.c.roadmap_id == Roadmap.id)
         )
         completed_stmt = (
             select(func.count(RoadmapStep.id))
             .join(Roadmap, Roadmap.id == RoadmapStep.roadmap_id)
             .join(User, User.id == Roadmap.user_id)
+            .join(current_roadmaps, current_roadmaps.c.roadmap_id == Roadmap.id)
             .where(RoadmapStep.progress_status == "completed")
         )
         if tenant_id is not None:
-            total_stmt = total_stmt.where(User.tenant_id == tenant_id)
-            completed_stmt = completed_stmt.where(User.tenant_id == tenant_id)
+            total_stmt = total_stmt.where(user_belongs_to_tenant(User, tenant_id))
+            completed_stmt = completed_stmt.where(user_belongs_to_tenant(User, tenant_id))
 
         total_result = await self.session.execute(total_stmt)
         completed_result = await self.session.execute(completed_stmt)
@@ -141,13 +179,14 @@ class AnalyticsService:
         return await self.cache_service.get_or_set(cache_key, ttl=120, factory=_factory)
 
     async def _roadmap_progress_rows(self, tenant_id: int | None = None) -> list[dict[str, int | str]]:
+        current_roadmaps = self._current_active_roadmap_ids_subquery(tenant_id)
         completed_case = case((RoadmapStep.progress_status == "completed", 1), else_=0)
         in_progress_case = case((RoadmapStep.progress_status == "in_progress", 1), else_=0)
         pending_case = case((RoadmapStep.progress_status == "pending", 1), else_=0)
 
         stmt = (
             select(
-                Tenant.id.label("tenant_id"),
+                UserTenantRole.tenant_id.label("tenant_id"),
                 Tenant.name.label("tenant_name"),
                 User.id.label("user_id"),
                 User.email.label("email"),
@@ -156,15 +195,18 @@ class AnalyticsService:
                 func.coalesce(func.sum(in_progress_case), 0).label("in_progress_steps"),
                 func.coalesce(func.sum(pending_case), 0).label("pending_steps"),
             )
-            .join(Tenant, Tenant.id == User.tenant_id)
-            .outerjoin(Roadmap, Roadmap.user_id == User.id)
+            .select_from(UserTenantRole)
+            .join(User, User.id == UserTenantRole.user_id)
+            .join(Tenant, Tenant.id == UserTenantRole.tenant_id)
+            .outerjoin(current_roadmaps, current_roadmaps.c.user_id == User.id)
+            .outerjoin(Roadmap, Roadmap.id == current_roadmaps.c.roadmap_id)
             .outerjoin(RoadmapStep, RoadmapStep.roadmap_id == Roadmap.id)
-            .where(User.role == UserRole.student)
-            .group_by(Tenant.id, Tenant.name, User.id, User.email)
+            .where(UserTenantRole.role == UserRole.student)
+            .group_by(UserTenantRole.tenant_id, Tenant.name, User.id, User.email)
             .order_by(Tenant.name.asc(), User.email.asc())
         )
         if tenant_id is not None:
-            stmt = stmt.where(User.tenant_id == tenant_id)
+            stmt = stmt.where(UserTenantRole.tenant_id == tenant_id)
 
         result = await self.session.execute(stmt)
 
@@ -250,14 +292,14 @@ class AnalyticsService:
                 Tenant.id.label("tenant_id"),
                 Tenant.name.label("tenant_name"),
                 Tenant.type.label("tenant_type"),
-                func.coalesce(func.sum(case((User.role == UserRole.student, 1), else_=0)), 0).label("student_count"),
-                func.coalesce(func.sum(case((User.role == UserRole.mentor, 1), else_=0)), 0).label("mentor_count"),
-                func.coalesce(func.sum(case((User.role == UserRole.teacher, 1), else_=0)), 0).label("teacher_count"),
-                func.coalesce(func.sum(case((User.role == UserRole.admin, 1), else_=0)), 0).label("admin_count"),
-                func.coalesce(func.sum(case((User.role == UserRole.super_admin, 1), else_=0)), 0).label("super_admin_count"),
+                func.coalesce(func.sum(case((UserTenantRole.role == UserRole.student, 1), else_=0)), 0).label("student_count"),
+                func.coalesce(func.sum(case((UserTenantRole.role == UserRole.mentor, 1), else_=0)), 0).label("mentor_count"),
+                func.coalesce(func.sum(case((UserTenantRole.role == UserRole.teacher, 1), else_=0)), 0).label("teacher_count"),
+                func.coalesce(func.sum(case((UserTenantRole.role == UserRole.admin, 1), else_=0)), 0).label("admin_count"),
+                func.coalesce(func.sum(case((UserTenantRole.role == UserRole.super_admin, 1), else_=0)), 0).label("super_admin_count"),
             )
             .select_from(Tenant)
-            .outerjoin(User, User.tenant_id == Tenant.id)
+            .outerjoin(UserTenantRole, UserTenantRole.tenant_id == Tenant.id)
             .group_by(Tenant.id, Tenant.name, Tenant.type)
             .order_by(Tenant.name.asc())
         )
@@ -278,16 +320,17 @@ class AnalyticsService:
     async def _diagnostic_completion_rates_by_tenant(self) -> dict[int, float]:
         result = await self.session.execute(
             select(
-                User.tenant_id.label("tenant_id"),
-                func.count(DiagnosticTest.id).label("total"),
+                UserTenantRole.tenant_id.label("tenant_id"),
+                func.count(func.distinct(UserTenantRole.user_id)).label("total"),
                 func.coalesce(
-                    func.sum(case((DiagnosticTest.completed_at.is_not(None), 1), else_=0)),
+                    func.count(func.distinct(case((DiagnosticTest.completed_at.is_not(None), DiagnosticTest.user_id)))),
                     0,
                 ).label("completed"),
             )
-            .select_from(DiagnosticTest)
-            .join(User, User.id == DiagnosticTest.user_id)
-            .group_by(User.tenant_id)
+            .select_from(UserTenantRole)
+            .outerjoin(DiagnosticTest, DiagnosticTest.user_id == UserTenantRole.user_id)
+            .where(UserTenantRole.role == UserRole.student)
+            .group_by(UserTenantRole.tenant_id)
         )
         return {
             int(row.tenant_id): round((int(row.completed or 0) / int(row.total or 0)) * 100, 2)
@@ -297,9 +340,10 @@ class AnalyticsService:
         }
 
     async def _roadmap_completion_rates_by_tenant(self) -> dict[int, float]:
+        current_roadmaps = self._current_active_roadmap_ids_subquery()
         result = await self.session.execute(
             select(
-                User.tenant_id.label("tenant_id"),
+                UserTenantRole.tenant_id.label("tenant_id"),
                 func.count(RoadmapStep.id).label("total"),
                 func.coalesce(
                     func.sum(case((RoadmapStep.progress_status == "completed", 1), else_=0)),
@@ -309,7 +353,10 @@ class AnalyticsService:
             .select_from(RoadmapStep)
             .join(Roadmap, Roadmap.id == RoadmapStep.roadmap_id)
             .join(User, User.id == Roadmap.user_id)
-            .group_by(User.tenant_id)
+            .join(UserTenantRole, UserTenantRole.user_id == User.id)
+            .join(current_roadmaps, current_roadmaps.c.roadmap_id == Roadmap.id)
+            .where(UserTenantRole.role == UserRole.student)
+            .group_by(UserTenantRole.tenant_id)
         )
         return {
             int(row.tenant_id): round((int(row.completed or 0) / int(row.total or 0)) * 100, 2)

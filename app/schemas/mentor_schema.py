@@ -6,13 +6,12 @@ from pydantic import BaseModel, Field
 
 class MentorChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
-    user_id: int
-    tenant_id: int
     chat_history: list[dict[str, str]] = Field(default_factory=list)
     request_id: str | None = None
 
 
 class MentorChatResponse(BaseModel):
+    request_id: str | None = None
     reply: str
     advisor_type: str
     used_ai: bool = False
@@ -25,6 +24,19 @@ class MentorChatResponse(BaseModel):
     next_checkin_date: date | None = None
     session_summary: str = ""
     memory_summary: dict[str, Any] = Field(default_factory=dict)
+
+
+class MentorChatAckRequest(BaseModel):
+    request_id: str = Field(min_length=1, max_length=128)
+
+
+class MentorChatStatusResponse(BaseModel):
+    request_id: str
+    status: str
+    channel: str
+    reply: str | None = None
+    delivered: bool = False
+    acked: bool = False
 
 
 class MentorSuggestionsResponse(BaseModel):

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from app.domain.models.outbox_event import OutboxEvent
 from app.infrastructure.repositories.outbox_repository import OutboxRepository
@@ -58,5 +59,65 @@ def test_mark_failed_keeps_pending_before_limit():
         assert event.status == "pending"
         assert event.error_message == "temporary failure"
         assert event.available_at >= original_available_at
+
+    asyncio.run(_run())
+
+
+def test_create_event_includes_tenant_for_idempotency_key():
+    class _SessionCapture:
+        def __init__(self):
+            self.last_stmt = None
+
+        async def execute(self, stmt, *args, **kwargs):
+            self.last_stmt = str(stmt)
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+        def add(self, row):
+            self.row = row
+
+        async def flush(self):
+            return None
+
+    async def _run():
+        session = _SessionCapture()
+        repo = OutboxRepository(session)
+        await repo.create_event(
+            tenant_id=99,
+            event_type="test_event",
+            payload_json='{"a":1}',
+            idempotency_key="key-99",
+        )
+        assert "tenant_id" in session.last_stmt
+        assert "idempotency_key" in session.last_stmt
+
+    asyncio.run(_run())
+
+
+def test_create_event_without_idempotency_uses_payload_and_tenant():
+    class _SessionCapture:
+        def __init__(self):
+            self.last_stmt = None
+
+        async def execute(self, stmt, *args, **kwargs):
+            self.last_stmt = str(stmt)
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+        def add(self, row):
+            self.row = row
+
+        async def flush(self):
+            return None
+
+    async def _run():
+        session = _SessionCapture()
+        repo = OutboxRepository(session)
+        await repo.create_event(
+            tenant_id=101,
+            event_type="test_event",
+            payload_json='{"a":1}',
+            idempotency_key=None,
+        )
+        assert "tenant_id" in session.last_stmt
+        assert "payload_json" in session.last_stmt
 
     asyncio.run(_run())

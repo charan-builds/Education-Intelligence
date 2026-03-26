@@ -27,6 +27,7 @@ from app.domain.models.ml_training_run import MLTrainingRun
 from app.domain.models.notification import Notification
 from app.domain.models.mentor_suggestion import MentorSuggestion
 from app.domain.models.mentor_memory_profile import MentorMemoryProfile
+from app.domain.models.mentor_chat_message import MentorChatMessage
 from app.domain.models.mentor_session_memory import MentorSessionMemory
 from app.domain.models.outbox_event import OutboxEvent
 from app.domain.models.api_client import APIClient
@@ -52,6 +53,7 @@ from app.domain.models.user import User
 from app.domain.models.user_answer import UserAnswer
 from app.domain.models.user_feature import UserFeature
 from app.domain.models.user_skill_vector import UserSkillVector
+from app.domain.models.user_tenant_role import UserTenantRole
 
 __all__ = [
     "Base",
@@ -80,6 +82,7 @@ __all__ = [
     "Notification",
     "MentorSuggestion",
     "MentorMemoryProfile",
+    "MentorChatMessage",
     "MentorSessionMemory",
     "OutboxEvent",
     "APIClient",
@@ -106,6 +109,7 @@ __all__ = [
     "UserAnswer",
     "UserFeature",
     "UserSkillVector",
+    "UserTenantRole",
     "Roadmap",
     "RoadmapStep",
 ]

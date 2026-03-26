@@ -12,26 +12,34 @@ class OutboxRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def create_event(self, *, tenant_id: int | None, event_type: str, payload_json: str) -> OutboxEvent:
+    async def create_event(
+        self,
+        *,
+        tenant_id: int | None,
+        event_type: str,
+        payload_json: str,
+        idempotency_key: str | None = None,
+    ) -> OutboxEvent:
         now = datetime.now(timezone.utc)
-        existing = (
-            await self.session.execute(
-                select(OutboxEvent)
-                .where(
-                    OutboxEvent.tenant_id == tenant_id,
-                    OutboxEvent.event_type == event_type,
-                    OutboxEvent.payload_json == payload_json,
-                    OutboxEvent.status.in_(["pending", "processing"]),
-                )
-                .order_by(OutboxEvent.id.desc())
-                .limit(1)
+        stmt = select(OutboxEvent).where(OutboxEvent.event_type == event_type)
+        if idempotency_key is not None:
+            stmt = stmt.where(
+                OutboxEvent.idempotency_key == idempotency_key,
+                OutboxEvent.tenant_id == tenant_id,
             )
-        ).scalar_one_or_none()
+        else:
+            stmt = stmt.where(
+                OutboxEvent.tenant_id == tenant_id,
+                OutboxEvent.payload_json == payload_json,
+            )
+        stmt = stmt.where(OutboxEvent.status.in_(["pending", "processing"])).order_by(OutboxEvent.id.desc()).limit(1)
+        existing = (await self.session.execute(stmt)).scalar_one_or_none()
         if existing is not None:
             return existing
         row = OutboxEvent(
             tenant_id=tenant_id,
             event_type=event_type,
+            idempotency_key=idempotency_key,
             payload_json=payload_json,
             status="pending",
             attempts=0,

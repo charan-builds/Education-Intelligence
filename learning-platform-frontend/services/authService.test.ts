@@ -29,10 +29,16 @@ describe("authService", () => {
     });
     const { login } = await import("@/services/authService");
 
-    const result = await login("student@example.com", "password");
+    const result = await login("student@example.com", "password", { tenant_id: 7 });
 
     expect(result.authenticated).toBe(true);
     expect(result.user.role).toBe("student");
+    expect(postMock).toHaveBeenCalledWith("/auth/login", {
+      email: "student@example.com",
+      password: "password",
+      tenant_id: 7,
+      tenant_subdomain: undefined,
+    });
   });
 
   it("loads current user from the backend session endpoint", async () => {

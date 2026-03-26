@@ -12,7 +12,8 @@ from app.infrastructure.cache.cache_service import CacheService
 from app.infrastructure.repositories.analytics_snapshot_repository import AnalyticsSnapshotRepository
 from app.domain.models.learning_event import LearningEvent
 from app.domain.models.topic_score import TopicScore
-from app.domain.models.user import User, UserRole
+from app.domain.models.user import UserRole
+from app.domain.models.user_tenant_role import UserTenantRole
 
 
 class PrecomputedAnalyticsService:
@@ -27,7 +28,10 @@ class PrecomputedAnalyticsService:
         active_learners = int(
             (
                 await self.session.execute(
-                    select(func.count(User.id)).where(User.tenant_id == tenant_id, User.role == UserRole.student)
+                    select(func.count(UserTenantRole.id)).where(
+                        UserTenantRole.tenant_id == tenant_id,
+                        UserTenantRole.role == UserRole.student,
+                    )
                 )
             ).scalar_one()
             or 0

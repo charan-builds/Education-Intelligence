@@ -13,6 +13,8 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    tenant_id: int | None = None
+    tenant_subdomain: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -34,3 +36,35 @@ class InviteResponse(BaseModel):
     email: EmailStr | None = None
     role: UserRole
     expires_in_hours: int
+
+
+class EmailVerificationRequest(BaseModel):
+    tenant_id: int
+    email: EmailStr
+
+
+class EmailVerificationConfirmRequest(BaseModel):
+    token: str
+
+
+class PasswordResetRequest(BaseModel):
+    tenant_id: int
+    email: EmailStr
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    token: str
+    password: str
+
+
+class AuthActionResponse(BaseModel):
+    success: bool = True
+    detail: str
+    token: str | None = None
+
+
+class ActiveSessionResponse(BaseModel):
+    id: str
+    device: str | None = None
+    created_at: str
+    expires_at: str

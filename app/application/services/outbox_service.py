@@ -38,6 +38,7 @@ class OutboxService:
         args: list | None = None,
         kwargs: dict | None = None,
         tenant_id: int | None = None,
+        idempotency_key: str | None = None,
     ) -> int:
         payload = {
             "task_name": task_name,
@@ -48,6 +49,7 @@ class OutboxService:
             tenant_id=tenant_id,
             event_type="celery_task",
             payload_json=json.dumps(payload, separators=(",", ":"), sort_keys=True),
+            idempotency_key=idempotency_key,
         )
         await self.refresh_queue_depth_metrics()
         return int(row.id)
@@ -57,6 +59,7 @@ class OutboxService:
             tenant_id=envelope.tenant_id,
             event_type="kafka_message",
             payload_json=json.dumps(envelope.to_dict(), separators=(",", ":"), sort_keys=True),
+            idempotency_key=envelope.idempotency_key,
         )
         await self.refresh_queue_depth_metrics()
         return int(row.id)

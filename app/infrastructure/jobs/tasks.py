@@ -17,6 +17,8 @@ from app.application.services.skill_vector_service import SkillVectorService
 from app.core.config import get_settings
 from app.domain.models.learning_event import LearningEvent
 from app.domain.models.notification import Notification
+from app.domain.models.user import UserRole
+from app.domain.models.user_tenant_role import UserTenantRole
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.jobs.celery_app import celery_app
 from app.core.metrics import event_processing_duration_seconds
@@ -289,7 +291,10 @@ async def _run_refresh_precomputed_analytics(tenant_id: int | None = None, limit
 
             tenant_rows = (
                 await session.execute(
-                    select(User.tenant_id).where(User.role == UserRole.student).distinct().limit(limit_users)
+                    select(UserTenantRole.tenant_id)
+                    .where(UserTenantRole.role == UserRole.student)
+                    .distinct()
+                    .limit(limit_users)
                 )
             ).all()
             for row in tenant_rows:

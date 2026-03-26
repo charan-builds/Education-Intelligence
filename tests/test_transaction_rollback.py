@@ -25,7 +25,7 @@ def test_auth_register_rolls_back_on_create_failure():
             return object()
 
     class _UserRepo:
-        async def get_by_email(self, email):
+        async def get_by_email(self, email, *, tenant_id=None):
             return None
 
         async def create(self, tenant_id, email, password_hash, role, created_at):
@@ -95,7 +95,7 @@ def test_roadmap_generate_rolls_back_on_step_failure():
         def __init__(self):
             self.roadmap = self._RM()
 
-        async def get_by_identity(self, *, user_id, goal_id, test_id, tenant_id):
+        async def get_by_identity(self, *, user_id, goal_id, test_id, tenant_id, for_update=False):
             return self.roadmap
 
         async def create_roadmap(self, user_id, goal_id, test_id, generated_at, status="generating", error_message=None):

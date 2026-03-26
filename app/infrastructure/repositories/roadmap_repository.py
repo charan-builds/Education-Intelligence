@@ -35,7 +35,15 @@ class RoadmapRepository(BaseRepository):
         await self.session.flush()
         return roadmap
 
-    async def get_by_identity(self, *, user_id: int, goal_id: int, test_id: int, tenant_id: int) -> Roadmap | None:
+    async def get_by_identity(
+        self,
+        *,
+        user_id: int,
+        goal_id: int,
+        test_id: int,
+        tenant_id: int,
+        for_update: bool = False,
+    ) -> Roadmap | None:
         stmt = (
             select(Roadmap)
             .options(selectinload(Roadmap.steps))
@@ -48,6 +56,8 @@ class RoadmapRepository(BaseRepository):
             )
             .limit(1)
         )
+        if for_update:
+            stmt = stmt.with_for_update()
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 

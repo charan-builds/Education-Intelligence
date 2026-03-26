@@ -11,6 +11,7 @@ const PROTECTED_PREFIXES = [
   "/admin",
   "/super-admin",
   "/mentor",
+  "/community",
 ];
 
 export function middleware(request: NextRequest) {
@@ -70,6 +71,7 @@ export const config = {
     "/admin/:path*",
     "/super-admin/:path*",
     "/mentor/:path*",
+    "/community/:path*",
     "/dashboard/:path*",
     "/goals/:path*",
     "/diagnostic/:path*",

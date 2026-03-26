@@ -13,6 +13,7 @@ from app.core.security import (
 )
 from app.infrastructure.database import AsyncSessionLocal
 from app.infrastructure.repositories.community_repository import CommunityRepository
+from app.infrastructure.repositories.mentor_chat_repository import MentorChatRepository
 from app.realtime.hub import realtime_hub
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
@@ -54,8 +55,15 @@ async def realtime_websocket(websocket: WebSocket) -> None:
     try:
         payload = decode_access_token(token)
         user_id = int(payload["sub"])
-        tenant_id = int(payload.get("tenant_id", 1))
+        actor_tenant_id = int(payload.get("tenant_id", 1))
+        tenant_id = actor_tenant_id
         role = str(payload.get("role")) if payload.get("role") is not None else None
+        requested_tenant_id = websocket.query_params.get("tenant_id")
+        if requested_tenant_id is not None:
+            if role != "super_admin":
+                await websocket.close(code=4403)
+                return
+            tenant_id = int(requested_tenant_id)
     except (AuthenticationError, KeyError, ValueError):
         await websocket.close(code=4401)
         return
@@ -140,12 +148,35 @@ async def realtime_websocket(websocket: WebSocket) -> None:
 
                 await websocket.send_json({"type": "mentor.response.started", "request_id": request_id})
                 async with AsyncSessionLocal() as session:
+                    repository = MentorChatRepository(session)
+                    await repository.upsert_message(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        request_id=request_id,
+                        direction="inbound",
+                        channel="websocket",
+                        status="received",
+                        content=message_text,
+                    )
                     result = await MentorService(session=session).chat(
                         message=message_text,
                         user_id=user_id,
                         tenant_id=tenant_id,
                         chat_history=chat_history,
                     )
+                    result["request_id"] = request_id
+                    outbound = await repository.upsert_message(
+                        tenant_id=tenant_id,
+                        user_id=user_id,
+                        request_id=request_id,
+                        direction="outbound",
+                        channel="websocket",
+                        status="ready",
+                        content=str(result.get("reply") or ""),
+                        response_json=result,
+                    )
+                    await repository.mark_delivered(outbound)
+                    await session.commit()
 
                 reply = str(result.get("reply") or "")
                 for index in range(12, len(reply) + 12, 12):

@@ -17,6 +17,7 @@ class UserResponse(BaseModel):
     tenant_id: int
     email: EmailStr
     role: UserRole
+    email_verified_at: datetime | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

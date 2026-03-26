@@ -16,6 +16,7 @@ export default function AuthPage() {
   const { isAuthenticated, isReady, login, role } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [tenantContext, setTenantContext] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState<string | null>(null);
@@ -24,6 +25,9 @@ export default function AuthPage() {
     const params = new URLSearchParams(window.location.search);
     const rawNextPath = params.get("next");
     setNextPath(rawNextPath && rawNextPath.startsWith("/") ? normalizeAppPath(rawNextPath) : null);
+    const tenantId = params.get("tenant_id");
+    const tenantSubdomain = params.get("tenant");
+    setTenantContext(tenantId ?? tenantSubdomain ?? "");
   }, []);
 
   useEffect(() => {
@@ -39,10 +43,16 @@ export default function AuthPage() {
     setIsSubmitting(true);
 
     try {
-      const user = await login(email, password);
+      const trimmedTenantContext = tenantContext.trim();
+      const numericTenantId = Number(trimmedTenantContext);
+      const user = await login(email, password, {
+        tenant_id: Number.isInteger(numericTenantId) && numericTenantId > 0 ? numericTenantId : null,
+        tenant_subdomain:
+          Number.isInteger(numericTenantId) && numericTenantId > 0 ? null : (trimmedTenantContext || null),
+      });
       router.replace(nextPath ?? getRoleRedirectPath(user?.role));
     } catch {
-      setError("Unable to sign in. Verify the backend is running and the credentials are valid.");
+      setError("Unable to sign in. Check your tenant context, backend availability, and credentials.");
     } finally {
       setIsSubmitting(false);
     }
@@ -108,6 +118,19 @@ export default function AuthPage() {
                 type="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
+                className="mt-2 border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-300" htmlFor="auth-tenant">
+                Tenant ID or Workspace
+              </label>
+              <Input
+                id="auth-tenant"
+                value={tenantContext}
+                onChange={(event) => setTenantContext(event.target.value)}
+                placeholder="e.g. 7 or northwind"
                 className="mt-2 border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
             </div>

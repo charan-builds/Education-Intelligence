@@ -19,6 +19,7 @@ from app.domain.models.user import User
 from app.infrastructure.clients.ai_service_client import AIServiceClient
 from app.infrastructure.repositories.diagnostic_repository import DiagnosticRepository
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
 from app.infrastructure.repositories.topic_repository import TopicRepository
 
 
@@ -167,6 +168,7 @@ class MentorService:
 
         guidance_text = await self.generate_advice(
             user_id=user_id,
+            tenant_id=tenant_id,
             message="Provide concise next-step suggestions with rationale.",
         )
         chunks = [chunk.strip() for chunk in guidance_text.split(".") if chunk.strip()]
@@ -184,16 +186,17 @@ class MentorService:
         if self.session is None or self.diagnostic_repository is None or self.roadmap_repository is None or self.topic_repository is None:
             return None
 
-        user_stmt = select(User).where(User.id == user_id)
-        if tenant_id is not None:
-            user_stmt = user_stmt.where(User.tenant_id == tenant_id)
+        if tenant_id is None:
+            return None
+
+        user_stmt = select(User).where(User.id == user_id).where(user_belongs_to_tenant(User, tenant_id))
 
         user_row = await self.session.execute(user_stmt)
         user = user_row.scalar_one_or_none()
         if user is None:
             return None
 
-        effective_tenant_id = int(user.tenant_id)
+        effective_tenant_id = int(tenant_id)
 
         roadmap_items = await self.roadmap_repository.list_user_roadmaps(
             user_id=user_id,
@@ -296,7 +299,7 @@ class MentorService:
             cognitive_model=cognitive_model,
         )
 
-    async def generate_advice(self, user_id: int, message: str) -> str:
+    async def generate_advice(self, user_id: int, message: str, tenant_id: int | None = None) -> str:
         if self.session is None or self.diagnostic_repository is None or self.roadmap_repository is None or self.topic_repository is None:
             normalized = message.strip()
             if not normalized:
@@ -306,7 +309,7 @@ class MentorService:
                 f"You asked: '{normalized[:240]}'"
             )
 
-        context = await self._load_user_context(user_id=user_id)
+        context = await self._load_user_context(user_id=user_id, tenant_id=tenant_id)
         if context is None:
             return "User context not found. Please login again and retry."
 
@@ -446,7 +449,7 @@ class MentorService:
                 "latency_ms": None,
             }
 
-    async def progress_analysis(self, user_id: int) -> dict:
+    async def progress_analysis(self, user_id: int, tenant_id: int | None = None) -> dict:
         if self.session is None or self.diagnostic_repository is None or self.roadmap_repository is None or self.topic_repository is None:
             return {
                 "topic_improvements": {},
@@ -462,32 +465,16 @@ class MentorService:
                 ],
             }
 
-        user_row = await self.session.execute(select(User).where(User.id == user_id))
-        user = user_row.scalar_one_or_none()
-        if user is None:
+        context = await self._load_user_context(user_id=user_id, tenant_id=tenant_id)
+        if context is None:
             return {
                 "topic_improvements": {},
                 "weekly_progress": [],
                 "recommended_focus": ["User context not found."],
             }
 
-        tenant_id = int(user.tenant_id)
-
-        latest_test_row = await self.session.execute(
-            select(DiagnosticTest)
-            .where(DiagnosticTest.user_id == user_id)
-            .order_by(DiagnosticTest.id.desc())
-            .limit(1)
-        )
-        latest_test = latest_test_row.scalar_one_or_none()
-
-        topic_scores: dict[int, float] = {}
-        if latest_test is not None:
-            topic_scores = await self.diagnostic_repository.topic_scores_for_test(
-                test_id=latest_test.id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
+        tenant_id = context.tenant_id
+        topic_scores = context.topic_scores
 
         # Deterministic improvement proxy: distance from mastery threshold.
         topic_improvements = {
@@ -495,18 +482,11 @@ class MentorService:
             for topic_id, score in topic_scores.items()
         }
 
-        roadmap_items = await self.roadmap_repository.list_user_roadmaps(
-            user_id=user_id,
-            tenant_id=tenant_id,
-            limit=1,
-            offset=0,
-        )
-        latest_roadmap = roadmap_items[0] if roadmap_items else None
-        steps = latest_roadmap.steps if latest_roadmap else []
+        steps = context.steps
 
         total_steps = len(steps)
-        completed_steps = sum(1 for step in steps if str(step.progress_status).lower() == "completed")
-        current_completion = (completed_steps / total_steps * 100.0) if total_steps else 0.0
+        completed_steps = context.completed_steps
+        current_completion = context.completion_rate
 
         # Simple four-week trend approximation for dashboarding.
         weekly_progress: list[dict[str, float | int | str]] = []

@@ -41,4 +41,11 @@ async def list_users(
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user=Depends(get_current_user)):
-    return current_user.user
+    return {
+        "id": int(current_user.user.id),
+        "tenant_id": int(current_user.tenant_id),
+        "email": current_user.user.email,
+        "role": current_user.role,
+        "email_verified_at": getattr(current_user.user, "email_verified_at", None),
+        "created_at": current_user.user.created_at,
+    }

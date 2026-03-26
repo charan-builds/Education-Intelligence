@@ -22,6 +22,8 @@ REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 TOKEN_TYPE_ACCESS = "access"
 TOKEN_TYPE_REFRESH = "refresh"
 TOKEN_TYPE_INVITE = "invite"
+TOKEN_TYPE_EMAIL_VERIFICATION = "email_verification"
+TOKEN_TYPE_PASSWORD_RESET = "password_reset"
 
 
 def hash_password(password: str) -> str:
@@ -109,6 +111,34 @@ def create_invite_token(
     )
 
 
+def create_email_verification_token(
+    *,
+    user_id: int,
+    tenant_id: int,
+    email: str,
+    expires_delta: timedelta | None = None,
+) -> str:
+    return _create_token(
+        {"sub": str(user_id), "tenant_id": tenant_id, "email": email},
+        token_type=TOKEN_TYPE_EMAIL_VERIFICATION,
+        expires_delta=expires_delta or timedelta(hours=24),
+    )
+
+
+def create_password_reset_token(
+    *,
+    user_id: int,
+    tenant_id: int,
+    email: str,
+    expires_delta: timedelta | None = None,
+) -> str:
+    return _create_token(
+        {"sub": str(user_id), "tenant_id": tenant_id, "email": email},
+        token_type=TOKEN_TYPE_PASSWORD_RESET,
+        expires_delta=expires_delta or timedelta(hours=2),
+    )
+
+
 def _parse_expiration(exp: Any) -> datetime:
     if isinstance(exp, datetime):
         return exp.astimezone(timezone.utc)
@@ -143,6 +173,14 @@ def decode_refresh_token(token: str) -> dict[str, Any]:
 
 def decode_invite_token(token: str) -> dict[str, Any]:
     return decode_token(token, expected_type=TOKEN_TYPE_INVITE)
+
+
+def decode_email_verification_token(token: str) -> dict[str, Any]:
+    return decode_token(token, expected_type=TOKEN_TYPE_EMAIL_VERIFICATION)
+
+
+def decode_password_reset_token(token: str) -> dict[str, Any]:
+    return decode_token(token, expected_type=TOKEN_TYPE_PASSWORD_RESET)
 
 
 def get_token_from_headers_and_cookies(

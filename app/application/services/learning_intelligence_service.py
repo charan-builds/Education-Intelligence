@@ -27,6 +27,8 @@ from app.domain.models.topic import Topic
 from app.domain.models.topic_prerequisite import TopicPrerequisite
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User, UserRole
+from app.domain.models.user_tenant_role import UserTenantRole
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant, user_has_tenant_role
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
 
 
@@ -204,8 +206,11 @@ class LearningIntelligenceService:
         }
 
     async def student_dashboard(self, *, user_id: int, tenant_id: int) -> dict:
-        user = await self.session.get(User, user_id)
-        if user is None or int(user.tenant_id) != tenant_id:
+        user_result = await self.session.execute(
+            select(User).where(User.id == user_id, user_belongs_to_tenant(User, tenant_id))
+        )
+        user = user_result.scalar_one_or_none()
+        if user is None:
             raise NotFoundError("Student not found")
 
         roadmap = await self.roadmap_repository.get_latest_roadmap_for_user(user_id=user_id, tenant_id=tenant_id)
@@ -330,7 +335,11 @@ class LearningIntelligenceService:
 
         leaderboard_result = await self.session.execute(
             select(User.id, User.display_name, User.email, User.experience_points)
-            .where(User.tenant_id == tenant_id, User.role == UserRole.student)
+            .join(UserTenantRole, UserTenantRole.user_id == User.id)
+            .where(
+                UserTenantRole.tenant_id == tenant_id,
+                UserTenantRole.role == UserRole.student,
+            )
             .order_by(User.experience_points.desc(), User.id.asc())
             .limit(10)
         )
@@ -444,7 +453,7 @@ class LearningIntelligenceService:
 
         students_result = await self.session.execute(
             select(User.id, User.display_name, User.email, User.experience_points)
-            .where(User.tenant_id == tenant_id, User.role == UserRole.student)
+            .where(user_has_tenant_role(User, tenant_id, UserRole.student.value))
             .order_by(User.email.asc())
         )
         students = students_result.all()

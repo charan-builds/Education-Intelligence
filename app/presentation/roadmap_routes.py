@@ -30,23 +30,25 @@ async def generate_roadmap(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    roadmap = await RoadmapService(db).ensure_generation_requested(
+    roadmap, should_enqueue = await RoadmapService(db).ensure_generation_requested(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         goal_id=payload.goal_id,
         test_id=payload.test_id,
     )
-    queued_generate = enqueue_job(
-        "jobs.generate_roadmap",
-        args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
-    )
-    if not queued_generate:
-        await OutboxService(db).add_task_event(
-            task_name="jobs.generate_roadmap",
+    if should_enqueue:
+        queued_generate = enqueue_job(
+            "jobs.generate_roadmap",
             args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
-            tenant_id=current_user.tenant_id,
         )
-        await db.commit()
+        if not queued_generate:
+            await OutboxService(db).add_task_event(
+                task_name="jobs.generate_roadmap",
+                args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
+                tenant_id=current_user.tenant_id,
+                idempotency_key=f"roadmap-generate:{current_user.tenant_id}:{current_user.id}:{payload.goal_id}:{payload.test_id}",
+            )
+            await db.commit()
     return roadmap
 
 

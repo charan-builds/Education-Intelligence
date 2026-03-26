@@ -18,6 +18,7 @@ from app.domain.models.topic import Topic
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
 
 
 class DigitalTwinService:
@@ -35,8 +36,11 @@ class DigitalTwinService:
         return {int(topic_id): str(topic_name) for topic_id, topic_name in result.all()}
 
     async def _load_user(self, *, user_id: int, tenant_id: int) -> User:
-        user = await self.session.get(User, user_id)
-        if user is None or int(user.tenant_id) != tenant_id:
+        result = await self.session.execute(
+            select(User).where(User.id == user_id, user_belongs_to_tenant(User, tenant_id))
+        )
+        user = result.scalar_one_or_none()
+        if user is None:
             raise NotFoundError("Learner not found")
         return user
 

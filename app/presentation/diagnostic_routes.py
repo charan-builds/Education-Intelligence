@@ -89,23 +89,25 @@ async def submit_diagnostic(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
     )
-    await RoadmapService(db).ensure_generation_requested(
+    _, should_enqueue = await RoadmapService(db).ensure_generation_requested(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         goal_id=test.goal_id,
         test_id=payload.test_id,
     )
-    queued = enqueue_job(
-        "jobs.generate_roadmap",
-        args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
-    )
-    if not queued:
-        await OutboxService(db).add_task_event(
-            task_name="jobs.generate_roadmap",
+    if should_enqueue:
+        queued = enqueue_job(
+            "jobs.generate_roadmap",
             args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
-            tenant_id=current_user.tenant_id,
         )
-        await db.commit()
+        if not queued:
+            await OutboxService(db).add_task_event(
+                task_name="jobs.generate_roadmap",
+                args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
+                tenant_id=current_user.tenant_id,
+                idempotency_key=f"roadmap-generate:{current_user.tenant_id}:{current_user.id}:{test.goal_id}:{payload.test_id}",
+            )
+            await db.commit()
     return {
         "id": test.id,
         "user_id": test.user_id,

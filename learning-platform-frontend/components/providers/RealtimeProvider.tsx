@@ -13,6 +13,7 @@ import {
 
 import { useToast } from "@/components/providers/ToastProvider";
 import { useAuth } from "@/hooks/useAuth";
+import { useTenantScope } from "@/hooks/useTenantScope";
 import type { PlatformNotification } from "@/types/notification";
 import type { RealtimeEvent } from "@/types/realtime";
 
@@ -66,6 +67,7 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { isAuthenticated } = useAuth();
+  const { activeTenantScope } = useTenantScope();
   const socketRef = useRef<WebSocket | null>(null);
   const typingTimersRef = useRef<Record<number, number>>({});
   const reconnectTimerRef = useRef<number | null>(null);
@@ -100,7 +102,12 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
       return;
     }
 
-    const wsUrl = apiUrl.replace(/^http/, "ws").replace(/\/$/, "") + `/realtime/ws`;
+    const wsBaseUrl = apiUrl.replace(/^http/, "ws").replace(/\/$/, "");
+    const activeTenantId = typeof window !== "undefined" ? window.localStorage.getItem("active_tenant_id") : null;
+    const wsUrl =
+      activeTenantId && activeTenantId.length > 0
+        ? `${wsBaseUrl}/realtime/ws?tenant_id=${encodeURIComponent(activeTenantId)}`
+        : `${wsBaseUrl}/realtime/ws`;
 
     const connect = () => {
       setConnectionStatus(reconnectAttemptRef.current > 0 ? "reconnecting" : "connecting");
@@ -203,7 +210,7 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
       socketRef.current = null;
       setConnectionStatus("offline");
     };
-  }, [isAuthenticated, queryClient, toast]);
+  }, [activeTenantScope, isAuthenticated, queryClient, toast]);
 
   const value = useMemo<RealtimeContextValue>(
     () => ({

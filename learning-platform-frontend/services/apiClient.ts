@@ -39,6 +39,26 @@ const sessionClient = axios.create({
 
 let refreshPromise: Promise<void> | null = null;
 
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function applyCsrfHeader(config: InternalAxiosRequestConfig): InternalAxiosRequestConfig {
+  const method = (config.method ?? "get").toUpperCase();
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    return config;
+  }
+  const csrfToken = readCookie("csrf_token");
+  if (csrfToken) {
+    config.headers["X-CSRF-Token"] = csrfToken;
+  }
+  return config;
+}
+
 function normalizeError(error: AxiosError): ApiError {
   return {
     message:
@@ -95,8 +115,10 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
       config.headers["X-Tenant-ID"] = activeTenantId;
     }
   }
-  return config;
+  return applyCsrfHeader(config);
 });
+
+sessionClient.interceptors.request.use((config: InternalAxiosRequestConfig) => applyCsrfHeader(config));
 
 apiClient.interceptors.response.use(
   (response) => response,

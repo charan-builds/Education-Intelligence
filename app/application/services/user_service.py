@@ -27,7 +27,7 @@ class UserService:
                 validate_password_strength(password)
             except PasswordValidationError as exc:
                 raise ValidationError(str(exc)) from exc
-            existing = await self.repository.get_by_email(email)
+            existing = await self.repository.get_by_email(email, tenant_id=tenant_id)
             if existing:
                 raise ConflictError("Email already registered")
             user = await self.repository.create(

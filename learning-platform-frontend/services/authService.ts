@@ -10,10 +10,16 @@ export type AuthSessionResponse = {
   user: User;
 };
 
-export async function login(email: string, password: string): Promise<AuthSessionResponse> {
+export async function login(
+  email: string,
+  password: string,
+  tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
+): Promise<AuthSessionResponse> {
   const { data } = await apiClient.post<AuthSessionResponse>("/auth/login", {
     email,
     password,
+    tenant_id: tenantContext?.tenant_id ?? undefined,
+    tenant_subdomain: tenantContext?.tenant_subdomain ?? undefined,
   });
   notifyAuthChanged();
   return data;

@@ -15,6 +15,7 @@ class LearningEventService:
     EVENT_QUESTION_ANSWERED = "question_answered"
     EVENT_TOPIC_COMPLETED = "topic_completed"
     EVENT_DIAGNOSTIC_COMPLETED = "diagnostic_completed"
+    EVENT_ROADMAP_GENERATED = "roadmap_generated"
     EVENT_TOPIC_VIEWED = "topic_viewed"
     EVENT_ROADMAP_STEP_UPDATED = "roadmap_step_updated"
 
@@ -172,5 +173,27 @@ class LearningEventService:
             topic_id=topic_id,
             time_spent_seconds=time_spent_seconds,
             metadata=metadata,
+            commit=commit,
+        )
+
+    async def track_roadmap_generated(
+        self,
+        *,
+        tenant_id: int,
+        user_id: int,
+        diagnostic_test_id: int,
+        goal_id: int,
+        roadmap_id: int,
+        idempotency_key: str | None = None,
+        commit: bool = True,
+    ) -> LearningEvent:
+        return await self.track_event(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            event_type=self.EVENT_ROADMAP_GENERATED,
+            action_type="complete",
+            diagnostic_test_id=diagnostic_test_id,
+            metadata={"goal_id": goal_id, "roadmap_id": roadmap_id},
+            idempotency_key=idempotency_key,
             commit=commit,
         )

@@ -29,6 +29,11 @@ class TenantRepository(BaseRepository):
         result = await self.session.execute(select(Tenant).where(Tenant.id == tenant_id))
         return result.scalar_one_or_none()
 
+    async def get_by_subdomain(self, subdomain: str) -> Tenant | None:
+        normalized = subdomain.strip().lower()
+        result = await self.session.execute(select(Tenant).where(Tenant.subdomain == normalized))
+        return result.scalar_one_or_none()
+
     async def count_all(self) -> int:
         result = await self.session.execute(select(func.count(Tenant.id)))
         return int(result.scalar_one())

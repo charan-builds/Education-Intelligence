@@ -26,7 +26,11 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   user: AuthUser | null;
   role: string | null;
-  login: (email: string, password: string) => Promise<AuthUser | null>;
+  login: (
+    email: string,
+    password: string,
+    tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
+  ) => Promise<AuthUser | null>;
   logout: () => void;
   refresh: () => Promise<void>;
   getUser: () => AuthUser | null;
@@ -77,8 +81,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const session = await loginRequest(email, password);
+  const login = async (
+    email: string,
+    password: string,
+    tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
+  ) => {
+    const session = await loginRequest(email, password, tenantContext);
     const nextUser = normalizeUser(session.user);
     setUser(nextUser);
     return nextUser;

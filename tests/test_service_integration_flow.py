@@ -14,6 +14,7 @@ class _Tenant:
     id: int
     name: str
     type: TenantType
+    subdomain: str | None = None
 
 
 @dataclass
@@ -72,6 +73,9 @@ class _Session:
 
         return _Result()
 
+    async def scalar(self, _stmt):
+        return None
+
     async def commit(self):
         return None
 
@@ -82,7 +86,12 @@ class _Session:
 class _TenantRepo:
     async def get_by_id(self, tenant_id: int):
         if tenant_id == 1:
-            return _Tenant(id=1, name="Platform", type=TenantType.platform)
+            return _Tenant(id=1, name="Platform", type=TenantType.platform, subdomain="platform")
+        return None
+
+    async def get_by_subdomain(self, subdomain: str):
+        if subdomain == "platform":
+            return _Tenant(id=1, name="Platform", type=TenantType.platform, subdomain="platform")
         return None
 
 
@@ -91,8 +100,15 @@ class _UserRepo:
         self.users = {}
         self.next_id = 1
 
-    async def get_by_email(self, email: str):
-        return self.users.get(email)
+    async def get_by_email(self, email: str, *, tenant_id: int | None = None):
+        user = self.users.get((tenant_id, email)) if tenant_id is not None else None
+        if user is not None:
+            return user
+        if tenant_id is None:
+            for (stored_tenant_id, stored_email), stored_user in self.users.items():
+                if stored_email == email:
+                    return stored_user
+        return None
 
     async def create(self, tenant_id, email, password_hash, role, created_at):
         user = _User(
@@ -103,7 +119,7 @@ class _UserRepo:
             role=role,
         )
         self.next_id += 1
-        self.users[email] = user
+        self.users[(tenant_id, email)] = user
         return user
 
 
@@ -119,6 +135,51 @@ class _TopicRepo:
     async def get_prerequisite_edges(self, tenant_id=None):
         return [(102, 101)]
 
+    async def list_questions_by_ids(self, *, tenant_id: int, question_ids: list[int]):
+        if tenant_id != 1:
+            return []
+        return [await self.get_question(question_id) for question_id in question_ids]
+
+
+class _GoalRepo:
+    async def get_by_id(self, *, tenant_id: int, goal_id: int):
+        if tenant_id == 1 and goal_id == 1:
+            return type("_Goal", (), {"id": 1})()
+        return None
+
+
+class _LearningEventService:
+    async def track_question_answered(self, **kwargs):
+        return None
+
+    async def track_diagnostic_completed(self, **kwargs):
+        return None
+
+
+class _SkillVectorService:
+    async def update_from_diagnostic_answer(self, **kwargs):
+        return None
+
+
+class _RetentionService:
+    async def upsert_topic_score(self, **kwargs):
+        return None
+
+
+class _MlPlatformService:
+    async def build_feature_snapshot(self, **kwargs):
+        return None
+
+
+class _FeatureFlagService:
+    async def is_enabled(self, *args, **kwargs):
+        return False
+
+
+class _CacheService:
+    async def bump_namespace_version(self, *args, **kwargs):
+        return None
+
 
 class _DiagnosticRepo:
     def __init__(self):
@@ -132,11 +193,40 @@ class _DiagnosticRepo:
         self.next_test_id += 1
         return test
 
-    async def get_test_for_user(self, test_id, user_id, tenant_id):
+    async def get_test_for_user(self, test_id, user_id, tenant_id, for_update=False):
         test = self.tests.get(test_id)
         if test and test.user_id == user_id and tenant_id == 1:
             return test
         return None
+
+    async def get_answer_for_test_question(self, *, test_id, question_id, for_update=False):
+        for stored_test_id, stored_question_id, _score in self.answers:
+            if stored_test_id == test_id and stored_question_id == question_id:
+                return type("_Answer", (), {"test_id": test_id, "question_id": question_id})()
+        return None
+
+    async def upsert_answer(self, *, test_id, question_id, user_answer, score, time_taken):
+        existing_index = next(
+            (
+                index
+                for index, (stored_test_id, stored_question_id, _score) in enumerate(self.answers)
+                if stored_test_id == test_id and stored_question_id == question_id
+            ),
+            None,
+        )
+        if existing_index is None:
+            self.answers.append((test_id, question_id, score))
+        else:
+            self.answers[existing_index] = (test_id, question_id, score)
+        return type("_Answer", (), {"test_id": test_id, "question_id": question_id, "score": score})()
+
+    async def get_latest_open_test_for_user(self, *, user_id, goal_id, tenant_id):
+        if tenant_id != 1:
+            return None
+        open_tests = [
+            test for test in self.tests.values() if test.user_id == user_id and test.goal_id == goal_id and test.completed_at is None
+        ]
+        return open_tests[-1] if open_tests else None
 
     async def add_answer(self, test_id, question_id, user_answer, score, time_taken):
         self.answers.append((test_id, question_id, score))
@@ -177,7 +267,7 @@ class _RoadmapRepo:
         self.next_id = 1
         self.next_step_id = 1
 
-    async def get_by_identity(self, *, user_id, goal_id, test_id, tenant_id):
+    async def get_by_identity(self, *, user_id, goal_id, test_id, tenant_id, for_update=False):
         if tenant_id != 1:
             return None
         return next(
@@ -260,9 +350,14 @@ def test_end_to_end_service_flow_with_tenant_scope():
             email="student@platform.local",
             password="secret123",
         )
-        token, refresh_token, logged = await auth.login(email="student@platform.local", password="secret123")
+        token, refresh_token, logged, role = await auth.login(
+            email="student@platform.local",
+            password="secret123",
+            tenant_id=1,
+        )
 
         assert user.id == logged.id
+        assert role == UserRole.student
         assert isinstance(token, str)
         assert token
         assert isinstance(refresh_token, str)
@@ -274,6 +369,11 @@ def test_end_to_end_service_flow_with_tenant_scope():
         diagnostic = DiagnosticService(session)
         diagnostic.diagnostic_repository = diagnostic_repo
         diagnostic.topic_repository = topic_repo
+        diagnostic.goal_repository = _GoalRepo()
+        diagnostic.learning_event_service = _LearningEventService()
+        diagnostic.skill_vector_service = _SkillVectorService()
+        diagnostic.retention_service = _RetentionService()
+        diagnostic.ml_platform_service = _MlPlatformService()
 
         test = await diagnostic.start_test(user_id=user.id, goal_id=1)
         await diagnostic.submit_answers(
@@ -295,6 +395,8 @@ def test_end_to_end_service_flow_with_tenant_scope():
         roadmap.diagnostic_repository = diagnostic_repo
         roadmap.topic_repository = topic_repo
         roadmap.roadmap_repository = roadmap_repo
+        roadmap.feature_flag_service = _FeatureFlagService()
+        roadmap.cache_service = _CacheService()
 
         created = await roadmap.generate(user_id=user.id, tenant_id=1, goal_id=1, test_id=test.id)
         assert created.user_id == user.id
@@ -307,7 +409,8 @@ def test_end_to_end_service_flow_with_tenant_scope():
         assert len(own_roadmaps) == 1
         assert foreign_roadmaps == []
 
-        duplicate = await roadmap.ensure_generation_requested(user.id, 1, goal_id=1, test_id=test.id)
+        duplicate, should_enqueue = await roadmap.ensure_generation_requested(user.id, 1, goal_id=1, test_id=test.id)
         assert duplicate.id == created.id
+        assert should_enqueue is False
 
     asyncio.run(_run())

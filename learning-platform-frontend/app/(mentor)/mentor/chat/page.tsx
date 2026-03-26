@@ -15,6 +15,7 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { useRealtime } from "@/components/providers/RealtimeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { useMentorWorkspace } from "@/hooks/useDashboard";
+import { ackMentorChat, chatWithMentor } from "@/services/mentorService";
 
 type ChatMessage = {
   id: number;
@@ -45,6 +46,7 @@ export default function MentorChatPage() {
     },
   ]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const fallbackTimerRef = useRef<number | null>(null);
 
   const canSend = useMemo(() => Boolean(input.trim() && user?.user_id && user?.tenant_id), [input, user?.tenant_id, user?.user_id]);
 
@@ -94,11 +96,73 @@ export default function MentorChatPage() {
     setPendingRequestId(null);
     setIsSending(false);
     setInput("");
+    if (fallbackTimerRef.current) {
+      window.clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = null;
+    }
+    void ackMentorChat(lastMentorReply.requestId).catch(() => undefined);
   }, [lastMentorReply, pendingRequestId, streamingId]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [draftResponse, messages]);
+
+  useEffect(() => {
+    return () => {
+      if (fallbackTimerRef.current) {
+        window.clearTimeout(fallbackTimerRef.current);
+      }
+    };
+  }, []);
+
+  async function handleHttpFallback(payload: { prompt: string; requestId: string; responseMessageId: number }) {
+    if (!user?.user_id || !user?.tenant_id || pendingRequestId !== payload.requestId) {
+      return;
+    }
+    try {
+      const response = await chatWithMentor({
+        message: payload.prompt,
+        user_id: user.user_id,
+        tenant_id: user.tenant_id,
+        request_id: payload.requestId,
+        chat_history: messages.slice(-6).map((message) => ({
+          role: message.role === "learner" ? "user" : "assistant",
+          content: message.text,
+        })),
+      });
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === payload.responseMessageId
+            ? {
+                ...message,
+                text: response.reply,
+                metadata: `HTTP fallback reply • ${payload.requestId}`,
+                provider: response.provider ?? null,
+                whyRecommended: response.why_recommended ?? [],
+              }
+            : message,
+        ),
+      );
+      setStreamingId(null);
+      setDraftResponse("");
+      setPendingRequestId(null);
+      setIsSending(false);
+      setInput("");
+      await ackMentorChat(payload.requestId);
+      toast({
+        title: "Mentor fallback used",
+        description: "The realtime reply took too long, so the response was recovered through HTTP.",
+        variant: "info",
+      });
+    } catch {
+      setIsSending(false);
+      toast({
+        title: "Mentor reply delayed",
+        description: "The realtime and fallback paths are both delayed. Please retry in a moment.",
+        variant: "error",
+      });
+    }
+  }
 
   function submitPrompt(prompt: string) {
     if (!prompt.trim() || !user?.user_id || !user?.tenant_id || isSending) {
@@ -132,6 +196,16 @@ export default function MentorChatPage() {
         content: message.text,
       })),
     });
+    if (fallbackTimerRef.current) {
+      window.clearTimeout(fallbackTimerRef.current);
+    }
+    fallbackTimerRef.current = window.setTimeout(() => {
+      void handleHttpFallback({
+        prompt: learnerMessage,
+        requestId,
+        responseMessageId: baseId + 1,
+      });
+    }, 6000);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

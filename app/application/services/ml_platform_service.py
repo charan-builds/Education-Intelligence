@@ -15,10 +15,12 @@ from app.domain.models.question import Question
 from app.domain.models.diagnostic_test import DiagnosticTest
 from app.domain.models.topic import Topic
 from app.domain.models.topic_score import TopicScore
+from app.domain.models.user import User
 from app.domain.models.user_answer import UserAnswer
 from app.domain.models.user_skill_vector import UserSkillVector
 from app.domain.engines.ml_recommendation_engine import MLRecommendationEngine
 from app.domain.engines.predictive_intelligence_engine import PredictiveIntelligenceEngine
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
 
 
 class MLPlatformService:
@@ -38,7 +40,10 @@ class MLPlatformService:
             select(UserAnswer.score, UserAnswer.time_taken, Question.difficulty)
             .join(Question, Question.id == UserAnswer.question_id)
             .join(DiagnosticTest, DiagnosticTest.id == UserAnswer.test_id)
-            .where(DiagnosticTest.user_id == user_id, DiagnosticTest.user.has(tenant_id=tenant_id))
+            .where(
+                DiagnosticTest.user_id == user_id,
+                DiagnosticTest.user.has(user_belongs_to_tenant(User, tenant_id)),
+            )
         )
         answers = answer_result.all()
 

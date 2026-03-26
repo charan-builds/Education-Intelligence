@@ -61,3 +61,11 @@ class RefreshSessionRepository:
             .values(revoked=True, revoked_at=datetime.now(timezone.utc))
         )
         return int(result.rowcount or 0)
+
+    async def list_active_for_user(self, *, user_id: int) -> list[RefreshSession]:
+        result = await self.session.execute(
+            select(RefreshSession)
+            .where(RefreshSession.user_id == user_id, RefreshSession.revoked.is_(False))
+            .order_by(RefreshSession.created_at.desc())
+        )
+        return list(result.scalars().all())
