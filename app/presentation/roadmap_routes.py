@@ -5,7 +5,7 @@ from app.application.services.roadmap_service import RoadmapService
 from app.application.services.outbox_service import OutboxService
 from app.core.dependencies import get_current_user, get_pagination_params
 from app.infrastructure.database import get_db_session
-from app.infrastructure.jobs.dispatcher import enqueue_job
+from app.infrastructure.repositories.mentor_student_repository import MentorStudentRepository
 from app.realtime.hub import realtime_hub
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.common_schema import PaginationParams
@@ -30,26 +30,38 @@ async def generate_roadmap(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    roadmap, should_enqueue = await RoadmapService(db).ensure_generation_requested(
+    roadmap_service = RoadmapService(db)
+    roadmap, should_enqueue = await roadmap_service.ensure_generation_requested(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         goal_id=payload.goal_id,
         test_id=payload.test_id,
     )
     if should_enqueue:
-        queued_generate = enqueue_job(
-            "jobs.generate_roadmap",
+        # Always enqueue via transactional outbox to make job dispatch idempotent.
+        await OutboxService(db).add_task_event(
+            task_name="jobs.generate_roadmap",
             args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
+            tenant_id=current_user.tenant_id,
+            idempotency_key=f"roadmap-generate:{current_user.id}:{payload.goal_id}:{payload.test_id}",
         )
-        if not queued_generate:
-            await OutboxService(db).add_task_event(
-                task_name="jobs.generate_roadmap",
-                args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
-                tenant_id=current_user.tenant_id,
-                idempotency_key=f"roadmap-generate:{current_user.tenant_id}:{current_user.id}:{payload.goal_id}:{payload.test_id}",
-            )
-            await db.commit()
-    return roadmap
+        await db.commit()
+    return roadmap_service.serialize_roadmap(roadmap)
+
+
+@router.get("/view", response_model=RoadmapPageResponse)
+async def view_current_user_roadmaps(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+    pagination: PaginationParams = Depends(get_pagination_params),
+):
+    return await RoadmapService(db).list_for_user_page(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        limit=pagination.limit,
+        offset=pagination.offset,
+        cursor=pagination.cursor,
+    )
 
 
 @router.get("/{user_id}", response_model=RoadmapPageResponse)
@@ -59,8 +71,18 @@ async def list_roadmaps(
     current_user=Depends(get_current_user),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    if user_id != current_user.id and current_user.role.value not in {"admin", "super_admin", "teacher"}:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    if user_id != current_user.id:
+        if current_user.role.value in {"admin", "super_admin", "teacher"}:
+            pass
+        elif current_user.role.value == "mentor":
+            if not await MentorStudentRepository(db).has_mapping(
+                tenant_id=current_user.tenant_id,
+                mentor_id=current_user.id,
+                student_id=user_id,
+            ):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+        else:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     return await RoadmapService(db).list_for_user_page(
         user_id=user_id,
         tenant_id=current_user.tenant_id,

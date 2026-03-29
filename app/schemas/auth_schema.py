@@ -19,7 +19,8 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     authenticated: bool = True
-    token_type: str = "cookie"
+    token_type: str = "bearer"
+    access_token: str
     access_token_expires_in: int
     refresh_token_expires_in: int | None = None
     user: UserResponse

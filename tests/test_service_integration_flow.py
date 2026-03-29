@@ -31,6 +31,7 @@ class _Question:
     id: int
     topic_id: int
     correct_answer: str
+    difficulty: int = 2
     accepted_answers: list[str] | None = None
 
 
@@ -70,6 +71,10 @@ class _Session:
             @staticmethod
             def scalar_one_or_none():
                 return None
+
+            @staticmethod
+            def scalar_one():
+                return 0
 
         return _Result()
 
@@ -202,10 +207,10 @@ class _DiagnosticRepo:
     async def get_answer_for_test_question(self, *, test_id, question_id, for_update=False):
         for stored_test_id, stored_question_id, _score in self.answers:
             if stored_test_id == test_id and stored_question_id == question_id:
-                return type("_Answer", (), {"test_id": test_id, "question_id": question_id})()
+                return type("_Answer", (), {"test_id": test_id, "question_id": question_id, "attempt_count": 1})()
         return None
 
-    async def upsert_answer(self, *, test_id, question_id, user_answer, score, time_taken):
+    async def upsert_answer(self, *, test_id, question_id, user_answer, score, time_taken, accuracy, attempt_count):
         existing_index = next(
             (
                 index
@@ -218,7 +223,18 @@ class _DiagnosticRepo:
             self.answers.append((test_id, question_id, score))
         else:
             self.answers[existing_index] = (test_id, question_id, score)
-        return type("_Answer", (), {"test_id": test_id, "question_id": question_id, "score": score})()
+        return type(
+            "_Answer",
+            (),
+            {
+                "test_id": test_id,
+                "question_id": question_id,
+                "score": score,
+                "accuracy": accuracy,
+                "attempt_count": attempt_count,
+                "time_taken": time_taken,
+            },
+        )()
 
     async def get_latest_open_test_for_user(self, *, user_id, goal_id, tenant_id):
         if tenant_id != 1:
@@ -228,7 +244,7 @@ class _DiagnosticRepo:
         ]
         return open_tests[-1] if open_tests else None
 
-    async def add_answer(self, test_id, question_id, user_answer, score, time_taken):
+    async def add_answer(self, test_id, question_id, user_answer, score, time_taken, accuracy, attempt_count=1):
         self.answers.append((test_id, question_id, score))
 
     async def complete_test(self, test, completed_at):
@@ -259,6 +275,23 @@ class _DiagnosticRepo:
                 "hard": sum(1 for _, _, d in rows if d >= 3),
             },
         }
+
+    async def list_answers_for_test(self, *, test_id):
+        return [
+            type(
+                "_Answer",
+                (),
+                {
+                    "question_id": q_id,
+                    "score": score,
+                    "accuracy": round(score / 100.0, 4),
+                    "attempt_count": 1,
+                    "time_taken": 5.0 if q_id == 1 else 7.0,
+                },
+            )()
+            for t_id, q_id, score in self.answers
+            if t_id == test_id
+        ]
 
 
 class _RoadmapRepo:

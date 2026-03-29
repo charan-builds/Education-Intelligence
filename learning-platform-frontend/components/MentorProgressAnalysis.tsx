@@ -8,7 +8,7 @@ import { getMentorProgressAnalysis } from "@/services/mentorInsightsService";
 export default function MentorProgressAnalysis() {
   const query = useQuery({
     queryKey: ["mentor-progress-analysis"],
-    queryFn: getMentorProgressAnalysis,
+    queryFn: () => getMentorProgressAnalysis(),
     staleTime: 60_000,
     refetchInterval: 120_000,
   });

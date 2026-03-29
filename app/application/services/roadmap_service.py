@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +18,13 @@ from app.infrastructure.repositories.topic_repository import TopicRepository
 from app.application.exceptions import NotFoundError
 from app.application.exceptions import ValidationError
 from app.application.services.learning_event_service import LearningEventService
+from app.application.services.gamification_service import GamificationService
 from app.application.services.learning_intelligence_service import LearningIntelligenceService
 from app.application.services.ml_platform_service import MLPlatformService
 from app.application.services.retention_service import RetentionService
 from app.application.services.skill_vector_service import SkillVectorService
 from app.application.services.notification_service import NotificationService
-
+from app.application.services.outbox_service import OutboxService
 
 class RoadmapService:
     def __init__(self, session: AsyncSession):
@@ -37,10 +39,17 @@ class RoadmapService:
         self.cache_service = CacheService()
         self.feature_flag_service = FeatureFlagService(session)
         self.learning_event_service = LearningEventService(session)
+        self.gamification_service = GamificationService(session)
         self.notification_service = NotificationService(session)
         self.retention_service = RetentionService(session)
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
+        self.outbox_service = OutboxService(session)
+
+    async def _update_gamification_state(self, *, user_id: int, tenant_id: int, completed_step: bool) -> None:
+        if not completed_step:
+            return
+        await self.gamification_service.get_profile(tenant_id=tenant_id, user_id=user_id)
 
     @staticmethod
     def _phase_label(priority: int, total_steps: int) -> str:
@@ -81,6 +90,9 @@ class RoadmapService:
             ],
         }
 
+    def serialize_roadmap(self, roadmap) -> dict:
+        return self._serialize_roadmap(roadmap, len(getattr(roadmap, "steps", []) or []))
+
     async def get_for_test(self, user_id: int, tenant_id: int, goal_id: int, test_id: int):
         return await self.roadmap_repository.get_by_identity(
             user_id=user_id,
@@ -96,13 +108,22 @@ class RoadmapService:
         goal_id: int,
         test_id: int,
     ) -> tuple[object, bool]:
+        async def _reload_for_response():
+            loaded = await self.roadmap_repository.get_by_identity(
+                user_id=user_id,
+                goal_id=goal_id,
+                test_id=test_id,
+                tenant_id=tenant_id,
+            )
+            return loaded
+
         existing = await self.get_for_test(user_id=user_id, tenant_id=tenant_id, goal_id=goal_id, test_id=test_id)
         if existing is not None:
             if existing.status in {"generating", "ready"}:
                 return existing, False
             await self.roadmap_repository.mark_status(existing, status="generating", error_message=None)
             await self.session.commit()
-            return existing, True
+            return (await _reload_for_response()) or existing, True
         try:
             roadmap = await self.roadmap_repository.create_roadmap(
                 user_id=user_id,
@@ -112,7 +133,7 @@ class RoadmapService:
                 status="generating",
             )
             await self.session.commit()
-            return roadmap, True
+            return (await _reload_for_response()) or roadmap, True
         except IntegrityError:
             await self.session.rollback()
             existing = await self.get_for_test(user_id=user_id, tenant_id=tenant_id, goal_id=goal_id, test_id=test_id)
@@ -205,11 +226,9 @@ class RoadmapService:
             knowledge_graph_engine = KnowledgeGraphEngine(self.topic_repository)
             topic_order: list[int] = []
             seen: set[int] = set()
+            topic_paths = await knowledge_graph_engine.generate_learning_paths(recommended_targets, tenant_id=tenant_id)
             for target_topic in recommended_targets:
-                path = await knowledge_graph_engine.generate_learning_path(
-                    target_topic_id=target_topic,
-                    tenant_id=tenant_id,
-                )
+                path = topic_paths.get(int(target_topic), [int(target_topic)])
                 for topic_id in path:
                     if topic_id not in seen:
                         topic_order.append(topic_id)
@@ -218,6 +237,7 @@ class RoadmapService:
             if not topic_order:
                 topic_order = sorted(topic_scores.keys())
 
+            dependency_depths = await knowledge_graph_engine.get_dependency_depths(topic_order, tenant_id=tenant_id)
             base_date = datetime.now(timezone.utc)
             days_per_step = 7
             if profile.profile_type == "slow_deep_learner":
@@ -245,7 +265,7 @@ class RoadmapService:
                     time_factor=time_factor,
                     score_factor=inverse_score,
                 )
-                dependency_depth = await knowledge_graph_engine.get_dependency_depth(topic_id, tenant_id)
+                dependency_depth = dependency_depths.get(int(topic_id), 0)
                 estimated_time_hours = round(
                     base_hours_by_difficulty[difficulty_result.level]
                     * profile_time_multiplier
@@ -283,6 +303,18 @@ class RoadmapService:
             await self.cache_service.bump_namespace_version("analytics:overview")
             await self.cache_service.bump_namespace_version("analytics:topic-mastery")
             await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
+            await self.outbox_service.add_task_event(
+                task_name="jobs.refresh_precomputed_analytics",
+                args=[tenant_id],
+                tenant_id=tenant_id,
+                idempotency_key=f"refresh-precomputed:roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
+            )
+            await self.outbox_service.add_task_event(
+                task_name="jobs.generate_notifications",
+                args=[tenant_id, 100],
+                tenant_id=tenant_id,
+                idempotency_key=f"generate-notifications:roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
+            )
             await self.notification_service.create_notification(
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -380,7 +412,7 @@ class RoadmapService:
             "meta": payload["meta"],
         }
         await self.cache_service.set(cache_key, serialized_payload, ttl=300)
-        return payload
+        return serialized_payload
 
     async def update_step_status(
         self,
@@ -398,6 +430,7 @@ class RoadmapService:
         step = await self.roadmap_repository.get_step_for_user(step_id=step_id, user_id=user_id, tenant_id=tenant_id)
         if step is None:
             raise NotFoundError("Roadmap step not found")
+        previous_status = str(step.progress_status).lower()
 
         await self.roadmap_repository.update_step_status(step, progress_status=normalized_status)
         await self.learning_event_service.track_learning_action(
@@ -416,6 +449,14 @@ class RoadmapService:
             progress_status=normalized_status,
             observed_at=datetime.now(timezone.utc),
         )
+        if normalized_status == "completed" and previous_status != "completed":
+            await self.gamification_service.award_topic_completion(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                topic_id=int(step.topic_id),
+                roadmap_step_id=int(step.id),
+                activity_time=datetime.now(timezone.utc),
+            )
         await self.session.commit()
 
         if normalized_status == "completed":
@@ -440,6 +481,19 @@ class RoadmapService:
         await self.cache_service.bump_namespace_version("analytics:overview")
         await self.cache_service.bump_namespace_version("analytics:topic-mastery")
         await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
+        await self.outbox_service.add_task_event(
+            task_name="jobs.refresh_precomputed_analytics",
+            args=[tenant_id],
+            tenant_id=tenant_id,
+            idempotency_key=f"refresh-precomputed:roadmap-step:{tenant_id}:{user_id}:{step_id}:{normalized_status}",
+        )
+        await self.outbox_service.add_task_event(
+            task_name="jobs.generate_notifications",
+            args=[tenant_id, 100],
+            tenant_id=tenant_id,
+            idempotency_key=f"generate-notifications:roadmap-step:{tenant_id}:{user_id}:{step_id}:{normalized_status}",
+        )
+        await self.session.commit()
         return {
             "id": step.id,
             "topic_id": step.topic_id,

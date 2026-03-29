@@ -127,3 +127,70 @@ class LearnerSkillVectorResponse(BaseModel):
     tenant_id: int
     user_id: int
     vectors: list[SkillVectorItemResponse]
+
+
+class StudentTopicHeatmapItemResponse(BaseModel):
+    topic_id: int
+    topic_name: str
+    mastery_score: float
+    average_accuracy: float
+    average_time_taken_seconds: float
+    average_attempts: float
+    last_activity_at: str | None = None
+
+
+class StudentWeakTopicItemResponse(BaseModel):
+    topic_id: int
+    topic_name: str
+    mastery_score: float
+    average_accuracy: float
+    average_time_taken_seconds: float
+    average_attempts: float
+
+
+class StudentPerformanceTrendPointResponse(BaseModel):
+    label: str
+    average_score: float
+    average_accuracy: float
+    average_time_taken_seconds: float
+    answered_questions: int
+
+
+class StudentPerformanceAnalyticsResponse(BaseModel):
+    tenant_id: int
+    user_id: int
+    learning_efficiency_score: float
+    topic_mastery_heatmap: list[StudentTopicHeatmapItemResponse]
+    weak_topics: list[StudentWeakTopicItemResponse]
+    performance_trend: list[StudentPerformanceTrendPointResponse]
+    sql_queries: dict[str, str]
+
+
+class TopicLearnerPerformanceItemResponse(BaseModel):
+    user_id: int
+    mastery_score: float
+    average_accuracy: float
+    average_time_taken_seconds: float
+    average_attempts: float
+
+
+class TopicPerformanceTrendPointResponse(BaseModel):
+    label: str
+    learner_count: int
+    average_score: float
+    average_accuracy: float
+    average_time_taken_seconds: float
+
+
+class TopicPerformanceAnalyticsResponse(BaseModel):
+    tenant_id: int
+    topic_id: int
+    topic_name: str
+    learner_count: int
+    average_mastery_score: float
+    average_accuracy: float
+    average_time_taken_seconds: float
+    learning_efficiency_score: float
+    weakest_learners: list[TopicLearnerPerformanceItemResponse]
+    performance_trend: list[TopicPerformanceTrendPointResponse]
+    sql_queries: dict[str, str]

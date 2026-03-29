@@ -15,9 +15,9 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${frontendPort}`,
+    command: `sh -lc "npm run build && npm run start -- --hostname 127.0.0.1 --port ${frontendPort}"`,
     port: frontendPort,
     reuseExistingServer: true,
-    timeout: 120_000,
+    timeout: 180_000,
   },
 });

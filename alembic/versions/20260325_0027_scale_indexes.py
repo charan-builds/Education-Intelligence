@@ -1,7 +1,7 @@
 """additional indexes for scale-sensitive api paths
 
 Revision ID: 20260325_0027
-Revises: 20260325_0026_roadmap_generation_status
+Revises: 20260325_0026
 Create Date: 2026-03-25 00:00:00.000000
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 revision = "20260325_0027"
-down_revision = "20260325_0026_roadmap_generation_status"
+down_revision = "20260325_0026"
 branch_labels = None
 depends_on = None
 

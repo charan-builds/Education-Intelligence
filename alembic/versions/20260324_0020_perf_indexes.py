@@ -1,7 +1,7 @@
 """performance indexes for scale-sensitive paths
 
 Revision ID: 20260324_0020
-Revises: 20260323_0019_topic_retention_reviews
+Revises: 20260323_0019
 Create Date: 2026-03-24 00:00:00.000000
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 revision = "20260324_0020"
-down_revision = "20260323_0019_topic_retention_reviews"
+down_revision = "20260323_0019"
 branch_labels = None
 depends_on = None
 

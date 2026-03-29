@@ -18,6 +18,8 @@ engine = create_async_engine(
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
     pool_timeout=settings.database_pool_timeout_seconds,
+    pool_recycle=settings.database_pool_recycle_seconds,
+    pool_use_lifo=settings.database_pool_use_lifo,
     pool_pre_ping=True,
 )
 AsyncSessionLocal = async_sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

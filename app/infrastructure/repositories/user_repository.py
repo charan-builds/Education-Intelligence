@@ -1,10 +1,10 @@
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.models.user import User, UserRole
 from app.infrastructure.repositories.base_repository import BaseRepository
 from app.infrastructure.repositories.user_tenant_role_repository import UserTenantRoleRepository
-from app.domain.models.user_tenant_role import UserTenantRole
+from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant, user_has_tenant_role
 
 
 class UserRepository(BaseRepository):
@@ -28,9 +28,7 @@ class UserRepository(BaseRepository):
     async def get_by_email(self, email: str, *, tenant_id: int | None = None) -> User | None:
         stmt = select(User).where(User.email == email)
         if tenant_id is not None:
-            stmt = stmt.outerjoin(UserTenantRole, UserTenantRole.user_id == User.id).where(
-                or_(User.tenant_id == tenant_id, UserTenantRole.tenant_id == tenant_id)
-            )
+            stmt = stmt.where(user_belongs_to_tenant(User, tenant_id))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -41,10 +39,9 @@ class UserRepository(BaseRepository):
     async def get_by_id_in_tenant(self, user_id: int, tenant_id: int) -> User | None:
         result = await self.session.execute(
             select(User)
-            .outerjoin(UserTenantRole, UserTenantRole.user_id == User.id)
             .where(
                 User.id == user_id,
-                or_(User.tenant_id == tenant_id, UserTenantRole.tenant_id == tenant_id),
+                user_belongs_to_tenant(User, tenant_id),
             )
         )
         return result.scalar_one_or_none()
@@ -54,13 +51,12 @@ class UserRepository(BaseRepository):
             return []
         result = await self.session.execute(
             select(User)
-            .outerjoin(UserTenantRole, UserTenantRole.user_id == User.id)
             .where(
                 User.id.in_(user_ids),
-                or_(User.tenant_id == tenant_id, UserTenantRole.tenant_id == tenant_id),
+                user_belongs_to_tenant(User, tenant_id),
             )
         )
-        return list(result.scalars().unique().all())
+        return list(result.scalars().all())
 
     async def get_by_email_in_tenant(self, email: str, tenant_id: int) -> User | None:
         return await self.get_by_email(email, tenant_id=tenant_id)
@@ -74,8 +70,7 @@ class UserRepository(BaseRepository):
     ) -> list[User]:
         stmt = (
             select(User)
-            .outerjoin(UserTenantRole, UserTenantRole.user_id == User.id)
-            .where(or_(User.tenant_id == tenant_id, UserTenantRole.tenant_id == tenant_id))
+            .where(user_belongs_to_tenant(User, tenant_id))
             .order_by(User.id)
         )
         if cursor_id is not None:
@@ -83,7 +78,7 @@ class UserRepository(BaseRepository):
         else:
             stmt = self.apply_pagination(stmt, limit=limit, offset=offset)
         result = await self.session.execute(stmt)
-        return list(result.scalars().unique().all())
+        return list(result.scalars().all())
 
     async def list_by_tenant_and_roles(
         self,
@@ -95,21 +90,18 @@ class UserRepository(BaseRepository):
             return []
         result = await self.session.execute(
             select(User)
-            .outerjoin(UserTenantRole, UserTenantRole.user_id == User.id)
             .where(
-                or_(User.tenant_id == tenant_id, UserTenantRole.tenant_id == tenant_id),
-                or_(User.role.in_(roles), UserTenantRole.role.in_(roles)),
+                user_has_tenant_role(User, tenant_id, *[role.value for role in roles]),
             )
             .order_by(User.id.asc())
             .limit(limit)
         )
-        return list(result.scalars().unique().all())
+        return list(result.scalars().all())
 
     async def count_by_tenant(self, tenant_id: int) -> int:
         result = await self.session.execute(
             select(func.count(func.distinct(User.id)))
             .select_from(User)
-            .outerjoin(UserTenantRole, UserTenantRole.user_id == User.id)
-            .where(or_(User.tenant_id == tenant_id, UserTenantRole.tenant_id == tenant_id))
+            .where(user_belongs_to_tenant(User, tenant_id))
         )
         return int(result.scalar_one())

@@ -54,10 +54,28 @@ class DiagnosticAnswerResponse(BaseModel):
     question_id: int
     answered_count: int
     completed_at: datetime | None
+    adaptive_decision: dict | None = None
 
 
 class DiagnosticSubmitRequest(BaseModel):
     test_id: int = Field(gt=0)
+
+
+class DiagnosticAdaptiveTopicLevelResponse(BaseModel):
+    topic_id: int
+    level: str
+    average_accuracy: float
+    average_time_taken: float
+    average_attempts: float
+    recommended_difficulty: int
+
+
+class DiagnosticAdaptiveSummaryResponse(BaseModel):
+    topic_levels: list[DiagnosticAdaptiveTopicLevelResponse] = []
+
+
+class DiagnosticSubmitResponse(DiagnosticStartResponse):
+    adaptive_summary: DiagnosticAdaptiveSummaryResponse
 
 
 class DiagnosticResultResponse(BaseModel):

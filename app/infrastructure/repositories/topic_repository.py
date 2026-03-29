@@ -185,6 +185,33 @@ class TopicRepository:
         )
         return list(result.scalars().all())
 
+    async def list_questions_for_topics(
+        self,
+        *,
+        tenant_id: int,
+        topic_ids: list[int],
+        exclude_question_ids: list[int] | None = None,
+        goal_id: int | None = None,
+    ) -> list[Question]:
+        if not topic_ids:
+            return []
+        stmt = (
+            select(Question)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(
+                Topic.tenant_id == self._require_tenant_id(tenant_id),
+                Question.topic_id.in_(topic_ids),
+            )
+            .order_by(Question.topic_id.asc(), Question.difficulty.asc(), Question.id.asc())
+        )
+        if exclude_question_ids:
+            stmt = stmt.where(~Question.id.in_(exclude_question_ids))
+        if goal_id is not None:
+            mapped_topic_ids = select(GoalTopic.topic_id).where(GoalTopic.goal_id == goal_id)
+            stmt = stmt.where(Question.topic_id.in_(mapped_topic_ids))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def create_topic(self, tenant_id: int, name: str, description: str) -> Topic:
         topic = Topic(tenant_id=tenant_id, name=name, description=description)
         self.session.add(topic)

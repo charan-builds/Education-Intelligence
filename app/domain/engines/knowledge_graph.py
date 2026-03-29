@@ -20,6 +20,31 @@ class KnowledgeGraphEngine:
             graph[topic_id] = sorted(set(graph[topic_id]))
         return graph
 
+    @staticmethod
+    def _dependency_depth_map(graph: dict[int, list[int]]) -> dict[int, int]:
+        visiting: set[int] = set()
+        memo: dict[int, int] = {}
+
+        def depth(current: int) -> int:
+            if current in memo:
+                return memo[current]
+            if current in visiting:
+                raise ValueError(f"Circular dependency detected at topic {current}")
+
+            visiting.add(current)
+            prerequisites = graph.get(current, [])
+            if not prerequisites:
+                result = 0
+            else:
+                result = 1 + max(depth(prerequisite) for prerequisite in prerequisites)
+            visiting.remove(current)
+            memo[current] = result
+            return result
+
+        for topic_id in list(graph.keys()):
+            depth(topic_id)
+        return memo
+
     def _dfs_prerequisites(
         self,
         graph: dict[int, list[int]],
@@ -52,26 +77,19 @@ class KnowledgeGraphEngine:
 
     async def get_dependency_depth(self, topic_id: int, tenant_id: int) -> int:
         graph = await self._build_graph(tenant_id=tenant_id)
-        visiting: set[int] = set()
-        memo: dict[int, int] = {}
+        return self._dependency_depth_map(graph).get(topic_id, 0)
 
-        def depth(current: int) -> int:
-            if current in memo:
-                return memo[current]
-            if current in visiting:
-                raise ValueError(f"Circular dependency detected at topic {current}")
+    async def get_dependency_depths(self, topic_ids: list[int], tenant_id: int) -> dict[int, int]:
+        graph = await self._build_graph(tenant_id=tenant_id)
+        depth_map = self._dependency_depth_map(graph)
+        return {int(topic_id): int(depth_map.get(topic_id, 0)) for topic_id in topic_ids}
 
-            visiting.add(current)
-            prerequisites = graph.get(current, [])
-            if not prerequisites:
-                result = 0
-            else:
-                result = 1 + max(depth(prerequisite) for prerequisite in prerequisites)
-            visiting.remove(current)
-            memo[current] = result
-            return result
-
-        return depth(topic_id)
+    async def generate_learning_paths(self, target_topic_ids: list[int], tenant_id: int) -> dict[int, list[int]]:
+        graph = await self._build_graph(tenant_id=tenant_id)
+        return {
+            int(topic_id): self._dfs_prerequisites(graph, int(topic_id)) + [int(topic_id)]
+            for topic_id in target_topic_ids
+        }
 
     async def detect_missing_foundations(
         self,

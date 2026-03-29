@@ -42,6 +42,12 @@ request_duration = Histogram(
     ["endpoint", "method", "status_code"],
 )
 
+requests_in_flight = Gauge(
+    "requests_in_flight",
+    "Current in-flight HTTP requests",
+    ["method"],
+)
+
 error_count = Counter(
     "error_count",
     "Total HTTP errors",
@@ -138,6 +144,18 @@ event_processing_duration_seconds = Histogram(
     "event_processing_duration_seconds",
     "Event and background task processing duration in seconds",
     ["task_name", "status"],
+)
+
+queue_wait_duration_seconds = Histogram(
+    "queue_wait_duration_seconds",
+    "Time a task spent queued before execution",
+    ["task_name"],
+)
+
+task_retries_total = Counter(
+    "task_retries_total",
+    "Background task retries",
+    ["task_name"],
 )
 
 circuit_breaker_state = Gauge(

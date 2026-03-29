@@ -6,7 +6,6 @@ from app.application.services.outbox_service import OutboxService
 from app.application.services.roadmap_service import RoadmapService
 from app.core.dependencies import get_current_user
 from app.infrastructure.database import get_db_session
-from app.infrastructure.jobs.dispatcher import enqueue_job
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.diagnostic_schema import (
     DiagnosticAnswerRequest,
@@ -17,6 +16,7 @@ from app.schemas.diagnostic_schema import (
     DiagnosticResumeResponse,
     DiagnosticStartRequest,
     DiagnosticStartResponse,
+    DiagnosticSubmitResponse,
     DiagnosticSubmitRequest,
 )
 
@@ -75,7 +75,7 @@ async def answer_diagnostic_question(
     )
 
 
-@router.post("/submit", response_model=DiagnosticStartResponse)
+@router.post("/submit", response_model=DiagnosticSubmitResponse)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
 async def submit_diagnostic(
@@ -84,7 +84,7 @@ async def submit_diagnostic(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    test = await DiagnosticService(db).finalize_test(
+    result = await DiagnosticService(db).finalize_test(
         test_id=payload.test_id,
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
@@ -92,29 +92,19 @@ async def submit_diagnostic(
     _, should_enqueue = await RoadmapService(db).ensure_generation_requested(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
-        goal_id=test.goal_id,
+        goal_id=result["goal_id"],
         test_id=payload.test_id,
     )
     if should_enqueue:
-        queued = enqueue_job(
-            "jobs.generate_roadmap",
-            args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
+        # Always enqueue via transactional outbox to make dispatch idempotent.
+        await OutboxService(db).add_task_event(
+            task_name="jobs.generate_roadmap",
+            args=[current_user.id, current_user.tenant_id, result["goal_id"], payload.test_id],
+            tenant_id=current_user.tenant_id,
+            idempotency_key=f"roadmap-generate:{current_user.id}:{result['goal_id']}:{payload.test_id}",
         )
-        if not queued:
-            await OutboxService(db).add_task_event(
-                task_name="jobs.generate_roadmap",
-                args=[current_user.id, current_user.tenant_id, test.goal_id, payload.test_id],
-                tenant_id=current_user.tenant_id,
-                idempotency_key=f"roadmap-generate:{current_user.tenant_id}:{current_user.id}:{test.goal_id}:{payload.test_id}",
-            )
-            await db.commit()
-    return {
-        "id": test.id,
-        "user_id": test.user_id,
-        "goal_id": test.goal_id,
-        "started_at": test.started_at,
-        "completed_at": test.completed_at,
-    }
+        await db.commit()
+    return result
 
 
 @router.get("/result", response_model=DiagnosticResultResponse)

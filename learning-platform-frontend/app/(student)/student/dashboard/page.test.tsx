@@ -63,10 +63,21 @@ vi.mock("@/hooks/useDashboard", () => ({
     recentActivity: [{ title: "Graph Algorithms", subtitle: "Priority 1", tone: "completed" }],
     retention: {
       average_retention_score: 74,
-      due_reviews: [{ topic_id: 11, topic_name: "Graph Algorithms", retention_score: 62 }],
-      recommended_resources: [{ title: "Graph review set", reason: "Strengthen retention", href: "/student/roadmap" }],
+      due_reviews: [{ topic_id: 11, topic_name: "Graph Algorithms", retention_score: 62, review_interval_days: 3 }],
+      recommended_resources: [
+        {
+          id: 201,
+          title: "Graph review set",
+          topic_name: "Graph Algorithms",
+          resource_type: "quiz",
+          difficulty: "intermediate",
+          reason: "Strengthen retention",
+          href: "/student/roadmap",
+          url: "https://example.com/graph-review",
+        },
+      ],
     },
-    badges: [{ name: "Consistency", description: "Maintained your streak.", icon: "star" }],
+    badges: [{ name: "Consistency", description: "Maintained your streak.", icon: "star", awarded_at: "2026-03-28T00:00:00Z" }],
     cognitiveModel: {
       confusion_level: "low",
       confusion_signals: ["Keeps momentum after feedback"],
@@ -161,6 +172,6 @@ describe("StudentDashboardPage", () => {
     expect(screen.getByText("An adaptive learning command center")).toBeInTheDocument();
     expect(screen.getAllByText("Graph Algorithms").length).toBeGreaterThan(0);
     expect(screen.getByRole("link", { name: /View roadmap/i })).toHaveAttribute("href", "/student/roadmap");
-    expect(screen.getByText("AdaptiveGuidancePanel")).toBeInTheDocument();
+    expect(screen.getByText("Progress feels alive when every signal tells one story.")).toBeInTheDocument();
   });
 });

@@ -116,7 +116,7 @@ export default function StudentDiagnosticPage() {
         return loadNextQuestion({ testId });
       })
       .catch(() => setFlowError("Unable to resume the diagnostic session."));
-  }, [isTestMode, loadNextQuestion, testId]);
+  }, [isTestMode, loadNextQuestion, router, testId]);
 
   const goals = goalsQuery.data?.items ?? [];
 

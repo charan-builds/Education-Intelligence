@@ -39,12 +39,44 @@ class _DummySession:
     pass
 
 
+async def _noop(*args, **kwargs):
+    _ = args, kwargs
+    return None
+
+
 class _FakeRoadmapService:
     should_raise_not_found = False
     last_update = None
+    last_generation = None
 
     def __init__(self, session):
         self.session = session
+
+    async def ensure_generation_requested(self, **kwargs):
+        _FakeRoadmapService.last_generation = kwargs
+        roadmap = SimpleNamespace(
+            id=44,
+            user_id=kwargs["user_id"],
+            goal_id=kwargs["goal_id"],
+            test_id=kwargs["test_id"],
+            status="ready",
+            error_message=None,
+            generated_at="2026-03-14T00:00:00Z",
+            steps=[],
+        )
+        return roadmap, False
+
+    def serialize_roadmap(self, roadmap):
+        return {
+            "id": roadmap.id,
+            "user_id": roadmap.user_id,
+            "goal_id": roadmap.goal_id,
+            "test_id": roadmap.test_id,
+            "status": roadmap.status,
+            "error_message": roadmap.error_message,
+            "generated_at": roadmap.generated_at,
+            "steps": [],
+        }
 
     async def update_step_status(self, **kwargs):
         _FakeRoadmapService.last_update = kwargs
@@ -68,6 +100,8 @@ def _user(role: str):
 
 def test_patch_roadmap_step_success(monkeypatch):
     monkeypatch.setattr(roadmap_routes, "RoadmapService", _FakeRoadmapService)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_user", _noop)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_tenant", _noop)
 
     async def _run():
         result = await roadmap_routes.update_roadmap_step(
@@ -89,6 +123,8 @@ def test_patch_roadmap_step_success(monkeypatch):
 
 def test_patch_roadmap_step_forbidden_for_teacher(monkeypatch):
     monkeypatch.setattr(roadmap_routes, "RoadmapService", _FakeRoadmapService)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_user", _noop)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_tenant", _noop)
 
     async def _run():
         with pytest.raises(HTTPException) as exc:
@@ -107,6 +143,8 @@ def test_patch_roadmap_step_forbidden_for_teacher(monkeypatch):
 def test_patch_roadmap_step_not_found(monkeypatch):
     _FakeRoadmapService.should_raise_not_found = True
     monkeypatch.setattr(roadmap_routes, "RoadmapService", _FakeRoadmapService)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_user", _noop)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_tenant", _noop)
 
     async def _run():
         with pytest.raises(NotFoundError):
@@ -119,3 +157,27 @@ def test_patch_roadmap_step_not_found(monkeypatch):
 
     asyncio.run(_run())
     _FakeRoadmapService.should_raise_not_found = False
+
+
+def test_generate_roadmap_returns_serialized_response(monkeypatch):
+    monkeypatch.setattr(roadmap_routes, "RoadmapService", _FakeRoadmapService)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_user", _noop)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_tenant", _noop)
+
+    async def _run():
+        result = await roadmap_routes.generate_roadmap(
+            request=SimpleNamespace(),
+            payload=SimpleNamespace(goal_id=9, test_id=55),
+            db=SimpleNamespace(),
+            current_user=_user("student"),
+        )
+        assert result["id"] == 44
+        assert result["status"] == "ready"
+        assert _FakeRoadmapService.last_generation == {
+            "user_id": 7,
+            "tenant_id": 3,
+            "goal_id": 9,
+            "test_id": 55,
+        }
+
+    asyncio.run(_run())

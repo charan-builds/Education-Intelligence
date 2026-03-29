@@ -22,6 +22,9 @@ export type KnowledgeGraphNode = {
   mastery_score?: number | null;
   cluster: string;
   status: string;
+  is_completed?: boolean;
+  is_weak?: boolean;
+  is_locked?: boolean;
   skill_names: string[];
   prerequisite_count: number;
 };
@@ -46,7 +49,9 @@ export type KnowledgeGraphResponse = {
     topic_count: number;
     skill_count: number;
     edge_count: number;
+    completed_topic_count: number;
     weak_topic_count: number;
+    locked_topic_count: number;
   };
 };
 

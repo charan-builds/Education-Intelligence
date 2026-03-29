@@ -12,30 +12,6 @@ class _DummySession:
         return None
 
 
-class _FakeMentorService:
-    last_chat = None
-
-    def __init__(self, session):
-        self.session = session
-
-    async def chat(self, **kwargs):
-        _FakeMentorService.last_chat = kwargs
-        return {
-            "reply": "Focus on the next roadmap step.",
-            "advisor_type": "RuleBasedMentorAdvisor",
-            "used_ai": False,
-            "fallback_used": False,
-            "fallback_reason": None,
-            "suggested_focus_topics": [3],
-            "why_recommended": ["Your roadmap is partially complete."],
-            "provider": None,
-            "latency_ms": None,
-            "next_checkin_date": None,
-            "session_summary": "Re-centered the learner on the next milestone.",
-            "memory_summary": {},
-        }
-
-
 class _FakeMentorChatRepository:
     stored = {}
 
@@ -123,9 +99,14 @@ def _user():
 
 
 def test_mentor_chat_route_uses_authenticated_scope(monkeypatch):
-    monkeypatch.setattr(mentor_routes, "MentorService", _FakeMentorService)
     monkeypatch.setattr(mentor_routes, "MentorChatRepository", _FakeMentorChatRepository)
     monkeypatch.setattr(mentor_routes, "MentorMessageRepository", _FakeMentorMessageRepository)
+    enqueue_calls = []
+    monkeypatch.setattr(
+        mentor_routes,
+        "enqueue_job",
+        lambda task_name, args=None, kwargs=None: enqueue_calls.append((task_name, args, kwargs)) or True,
+    )
     monkeypatch.setattr(
         mentor_routes,
         "realtime_hub",
@@ -146,10 +127,10 @@ def test_mentor_chat_route_uses_authenticated_scope(monkeypatch):
             db=_DummySession(),
             current_user=_user(),
         )
-        assert response.reply == "Focus on the next roadmap step."
+        assert response.reply == ""
         assert response.request_id == "req-1"
-        assert _FakeMentorService.last_chat["tenant_id"] == 4
-        assert _FakeMentorService.last_chat["user_id"] == 9
+        assert response.status == "queued"
+        assert enqueue_calls == [("jobs.process_mentor_chat", [4, 9, "req-1"], None)]
 
     asyncio.run(_run())
 

@@ -5,8 +5,8 @@ import "reactflow/dist/style.css";
 import Providers from "./providers";
 
 export const metadata: Metadata = {
-  title: "Learning Intelligence Platform",
-  description: "Multi-tenant learning intelligence platform with role-based dashboards and AI-assisted workflows",
+  title: "Learnova AI",
+  description: "Production-ready AI learning SaaS frontend with a premium landing page, role-based dashboards, and FastAPI integration readiness.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

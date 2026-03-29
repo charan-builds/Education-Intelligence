@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request
+from app.core.config import get_settings
 
 try:
     from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -29,10 +32,19 @@ class _NoopLimiter:
         return _decorator
 
 
-if Limiter is None:
+def _running_under_pytest() -> bool:
+    return "pytest" in sys.modules or bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+
+if Limiter is None or _running_under_pytest():
     limiter: Any = _NoopLimiter()
 else:
-    limiter = Limiter(key_func=get_remote_address, default_limits=[])
+    settings = get_settings()
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=[],
+        storage_uri=settings.rate_limit_storage_url or settings.redis_url,
+    )
 
 
 def rate_limit_key_by_ip(request: Request) -> str:

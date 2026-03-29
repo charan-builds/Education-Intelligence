@@ -10,6 +10,7 @@ const loginMock = vi.fn().mockResolvedValue({ role: "student" });
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
+  useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
@@ -32,7 +33,7 @@ describe("AuthPage", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Sign in" }).at(-1)!);
 
     await waitFor(() => expect(loginMock).toHaveBeenCalled());
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/student/roadmap"));

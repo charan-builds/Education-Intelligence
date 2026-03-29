@@ -1,18 +1,20 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Briefcase, FileText, ShieldCheck, Sparkles } from "lucide-react";
-import { useMemo } from "react";
+import { Briefcase, FileUp, FileText, ShieldCheck, Sparkles } from "lucide-react";
+import { ChangeEvent, useMemo, useState } from "react";
 
 import PageHeader from "@/components/layouts/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import { getCareerOverview, getInterviewPrep } from "@/services/careerService";
+import { createUploadRequest, finalizeUpload, uploadAssetToSignedUrl } from "@/services/fileService";
 
 export default function StudentCareerPage() {
   const overviewQuery = useQuery({ queryKey: ["career", "overview"], queryFn: getCareerOverview });
   const overview = overviewQuery.data;
   const topRole = overview?.readiness.top_role_matches[0];
+  const [uploadedResume, setUploadedResume] = useState<{ filename: string; size: number } | null>(null);
 
   const interviewMutation = useMutation({
     mutationFn: () =>
@@ -22,11 +24,45 @@ export default function StudentCareerPage() {
         count: 5,
       }),
   });
+  const resumeUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const uploadRequest = await createUploadRequest({
+        filename: file.name,
+        content_type: file.type || "application/pdf",
+        metadata: {
+          document_type: "resume",
+          source: "career_center",
+        },
+      });
+      await uploadAssetToSignedUrl(file, uploadRequest);
+      const finalized = await finalizeUpload(uploadRequest.asset_id, file, {
+        document_type: "resume",
+        original_filename: file.name,
+      });
+      return {
+        ...finalized,
+        filename: file.name,
+        size: file.size,
+      };
+    },
+    onSuccess: (result) => {
+      setUploadedResume({ filename: result.filename, size: result.size });
+    },
+  });
 
   const phaseEntries = useMemo(
     () => Object.entries(overview?.career_path.career_roadmap ?? {}),
     [overview?.career_path.career_roadmap],
   );
+
+  function handleResumeSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+    resumeUploadMutation.mutate(file);
+    event.target.value = "";
+  }
 
   return (
     <div className="space-y-6">
@@ -60,13 +96,48 @@ export default function StudentCareerPage() {
         </SurfaceCard>
 
         <SurfaceCard title="Resume builder" description="Auto-generated resume summary from actual learning progress.">
-          <div className="story-card">
-            <p className="text-xl font-semibold text-slate-950">{overview?.resume_preview.headline ?? "Resume preview"}</p>
-            <p className="mt-3 text-sm leading-7 text-slate-600">{overview?.resume_preview.summary}</p>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Skills</p>
-            <p className="mt-2 text-sm text-slate-700">{overview?.resume_preview.skills.join(", ") || "No mastered skills yet"}</p>
-            <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Projects</p>
-            <p className="mt-2 text-sm text-slate-700">{overview?.resume_preview.projects.join(" • ") || "No projects yet"}</p>
+          <div className="space-y-4">
+            <div className="story-card">
+              <p className="text-xl font-semibold text-slate-950">{overview?.resume_preview.headline ?? "Resume preview"}</p>
+              <p className="mt-3 text-sm leading-7 text-slate-600">{overview?.resume_preview.summary}</p>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Skills</p>
+              <p className="mt-2 text-sm text-slate-700">{overview?.resume_preview.skills.join(", ") || "No mastered skills yet"}</p>
+              <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Projects</p>
+              <p className="mt-2 text-sm text-slate-700">{overview?.resume_preview.projects.join(" • ") || "No projects yet"}</p>
+            </div>
+            <div className="story-card border-dashed border-slate-300">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">Resume upload vault</p>
+                  <p className="mt-2 text-sm leading-7 text-slate-600">
+                    Upload a private resume draft through signed object-storage URLs so future review and tailoring flows can use the latest artifact.
+                  </p>
+                </div>
+                <FileUp className="h-5 w-5 text-brand-700" />
+              </div>
+              <label className="mt-4 inline-flex cursor-pointer rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white">
+                Choose resume
+                <input
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  className="hidden"
+                  onChange={handleResumeSelect}
+                />
+              </label>
+              {resumeUploadMutation.isPending ? (
+                <p className="mt-3 text-sm text-slate-600">Uploading securely to object storage...</p>
+              ) : null}
+              {resumeUploadMutation.isError ? (
+                <p className="mt-3 text-sm text-rose-600">
+                  {resumeUploadMutation.error instanceof Error ? resumeUploadMutation.error.message : "Unable to upload this file right now."}
+                </p>
+              ) : null}
+              {uploadedResume ? (
+                <p className="mt-3 text-sm text-emerald-700">
+                  Stored {uploadedResume.filename} ({Math.max(1, Math.round(uploadedResume.size / 1024))} KB) in the private resume vault.
+                </p>
+              ) : null}
+            </div>
           </div>
         </SurfaceCard>
       </div>

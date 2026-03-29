@@ -12,6 +12,7 @@ class MentorChatRequest(BaseModel):
 
 class MentorChatResponse(BaseModel):
     request_id: str | None = None
+    status: str = "ready"
     reply: str
     advisor_type: str
     used_ai: bool = False
@@ -59,6 +60,12 @@ class MentorNotificationItem(BaseModel):
 
 class MentorNotificationsResponse(BaseModel):
     notifications: list[MentorNotificationItem]
+
+
+class MentorLearnerResponse(BaseModel):
+    user_id: int
+    email: str
+    display_name: str
 
 
 class AgentObservedStateResponse(BaseModel):

@@ -8,6 +8,7 @@ export const appRoutes = {
     diagnostic: "/student/diagnostic",
     diagnosticResult: "/student/diagnostic/result",
     roadmap: "/student/roadmap",
+    mentor: "/student/mentor",
     progress: "/student/progress",
     network: "/student/network",
     digitalTwin: "/student/digital-twin",

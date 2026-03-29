@@ -55,7 +55,7 @@ export default function DashboardShell() {
       <div className="mx-auto max-w-7xl px-6 py-10">
         <header className="flex flex-col gap-6 rounded-[32px] border border-white/70 bg-white/80 p-8 shadow-[0_30px_80px_rgba(15,23,42,0.12)] backdrop-blur md:flex-row md:items-start md:justify-between">
           <div className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-700">Learning Intelligence Platform</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-sky-700">Learnova AI Platform</p>
             <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
               Multi-tenant learning operations, diagnostics, and roadmap intelligence in one workspace.
             </h1>

@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1.7
+
+FROM mcr.microsoft.com/playwright:v1.58.2-noble
+
+WORKDIR /app
+
+COPY learning-platform-frontend/package.json learning-platform-frontend/package-lock.json ./
+RUN npm ci
+
+COPY learning-platform-frontend ./
+
+ENV CI=true
+
+CMD ["npm", "run", "test:e2e"]

@@ -44,7 +44,7 @@ export default function RoleDashboardLayout({
         <aside className="border-r border-slate-200 bg-slate-950 px-5 py-8 text-slate-100">
           <div className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
             <p className="text-xs font-semibold uppercase tracking-[0.3em] text-sky-300">{roleLabel}</p>
-            <h2 className="mt-3 text-2xl font-semibold text-white">LearnIQ Ops</h2>
+            <h2 className="mt-3 text-2xl font-semibold text-white">Learnova Ops</h2>
             <p className="mt-2 text-sm leading-6 text-slate-400">Unified frontend connected to your FastAPI backend.</p>
           </div>
 

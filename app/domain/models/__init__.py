@@ -16,6 +16,8 @@ from app.domain.models.feature_flag import FeatureFlag
 from app.domain.models.file_asset import FileAsset
 from app.domain.models.goal import Goal
 from app.domain.models.goal_topic import GoalTopic
+from app.domain.models.gamification_event import GamificationEvent
+from app.domain.models.gamification_profile import GamificationProfile
 from app.domain.models.job_role import JobRole
 from app.domain.models.job_role_skill import JobRoleSkill
 from app.domain.models.learning_event import LearningEvent
@@ -30,6 +32,7 @@ from app.domain.models.mentor_memory_profile import MentorMemoryProfile
 from app.domain.models.mentor_chat_message import MentorChatMessage
 from app.domain.models.mentor_message import MentorMessage
 from app.domain.models.mentor_session_memory import MentorSessionMemory
+from app.domain.models.mentor_student import MentorStudent
 from app.domain.models.outbox_event import OutboxEvent
 from app.domain.models.api_client import APIClient
 from app.domain.models.plugin_registry import PluginRegistry
@@ -42,6 +45,7 @@ from app.domain.models.roadmap_step import RoadmapStep
 from app.domain.models.skill import Skill
 from app.domain.models.social_follow import SocialFollow
 from app.domain.models.subscription_plan import SubscriptionPlan
+from app.domain.models.session import SessionRecord
 from app.domain.models.tenant import Tenant
 from app.domain.models.tenant_subscription import TenantSubscription
 from app.domain.models.stream_consumer_offset import StreamConsumerOffset
@@ -86,12 +90,15 @@ __all__ = [
     "MentorChatMessage",
     "MentorMessage",
     "MentorSessionMemory",
+    "MentorStudent",
     "OutboxEvent",
     "APIClient",
     "PluginRegistry",
     "ProcessedStreamEvent",
     "Goal",
     "GoalTopic",
+    "GamificationEvent",
+    "GamificationProfile",
     "JobRole",
     "JobRoleSkill",
     "Topic",
@@ -104,6 +111,7 @@ __all__ = [
     "Skill",
     "SocialFollow",
     "SubscriptionPlan",
+    "SessionRecord",
     "StreamConsumerOffset",
     "TopicSkill",
     "DiagnosticTest",

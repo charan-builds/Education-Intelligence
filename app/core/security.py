@@ -59,12 +59,18 @@ def _create_token(
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
-def create_access_token(subject: str | dict[str, Any], expires_delta: timedelta | None = None) -> str:
+def create_access_token(
+    subject: str | dict[str, Any],
+    expires_delta: timedelta | None = None,
+    *,
+    token_id: str | None = None,
+) -> str:
     settings = get_settings()
     return _create_token(
         subject,
         token_type=TOKEN_TYPE_ACCESS,
         expires_delta=expires_delta or timedelta(minutes=settings.access_token_expire_minutes),
+        token_id=token_id,
     )
 
 

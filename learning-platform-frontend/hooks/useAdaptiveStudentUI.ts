@@ -100,7 +100,14 @@ export function useAdaptiveStudentUI(dashboard: StudentDashboardView) {
       label: "Steady progress",
       message: "The interface is balancing execution, review, and AI guidance based on your current learning rhythm.",
     };
-  }, [dashboard.kpis.completionPercent, dashboard.kpis.focusScore, dashboard.kpis.streakDays, dashboard.kpis.weakTopicCount, dashboard.retention.average_retention_score, dashboard.retention.due_reviews.length]);
+  }, [
+    dashboard.kpis.completionPercent,
+    dashboard.kpis.focusScore,
+    dashboard.kpis.streakDays,
+    dashboard.kpis.weakTopicCount,
+    dashboard.retention.average_retention_score,
+    dashboard.retention.due_reviews.length,
+  ]);
 
   const nextBestAction = useMemo(() => {
     const topWeakTopic = dashboard.weakTopics[0];
@@ -179,7 +186,15 @@ export function useAdaptiveStudentUI(dashboard: StudentDashboardView) {
     ];
 
     return features.sort((left, right) => right.score - left.score);
-  }, [dashboard.kpis.completionPercent, dashboard.kpis.inProgress, dashboard.kpis.weakTopicCount, dashboard.retention.due_reviews.length, emotionalState.tone, featureUsage]);
+  }, [
+    dashboard.kpis.completionPercent,
+    dashboard.kpis.inProgress,
+    dashboard.kpis.weakTopicCount,
+    dashboard.retention.due_reviews.length,
+    dashboard.weakTopics,
+    emotionalState.tone,
+    featureUsage,
+  ]);
 
   const visibleSections = useMemo(() => {
     const hideAmbient = focusMode || emotionalState.tone === "supportive";

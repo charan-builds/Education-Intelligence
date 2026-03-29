@@ -23,6 +23,16 @@ export type DiagnosticSession = {
   started_at: string;
   completed_at: string | null;
   answered_count?: number;
+  adaptive_summary?: {
+    topic_levels: Array<{
+      topic_id: number;
+      level: string;
+      average_accuracy: number;
+      average_time_taken: number;
+      average_attempts: number;
+      recommended_difficulty: number;
+    }>;
+  };
 };
 
 export type DiagnosticAnswerResponse = {
@@ -30,6 +40,16 @@ export type DiagnosticAnswerResponse = {
   question_id: number;
   answered_count: number;
   completed_at: string | null;
+  adaptive_decision?: {
+    topic_id: number;
+    current_difficulty: number;
+    recommended_difficulty: number;
+    accuracy: number;
+    time_taken: number;
+    attempt_count: number;
+    level: string;
+    rule: string;
+  } | null;
 };
 
 export type DiagnosticResult = {

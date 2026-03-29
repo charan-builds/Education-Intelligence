@@ -52,6 +52,8 @@ class AdaptiveTestingEngine:
     MEDIUM = 2
     HARD = 3
     CORRECT_THRESHOLD = 70.0
+    FAST_THRESHOLD_SECONDS = 20.0
+    SLOW_THRESHOLD_SECONDS = 45.0
 
     @staticmethod
     def _normalize_question(question: Any) -> AdaptiveQuestion:
@@ -78,6 +80,21 @@ class AdaptiveTestingEngine:
         last = previous_answers[-1]
         last_question = question_by_id.get(int(last.get("question_id", 0)))
         base = last_question.difficulty if last_question else self.MEDIUM
+        last_accuracy = float(last.get("accuracy", float(last.get("score", 0.0)) / 100.0))
+        last_time_taken = float(last.get("time_taken", 0.0) or 0.0)
+        last_attempt_count = int(last.get("attempt_count", 1) or 1)
+
+        if (
+            last_accuracy >= 0.85
+            and last_time_taken <= self.FAST_THRESHOLD_SECONDS
+            and last_attempt_count <= 1
+        ):
+            return min(self.HARD, base + 1)
+        if (
+            last_accuracy < 0.5
+            and (last_time_taken >= self.SLOW_THRESHOLD_SECONDS or last_attempt_count >= 2)
+        ):
+            return max(self.EASY, base - 1)
 
         recent = previous_answers[-2:]
         recent_correct = [float(answer.get("score", 0.0)) >= self.CORRECT_THRESHOLD for answer in recent]

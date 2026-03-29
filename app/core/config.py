@@ -1,19 +1,21 @@
 from functools import lru_cache
 from uuid import uuid4
 
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     database_url: str
     redis_url: str = "redis://localhost:6379"
+    rate_limit_storage_url: str | None = None
     celery_broker_url: str = "redis://redis:6379/0"
     celery_result_backend: str = "redis://redis:6379/0"
     ai_service_url: str = "http://ai_service:8100"
     ai_service_timeout_seconds: float = 10.0
     recommendation_engine: str = "rule"
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
-    secret_key: str
+    secret_key: str = Field(validation_alias=AliasChoices("JWT_SECRET", "SECRET_KEY"))
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
     refresh_token_expire_minutes: int = 20160
@@ -24,6 +26,8 @@ class Settings(BaseSettings):
     database_pool_size: int = 20
     database_max_overflow: int = 40
     database_pool_timeout_seconds: int = 30
+    database_pool_recycle_seconds: int = 1800
+    database_pool_use_lifo: bool = True
     environment: str = "development"
     default_tenant_id: int = 1
     outbox_max_attempts: int = 5
@@ -53,6 +57,23 @@ class Settings(BaseSettings):
     s3_bucket_name: str | None = None
     s3_region: str = "us-east-1"
     cdn_base_url: str | None = None
+    upload_max_bytes: int = 25_000_000
+    upload_allowed_content_types: str = (
+        "application/pdf,image/png,image/jpeg,image/webp,text/plain,text/markdown,"
+        "application/json,video/mp4"
+    )
+    upload_metadata_max_keys: int = 24
+    upload_metadata_max_value_length: int = 500
+    s3_presign_expiry_seconds: int = 900
+    app_base_url: str = "http://localhost:3000"
+    email_enabled: bool = False
+    email_provider: str = "log"
+    email_from_address: str = "no-reply@example.com"
+    email_from_name: str = "Learning Intelligence Platform"
+    email_reply_to: str | None = None
+    email_sendgrid_api_key: str | None = None
+    email_template_logo_url: str | None = None
+    sentry_dsn: str | None = None
     csrf_cookie_name: str = "csrf_token"
     csrf_header_name: str = "X-CSRF-Token"
     backup_s3_prefix: str = "db-backups"
@@ -79,7 +100,29 @@ class Settings(BaseSettings):
     meilisearch_index_name: str = "learning-platform-content"
     elasticsearch_index_name: str = "learning-platform-content"
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore", populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_security_posture(self) -> "Settings":
+        environment = self.environment.strip().lower()
+        normalized_secret = self.secret_key.strip().lower()
+        insecure_markers = {
+            "changeme",
+            "change-me",
+            "replace-me",
+            "replace-with-a-long-random-secret",
+            "supersecret",
+            "supersecretkey",
+            "dev-secret",
+        }
+
+        if environment == "production":
+            if len(self.secret_key.strip()) < 32 or any(marker in normalized_secret for marker in insecure_markers):
+                raise ValueError("JWT_SECRET/SECRET_KEY must be a strong production secret")
+            if not self.auth_cookie_secure:
+                raise ValueError("AUTH_COOKIE_SECURE must be true in production")
+
+        return self
 
 
 @lru_cache

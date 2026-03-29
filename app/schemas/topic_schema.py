@@ -41,6 +41,9 @@ class KnowledgeGraphNodeResponse(BaseModel):
     mastery_score: float | None = None
     cluster: str
     status: str
+    is_completed: bool = False
+    is_weak: bool = False
+    is_locked: bool = False
     skill_names: list[str] = []
     prerequisite_count: int = 0
 
@@ -61,7 +64,9 @@ class KnowledgeGraphSummaryResponse(BaseModel):
     topic_count: int
     skill_count: int
     edge_count: int
+    completed_topic_count: int = 0
     weak_topic_count: int
+    locked_topic_count: int = 0
 
 
 class KnowledgeGraphResponse(BaseModel):

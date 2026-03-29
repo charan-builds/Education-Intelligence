@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.feature_flags import FeatureFlagService
+from app.application.services.adaptive_engine_service import AdaptiveEngineService
+from app.application.services.gamification_service import GamificationService
 from app.domain.engines.adaptive_testing_engine import AdaptiveTestingEngine
 from app.domain.engines.weakness_modeling_engine import WeaknessModelingEngine
 from app.application.services.learning_event_service import LearningEventService
@@ -24,9 +27,11 @@ class DiagnosticService:
         self.goal_repository = GoalRepository(session)
         self.roadmap_repository = RoadmapRepository(session)
         self.adaptive_engine = AdaptiveTestingEngine()
+        self.adaptive_engine_service = AdaptiveEngineService()
         self.weakness_engine = WeaknessModelingEngine()
         self.feature_flag_service = FeatureFlagService(session)
         self.learning_event_service = LearningEventService(session)
+        self.gamification_service = GamificationService(session)
         self.retention_service = RetentionService(session)
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
@@ -47,6 +52,10 @@ class DiagnosticService:
                 valid_answers.add(normalized_alias)
         return 100.0 if normalized_user in valid_answers else 0.0
 
+    @staticmethod
+    def _accuracy_from_score(score: float) -> float:
+        return round(max(0.0, min(1.0, float(score) / 100.0)), 4)
+
     async def start_test(self, user_id: int, goal_id: int, tenant_id: int = 1):
         try:
             goal = await self.goal_repository.get_by_id(tenant_id=tenant_id, goal_id=goal_id)
@@ -62,6 +71,16 @@ class DiagnosticService:
             test = await self.diagnostic_repository.create_test(user_id=user_id, goal_id=goal_id, started_at=datetime.now(timezone.utc))
             await self.session.commit()
             return test
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.diagnostic_repository.get_latest_open_test_for_user(
+                user_id=user_id,
+                goal_id=goal_id,
+                tenant_id=tenant_id,
+            )
+            if existing is not None:
+                return existing
+            raise
         except Exception:
             await self.session.rollback()
             raise
@@ -73,25 +92,115 @@ class DiagnosticService:
         answers = await self.diagnostic_repository.list_answers_for_test(test_id=test.id)
         return test, answers
 
-    async def get_next_question(self, *, test_id: int, user_id: int, tenant_id: int) -> dict | None:
+    async def _get_or_build_test_state(self, *, test_id: int, user_id: int, tenant_id: int, for_update: bool = False):
+        state = await self.diagnostic_repository.get_test_state(
+            test_id=test_id,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            for_update=for_update,
+        )
+        if state is not None:
+            answered_ids = [int(x) for x in (state.answered_question_ids or []) if isinstance(x, int) or str(x).isdigit()]
+            previous_answers = list(state.previous_answers or [])
+            planned_question_ids = [int(x) for x in (getattr(state, "planned_question_ids", []) or []) if isinstance(x, int) or str(x).isdigit()]
+            return state, answered_ids, previous_answers, planned_question_ids
+
         test, answers = await self.get_or_resume_test(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
         previous_answers = [
             {
-                "question_id": answer.question_id,
+                "question_id": int(answer.question_id),
                 "user_answer": answer.user_answer,
-                "time_taken": answer.time_taken,
-                "score": answer.score,
+                "time_taken": float(answer.time_taken),
+                "score": float(answer.score),
             }
             for answer in answers
         ]
-        question = await self.select_next_question(
+        answered_ids = [int(a["question_id"]) for a in previous_answers if "question_id" in a]
+        next_question = await self.select_next_question(
             goal_id=test.goal_id,
             previous_answers=previous_answers,
             tenant_id=tenant_id,
         )
-        if question is None:
+        expected_next_question_id = int(next_question["id"]) if next_question is not None else None
+        now = datetime.now(timezone.utc)
+        state = await self.diagnostic_repository.upsert_test_state(
+            test_id=test.id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            goal_id=test.goal_id,
+            answered_question_ids=answered_ids,
+            previous_answers=previous_answers,
+            expected_next_question_id=expected_next_question_id,
+            updated_at=now,
+        )
+        return state, answered_ids, previous_answers, []
+
+    async def get_next_question(self, *, test_id: int, user_id: int, tenant_id: int) -> dict | None:
+        test = await self.diagnostic_repository.get_test_for_user(test_id, user_id, tenant_id)
+        if test is None:
+            raise NotFoundError("Test not found")
+        if test.completed_at is not None:
             return None
-        return {"test_id": test.id, **question}
+
+        state, _, previous_answers, planned_question_ids = await self._get_or_build_test_state(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
+        if state.expected_next_question_id is not None:
+            question_id = int(state.expected_next_question_id)
+            question = await self.topic_repository.get_question(question_id, tenant_id)
+            if question is None:
+                # If content changed, recompute from persisted history.
+                next_question = await self.select_next_question(
+                    goal_id=test.goal_id,
+                    previous_answers=previous_answers,
+                    question_ids=planned_question_ids or None,
+                    tenant_id=tenant_id,
+                )
+                if next_question is None:
+                    return None
+                await self.diagnostic_repository.upsert_test_state(
+                    test_id=test.id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    goal_id=test.goal_id,
+                    answered_question_ids=[int(a.get("question_id")) for a in previous_answers if a.get("question_id") is not None],
+                    previous_answers=previous_answers,
+                    expected_next_question_id=int(next_question["id"]),
+                    updated_at=datetime.now(timezone.utc),
+                )
+                return {"test_id": test.id, **next_question}
+            return {
+                "test_id": test.id,
+                "id": question.id,
+                "topic_id": question.topic_id,
+                "difficulty": question.difficulty,
+                "difficulty_label": {1: "easy", 2: "medium", 3: "hard"}.get(question.difficulty, "medium"),
+                "adaptive_strategy": "cached_state",
+                "target_topic_id": None,
+                "target_difficulty": None,
+                "weakness_topic_ids": [],
+                "question_type": question.question_type,
+                "question_text": question.question_text,
+                "answer_options": list(question.answer_options or []),
+            }
+
+        next_question = await self.select_next_question(
+            goal_id=test.goal_id,
+            previous_answers=previous_answers,
+            question_ids=planned_question_ids or None,
+            tenant_id=tenant_id,
+        )
+        if next_question is None:
+            return None
+        await self.diagnostic_repository.upsert_test_state(
+            test_id=test.id,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            goal_id=test.goal_id,
+            answered_question_ids=[int(a.get("question_id")) for a in previous_answers if a.get("question_id") is not None],
+            previous_answers=previous_answers,
+            expected_next_question_id=int(next_question["id"]),
+            updated_at=datetime.now(timezone.utc),
+        )
+        return {"test_id": test.id, **next_question}
 
     async def answer_question(
         self,
@@ -112,14 +221,27 @@ class DiagnosticService:
             )
             if test is None:
                 raise NotFoundError("Test not found")
-            existing_answers = await self.diagnostic_repository.list_answers_for_test(test_id=test.id)
             if test.completed_at is not None:
                 raise ValidationError("Diagnostic test already completed")
 
-            next_question = await self.get_next_question(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
-            if next_question is None:
+            state, answered_ids, previous_answers, planned_question_ids = await self._get_or_build_test_state(
+                test_id=test.id,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                for_update=True,
+            )
+            expected = state.expected_next_question_id
+            if expected is None:
+                computed = await self.select_next_question(
+                    goal_id=test.goal_id,
+                    previous_answers=previous_answers,
+                    question_ids=planned_question_ids or None,
+                    tenant_id=tenant_id,
+                )
+                expected = int(computed["id"]) if computed is not None else None
+            if expected is None:
                 raise ValidationError("Diagnostic is already complete")
-            if int(next_question["id"]) != int(question_id):
+            if int(expected) != int(question_id):
                 raise ValidationError("Question does not match the expected next diagnostic step")
 
             question = await self.topic_repository.get_question(question_id, tenant_id)
@@ -131,12 +253,78 @@ class DiagnosticService:
                 user_answer,
                 getattr(question, "accepted_answers", []),
             )
+            existing_answer = await self.diagnostic_repository.get_answer_for_test_question(
+                test_id=test_id,
+                question_id=question_id,
+                for_update=True,
+            )
+            attempt_count = int(getattr(existing_answer, "attempt_count", 0) or 0) + 1
+            accuracy = self._accuracy_from_score(score)
             await self.diagnostic_repository.upsert_answer(
                 test_id=test_id,
                 question_id=question_id,
                 user_answer=user_answer,
                 score=score,
                 time_taken=time_taken,
+                accuracy=accuracy,
+                attempt_count=attempt_count,
+            )
+            adaptive_decision = self.adaptive_engine_service.evaluate_answer(
+                topic_id=int(question.topic_id),
+                current_difficulty=int(question.difficulty),
+                score=score,
+                time_taken=time_taken,
+                attempt_count=attempt_count,
+            )
+            # Persist diagnostic state for fast resume/selection.
+            normalized_previous: list[dict] = []
+            replaced = False
+            for item in previous_answers:
+                try:
+                    if int(item.get("question_id")) == int(question_id):
+                        normalized_previous.append(
+                            {
+                                "question_id": int(question_id),
+                                "user_answer": user_answer,
+                                "time_taken": float(time_taken),
+                                "score": float(score),
+                                "accuracy": accuracy,
+                                "attempt_count": attempt_count,
+                            }
+                        )
+                        replaced = True
+                    else:
+                        normalized_previous.append(item)
+                except Exception:
+                    continue
+            if not replaced:
+                normalized_previous.append(
+                    {
+                        "question_id": int(question_id),
+                        "user_answer": user_answer,
+                        "time_taken": float(time_taken),
+                        "score": float(score),
+                        "accuracy": accuracy,
+                        "attempt_count": attempt_count,
+                    }
+                )
+            new_answered_ids = sorted({*answered_ids, int(question_id)})
+            next_after = await self.select_next_question(
+                goal_id=test.goal_id,
+                previous_answers=normalized_previous,
+                question_ids=planned_question_ids or None,
+                tenant_id=tenant_id,
+            )
+            expected_next_question_id = int(next_after["id"]) if next_after is not None else None
+            await self.diagnostic_repository.upsert_test_state(
+                test_id=test.id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                goal_id=test.goal_id,
+                answered_question_ids=new_answered_ids,
+                previous_answers=normalized_previous,
+                expected_next_question_id=expected_next_question_id,
+                updated_at=datetime.now(timezone.utc),
             )
             await self.learning_event_service.track_question_answered(
                 tenant_id=tenant_id,
@@ -161,8 +349,9 @@ class DiagnosticService:
             return {
                 "test_id": test_id,
                 "question_id": question_id,
-                "answered_count": len(existing_answers) + (0 if any(a.question_id == question_id for a in existing_answers) else 1),
+                "answered_count": len(new_answered_ids),
                 "completed_at": test.completed_at,
+                "adaptive_decision": self.adaptive_engine_service.serialize_decision(adaptive_decision),
             }
         except Exception:
             await self.session.rollback()
@@ -203,12 +392,16 @@ class DiagnosticService:
                     answer["user_answer"],
                     getattr(question, "accepted_answers", []),
                 )
+                attempt_count = int(getattr(existing_answer, "attempt_count", 1) or 1)
+                accuracy = self._accuracy_from_score(score)
                 await self.diagnostic_repository.upsert_answer(
                     test_id=test_id,
                     question_id=answer["question_id"],
                     user_answer=answer["user_answer"],
                     score=score,
                     time_taken=answer["time_taken"],
+                    accuracy=accuracy,
+                    attempt_count=attempt_count,
                 )
                 if existing_answer is None:
                     await self.learning_event_service.track_question_answered(
@@ -250,9 +443,28 @@ class DiagnosticService:
                 idempotency_key=f"diagnostic-complete:{tenant_id}:{user_id}:{test_id}",
                 commit=False,
             )
+            await self.gamification_service.award_test_completion(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                diagnostic_test_id=int(test_id),
+                goal_id=int(test.goal_id),
+                activity_time=datetime.now(timezone.utc),
+            )
             await self.session.commit()
             await self.ml_platform_service.build_feature_snapshot(user_id=user_id, tenant_id=tenant_id)
-            return test
+            stored_answers = await self.diagnostic_repository.list_answers_for_test(test_id=test_id)
+            adaptive_summary = self._build_adaptive_summary(
+                answers=stored_answers,
+                questions_by_id=questions_by_id,
+            )
+            return {
+                "id": test.id,
+                "user_id": test.user_id,
+                "goal_id": test.goal_id,
+                "started_at": test.started_at,
+                "completed_at": test.completed_at,
+                "adaptive_summary": adaptive_summary,
+            }
         except Exception:
             await self.session.rollback()
             raise
@@ -260,7 +472,17 @@ class DiagnosticService:
     async def finalize_test(self, *, test_id: int, user_id: int, tenant_id: int):
         test, answers = await self.get_or_resume_test(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
         if test.completed_at is not None:
-            return test
+            return {
+                "id": test.id,
+                "user_id": test.user_id,
+                "goal_id": test.goal_id,
+                "started_at": test.started_at,
+                "completed_at": test.completed_at,
+                "adaptive_summary": self._build_adaptive_summary(
+                    answers=answers,
+                    questions_by_id=await self._questions_by_id(tenant_id=tenant_id, question_ids=[int(answer.question_id) for answer in answers]),
+                ),
+            }
         next_question = await self.get_next_question(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
         if next_question is not None:
             raise ValidationError("Diagnostic still has unanswered questions")
@@ -277,6 +499,31 @@ class DiagnosticService:
                 for answer in answers
             ],
         )
+
+    async def _questions_by_id(self, *, tenant_id: int, question_ids: list[int]) -> dict[int, object]:
+        question_rows = await self.topic_repository.list_questions_by_ids(
+            tenant_id=tenant_id,
+            question_ids=question_ids,
+        )
+        return {int(question.id): question for question in question_rows}
+
+    def _build_adaptive_summary(self, *, answers: list[object], questions_by_id: dict[int, object]) -> dict:
+        adaptive_rows: list[dict] = []
+        for answer in answers:
+            question = questions_by_id.get(int(answer.question_id))
+            if question is None:
+                continue
+            adaptive_rows.append(
+                {
+                    "topic_id": int(question.topic_id),
+                    "difficulty": int(getattr(question, "difficulty", 2) or 2),
+                    "accuracy": float(getattr(answer, "accuracy", self._accuracy_from_score(float(answer.score)))),
+                    "time_taken": float(answer.time_taken),
+                    "attempt_count": int(getattr(answer, "attempt_count", 1) or 1),
+                }
+            )
+        profiles = self.adaptive_engine_service.classify_topic_levels(adaptive_rows)
+        return {"topic_levels": self.adaptive_engine_service.serialize_topic_profiles(profiles)}
 
     async def get_result(self, test_id: int, user_id: int, tenant_id: int) -> dict:
         scores = await self.diagnostic_repository.topic_scores_for_test(test_id, user_id, tenant_id)
@@ -300,9 +547,16 @@ class DiagnosticService:
         goal_id: int,
         previous_answers: list[dict],
         topic_scores: dict[int, float] | None = None,
+        question_ids: list[int] | None = None,
         tenant_id: int | None = None,
     ) -> dict | None:
-        questions = await self.topic_repository.list_questions_for_goal(goal_id=goal_id, tenant_id=tenant_id)
+        if question_ids:
+            questions = await self.topic_repository.list_questions_by_ids(
+                tenant_id=int(tenant_id) if tenant_id is not None else 1,
+                question_ids=[int(question_id) for question_id in question_ids],
+            )
+        else:
+            questions = await self.topic_repository.list_questions_for_goal(goal_id=goal_id, tenant_id=tenant_id)
         adaptive_enabled = True
         if tenant_id is not None:
             adaptive_enabled = await self.feature_flag_service.is_enabled(
@@ -324,6 +578,8 @@ class DiagnosticService:
                         str(answer["user_answer"]),
                         getattr(question, "accepted_answers", []),
                     ),
+                    "accuracy": float(answer.get("accuracy", self._accuracy_from_score(float(answer.get("score", 0.0))))),
+                    "attempt_count": int(answer.get("attempt_count", 1) or 1),
                 }
             )
         weakness_topic_ids: list[int] = []

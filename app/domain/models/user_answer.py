@@ -1,4 +1,4 @@
-from sqlalchemy import Float, ForeignKey, Text, UniqueConstraint
+from sqlalchemy import Float, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.models.base import Base
@@ -14,5 +14,7 @@ class UserAnswer(Base):
     user_answer: Mapped[str] = mapped_column(Text, nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     time_taken: Mapped[float] = mapped_column(Float, nullable=False)
+    accuracy: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     test = relationship("DiagnosticTest", back_populates="answers")

@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,8 +10,11 @@ from app.application.services.mentor_notification_service import MentorNotificat
 from app.application.services.mentor_service import MentorService
 from app.core.dependencies import get_current_user, require_tenant_membership
 from app.infrastructure.database import get_db_session
+from app.infrastructure.jobs.dispatcher import enqueue_job
 from app.infrastructure.repositories.mentor_chat_repository import MentorChatRepository
 from app.infrastructure.repositories.mentor_message_repository import MentorMessageRepository
+from app.infrastructure.repositories.mentor_student_repository import MentorStudentRepository
+from app.infrastructure.repositories.user_repository import UserRepository
 from app.realtime.hub import realtime_hub
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.mentor_schema import (
@@ -21,6 +25,7 @@ from app.schemas.mentor_schema import (
     MentorNotificationsResponse,
     MentorProgressAnalysisResponse,
     MentorSuggestionsResponse,
+    MentorLearnerResponse,
     AutonomousAgentResponse,
     HybridMentorshipOverviewResponse,
     HybridSessionPlanRequest,
@@ -28,6 +33,116 @@ from app.schemas.mentor_schema import (
 )
 
 router = APIRouter(prefix="/mentor", tags=["mentor"])
+PRIVILEGED_LEARNER_ACCESS_ROLES = {"teacher", "admin", "super_admin"}
+
+
+async def _queue_mentor_chat(
+    *,
+    db: AsyncSession,
+    tenant_id: int,
+    user_id: int,
+    request_id: str,
+    message: str,
+    chat_history: list[dict[str, str]],
+    channel: str,
+) -> str:
+    repository = MentorChatRepository(db)
+    mentor_message_repo = MentorMessageRepository(db)
+
+    await repository.upsert_message(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request_id=request_id,
+        direction="inbound",
+        channel=channel,
+        status="received",
+        content=message,
+        response_json={"chat_history": chat_history},
+    )
+    await mentor_message_repo.create_message(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request_id=request_id,
+        role="learner",
+        message=message,
+    )
+
+    outbound = await repository.get_by_request(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        request_id=request_id,
+        direction="outbound",
+    )
+    if outbound is None or outbound.status in {"failed"}:
+        enqueue_job(
+            task_name="jobs.process_mentor_chat",
+            args=[tenant_id, user_id, request_id],
+        )
+    await db.commit()
+    return request_id
+
+
+async def _resolve_learner_id(
+    *,
+    db: AsyncSession,
+    current_user,
+    learner_id: int | None,
+) -> int:
+    effective_learner_id = learner_id or current_user.id
+    if effective_learner_id == current_user.id and current_user.role.value == "student":
+        return effective_learner_id
+    if current_user.role.value in PRIVILEGED_LEARNER_ACCESS_ROLES:
+        learner = await UserRepository(db).get_by_id_in_tenant(effective_learner_id, current_user.tenant_id)
+        if learner is None or learner.role.value != "student":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Learner not found")
+        return effective_learner_id
+    if current_user.role.value == "mentor":
+        if await MentorStudentRepository(db).has_mapping(
+            tenant_id=current_user.tenant_id,
+            mentor_id=current_user.id,
+            student_id=effective_learner_id,
+        ):
+            return effective_learner_id
+        mapped_ids = await MentorStudentRepository(db).list_student_ids_for_mentor(
+            tenant_id=current_user.tenant_id,
+            mentor_id=current_user.id,
+        )
+        if learner_id is None and mapped_ids:
+            return mapped_ids[0]
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+
+@router.get("/learners", response_model=list[MentorLearnerResponse])
+async def mentor_learners(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_tenant_membership),
+):
+    repository = UserRepository(db)
+    if current_user.role.value in PRIVILEGED_LEARNER_ACCESS_ROLES:
+        learners = await repository.list_by_tenant_and_roles(
+            current_user.tenant_id,
+            roles=[type(current_user.role).student],
+            limit=200,
+        )
+    elif current_user.role.value == "mentor":
+        learner_ids = await MentorStudentRepository(db).list_student_ids_for_mentor(
+            tenant_id=current_user.tenant_id,
+            mentor_id=current_user.id,
+        )
+        learners = await repository.get_by_ids_in_tenant(learner_ids, current_user.tenant_id)
+        learners = [learner for learner in learners if learner.role.value == "student"]
+    elif current_user.role.value == "student":
+        learners = [current_user.user]
+    else:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return [
+        {
+            "user_id": int(learner.id),
+            "email": learner.email,
+            "display_name": learner.display_name or learner.email.split("@")[0],
+        }
+        for learner in learners
+    ]
 
 
 @router.post("/chat", response_model=MentorChatResponse)
@@ -40,80 +155,39 @@ async def mentor_chat(
     current_user=Depends(require_tenant_membership),
 ):
     request_id = payload.request_id or f"http-{current_user.id}-{int(asyncio.get_running_loop().time() * 1000)}"
-    tenant_id = current_user.tenant_id
-    user_id = current_user.id
-
-    repository = MentorChatRepository(db)
-    mentor_message_repo = MentorMessageRepository(db)
-
-    await repository.upsert_message(
-        tenant_id=tenant_id,
-        user_id=user_id,
+    await _queue_mentor_chat(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
         request_id=request_id,
-        direction="inbound",
-        channel="http",
-        status="received",
-        content=payload.message,
-    )
-    await mentor_message_repo.create_message(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        request_id=request_id,
-        role="learner",
         message=payload.message,
-    )
-
-    result = await MentorService(session=db).chat(
-        message=payload.message,
-        user_id=user_id,
-        tenant_id=tenant_id,
         chat_history=payload.chat_history,
-    )
-    result["request_id"] = request_id
-
-    await mentor_message_repo.set_response(request_id=request_id, response=result["reply"], status="sent")
-
-    outbound = await repository.upsert_message(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        request_id=request_id,
-        direction="outbound",
         channel="http",
-        status="ready",
-        content=result["reply"],
-        response_json=result,
     )
-    await repository.mark_delivered(outbound)
-    await db.commit()
     await realtime_hub.send_user(
-        tenant_id,
-        user_id,
+        current_user.tenant_id,
+        current_user.id,
         {
-            "type": "mentor.response.ready",
+            "type": "mentor.response.started",
             "request_id": request_id,
-            "reply": result["reply"],
-            "used_ai": result["used_ai"],
-            "session_summary": result.get("session_summary", ""),
         },
     )
-    if request_id and result.get("reply"):
-        async def _stream_chunks() -> None:
-            reply = str(result["reply"])
-            for index in range(8, len(reply) + 8, 8):
-                await realtime_hub.send_user(
-                    tenant_id,
-                    user_id,
-                    {
-                        "type": "mentor.response.chunk",
-                        "request_id": request_id,
-                        "content": reply[:index],
-                        "done": index >= len(reply),
-                    },
-                )
-                await asyncio.sleep(0.02)
-
-        asyncio.create_task(_stream_chunks())
-    return MentorChatResponse(**result)
+    return MentorChatResponse(
+        request_id=request_id,
+        status="queued",
+        reply="",
+        advisor_type="queued",
+        used_ai=False,
+        fallback_used=False,
+        fallback_reason=None,
+        suggested_focus_topics=[],
+        why_recommended=[],
+        provider=None,
+        latency_ms=None,
+        next_checkin_date=None,
+        session_summary="Queued for async processing.",
+        memory_summary={},
+    )
 
 
 @router.post("/chat/fallback", response_model=MentorChatResponse)
@@ -126,48 +200,64 @@ async def mentor_chat_fallback(
     current_user=Depends(require_tenant_membership),
 ):
     request_id = payload.request_id or f"fallback-{current_user.id}-{int(asyncio.get_running_loop().time() * 1000)}"
-    tenant_id = current_user.tenant_id
-    user_id = current_user.id
-
-    message_repo = MentorMessageRepository(db)
-    existing_msg = await message_repo.get_by_request(request_id=request_id, tenant_id=tenant_id, user_id=user_id)
-    if existing_msg is not None and existing_msg.response is not None:
+    repository = MentorChatRepository(db)
+    outbound = await repository.get_by_request(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request_id,
+        direction="outbound",
+    )
+    if outbound is not None and outbound.content and outbound.status in {"ready", "delivered", "acked"}:
+        payload_json = {}
+        if outbound.response_json:
+            try:
+                parsed = json.loads(outbound.response_json)
+                if isinstance(parsed, dict):
+                    payload_json = parsed
+            except json.JSONDecodeError:
+                payload_json = {}
         return MentorChatResponse(
-            request_id=existing_msg.request_id,
-            reply=existing_msg.response,
-            advisor_type="fallback", 
-            used_ai=False,
-            fallback_used=True,
-            fallback_reason="already_processed",
-            suggested_focus_topics=[],
-            why_recommended=[],
-            provider=None,
-            latency_ms=None,
-            next_checkin_date=None,
-            session_summary="",
-            memory_summary={},
+            request_id=request_id,
+            status=outbound.status,
+            reply=outbound.content,
+            advisor_type=str(payload_json.get("advisor_type") or "queued"),
+            used_ai=bool(payload_json.get("used_ai")),
+            fallback_used=bool(payload_json.get("fallback_used")),
+            fallback_reason=payload_json.get("fallback_reason"),
+            suggested_focus_topics=list(payload_json.get("suggested_focus_topics") or []),
+            why_recommended=list(payload_json.get("why_recommended") or []),
+            provider=payload_json.get("provider"),
+            latency_ms=payload_json.get("latency_ms"),
+            next_checkin_date=payload_json.get("next_checkin_date"),
+            session_summary=str(payload_json.get("session_summary") or ""),
+            memory_summary=dict(payload_json.get("memory_summary") or {}),
         )
 
-    await message_repo.create_message(
-        tenant_id=tenant_id,
-        user_id=user_id,
+    await _queue_mentor_chat(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
         request_id=request_id,
-        role="learner",
         message=payload.message,
-    )
-
-    result = await MentorService(session=db).chat(
-        message=payload.message,
-        user_id=user_id,
-        tenant_id=tenant_id,
         chat_history=payload.chat_history,
+        channel="fallback",
     )
-    result["request_id"] = request_id
-
-    await message_repo.set_response(request_id=request_id, response=result.get("reply", ""), status="sent")
-    await db.commit()
-
-    return MentorChatResponse(**result)
+    return MentorChatResponse(
+        request_id=request_id,
+        status="queued",
+        reply="",
+        advisor_type="queued",
+        used_ai=False,
+        fallback_used=True,
+        fallback_reason="still_processing",
+        suggested_focus_topics=[],
+        why_recommended=[],
+        provider=None,
+        latency_ms=None,
+        next_checkin_date=None,
+        session_summary="Still waiting for async processing.",
+        memory_summary={},
+    )
 
 
 @router.get("/chat/status/{request_id}", response_model=MentorChatStatusResponse)
@@ -225,35 +315,41 @@ async def mentor_chat_ack(
 
 @router.get("/suggestions", response_model=MentorSuggestionsResponse)
 async def mentor_suggestions(
+    learner_id: int | None = None,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
     service = MentorService(session=db)
-    result = await service.contextual_suggestions(user_id=current_user.id, tenant_id=current_user.tenant_id)
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=learner_id)
+    result = await service.contextual_suggestions(user_id=effective_learner_id, tenant_id=current_user.tenant_id)
     return MentorSuggestionsResponse(**result)
 
 
 @router.get("/progress-analysis", response_model=MentorProgressAnalysisResponse)
 async def mentor_progress_analysis(
+    learner_id: int | None = None,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
     service = MentorService(session=db)
-    result = await service.progress_analysis(user_id=current_user.id, tenant_id=current_user.tenant_id)
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=learner_id)
+    result = await service.progress_analysis(user_id=effective_learner_id, tenant_id=current_user.tenant_id)
     return MentorProgressAnalysisResponse(**result)
 
 
 @router.get("/notifications", response_model=MentorNotificationsResponse)
 async def mentor_notifications(
+    learner_id: int | None = None,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
     service = MentorService(session=db)
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=learner_id)
 
     roadmap_items = []
     if service.roadmap_repository is not None:
         roadmap_items = await service.roadmap_repository.list_user_roadmaps(
-            user_id=current_user.id,
+            user_id=effective_learner_id,
             tenant_id=current_user.tenant_id,
             limit=1,
             offset=0,
@@ -272,7 +368,7 @@ async def mentor_notifications(
         ]
 
     # Reuse progress analysis signals to derive weak topics when available.
-    progress = await service.progress_analysis(user_id=current_user.id, tenant_id=current_user.tenant_id)
+    progress = await service.progress_analysis(user_id=effective_learner_id, tenant_id=current_user.tenant_id)
     topic_improvements = progress.get("topic_improvements", {})
     topic_scores = {int(topic_id): max(0.0, 70.0 - float(gap)) for topic_id, gap in topic_improvements.items()}
 
@@ -298,11 +394,13 @@ async def mentor_notifications(
 
 @router.get("/agent/status", response_model=AutonomousAgentResponse)
 async def mentor_agent_status(
+    learner_id: int | None = None,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=learner_id)
     return await AutonomousLearningAgentService(db).run_cycle(
-        user_id=current_user.id,
+        user_id=effective_learner_id,
         tenant_id=current_user.tenant_id,
         execute_actions=False,
     )
@@ -310,11 +408,13 @@ async def mentor_agent_status(
 
 @router.post("/agent/run", response_model=AutonomousAgentResponse)
 async def mentor_agent_run(
+    learner_id: int | None = None,
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=learner_id)
     return await AutonomousLearningAgentService(db).run_cycle(
-        user_id=current_user.id,
+        user_id=effective_learner_id,
         tenant_id=current_user.tenant_id,
         execute_actions=True,
     )
@@ -326,10 +426,7 @@ async def hybrid_mentor_network(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
-    effective_learner_id = learner_id or current_user.id
-    privileged_roles = {"mentor", "teacher", "admin", "super_admin"}
-    if effective_learner_id != current_user.id and current_user.role.value not in privileged_roles:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=learner_id)
     return await HybridMentorshipService(db).get_overview(
         user_id=effective_learner_id,
         tenant_id=current_user.tenant_id,
@@ -342,10 +439,7 @@ async def hybrid_mentor_session_plan(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_tenant_membership),
 ):
-    effective_learner_id = payload.learner_id or current_user.id
-    privileged_roles = {"mentor", "teacher", "admin", "super_admin"}
-    if effective_learner_id != current_user.id and current_user.role.value not in privileged_roles:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    effective_learner_id = await _resolve_learner_id(db=db, current_user=current_user, learner_id=payload.learner_id)
     return await HybridMentorshipService(db).build_session_plan(
         user_id=effective_learner_id,
         tenant_id=current_user.tenant_id,

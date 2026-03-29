@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import {
   getAnalyticsOverview,
@@ -16,6 +16,7 @@ import { getGoals } from "@/services/goalService";
 import { getHealth } from "@/services/healthService";
 import {
   getAutonomousAgentStatus,
+  getMentorLearners,
   getMentorNotifications,
   getMentorProgressAnalysis,
   getMentorSuggestions,
@@ -58,6 +59,7 @@ export function useStudentDashboard() {
     queryFn: getStudentDashboard,
     staleTime: 30_000,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   });
   const roadmapQuery = useQuery({
     queryKey: ["dashboard", "student", "roadmap", tenantScope, user?.user_id],
@@ -70,6 +72,7 @@ export function useStudentDashboard() {
     enabled: Boolean(user?.user_id),
     staleTime: 15_000,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const roadmap = query.state.data?.items?.[0];
       return roadmap && normalizeRoadmapGenerationStatus(roadmap.status) === "generating" ? 2500 : false;
@@ -80,6 +83,7 @@ export function useStudentDashboard() {
     queryFn: getTopics,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   });
 
   return useMemo(() => {
@@ -196,7 +200,7 @@ export function useStudentDashboard() {
       })),
       heatmap: payload?.weak_topic_heatmap ?? [],
     };
-  }, [dashboardQuery, roadmapQuery.data?.items, topicsQuery.data?.items, user?.user_id]);
+  }, [dashboardQuery, roadmapQuery, topicsQuery]);
 }
 
 export function useTeacherDashboard() {
@@ -294,7 +298,7 @@ export function useTeacherDashboard() {
         },
       ],
     };
-  }, [retentionQuery.data, teacherDashboardQuery]);
+  }, [retentionQuery, teacherDashboardQuery]);
 }
 
 export function useAdminDashboard() {
@@ -388,7 +392,7 @@ export function useAdminDashboard() {
     };
   }, [
     communitiesQuery,
-    featureCatalogQuery.data?.items,
+    featureCatalogQuery,
     featureFlagsQuery,
     goalsQuery,
     overviewQuery,
@@ -500,38 +504,52 @@ export function useSuperAdminDashboard() {
   }, [featureFlagsQuery, healthQuery, outboxEventsQuery, outboxStatsQuery, platformOverviewQuery, tenantsQuery]);
 }
 
-export function useMentorWorkspace() {
+export function useMentorWorkspace(learnerId?: number | null) {
   const { user } = useAuth();
+  const learnersQuery = useQuery({
+    queryKey: ["dashboard", "mentor", "learners"],
+    queryFn: getMentorLearners,
+  });
+  const effectiveLearnerId = learnerId ?? learnersQuery.data?.[0]?.user_id ?? user?.user_id ?? null;
 
   const suggestionsQuery = useQuery({
-    queryKey: ["dashboard", "mentor", "suggestions"],
-    queryFn: getMentorSuggestions,
+    queryKey: ["dashboard", "mentor", "suggestions", effectiveLearnerId],
+    queryFn: () => getMentorSuggestions({ learnerId: effectiveLearnerId }),
+    enabled: Boolean(effectiveLearnerId),
+    placeholderData: keepPreviousData,
   });
   const notificationsQuery = useQuery({
-    queryKey: ["dashboard", "mentor", "notifications"],
-    queryFn: getMentorNotifications,
+    queryKey: ["dashboard", "mentor", "notifications", effectiveLearnerId],
+    queryFn: () => getMentorNotifications({ learnerId: effectiveLearnerId }),
+    enabled: Boolean(effectiveLearnerId),
+    placeholderData: keepPreviousData,
   });
   const progressAnalysisQuery = useQuery({
-    queryKey: ["dashboard", "mentor", "progress"],
-    queryFn: getMentorProgressAnalysis,
+    queryKey: ["dashboard", "mentor", "progress", effectiveLearnerId],
+    queryFn: () => getMentorProgressAnalysis({ learnerId: effectiveLearnerId }),
+    enabled: Boolean(effectiveLearnerId),
+    placeholderData: keepPreviousData,
   });
   const agentQuery = useQuery({
-    queryKey: ["dashboard", "mentor", "agent"],
-    queryFn: getAutonomousAgentStatus,
+    queryKey: ["dashboard", "mentor", "agent", effectiveLearnerId],
+    queryFn: () => getAutonomousAgentStatus({ learnerId: effectiveLearnerId }),
+    enabled: Boolean(effectiveLearnerId),
+    placeholderData: keepPreviousData,
   });
   const featureFlagsQuery = useQuery({
     queryKey: ["dashboard", "mentor", "flags"],
     queryFn: () => getFeatureFlags({ limit: 20, offset: 0 }),
   });
   const roadmapQuery = useQuery({
-    queryKey: ["dashboard", "mentor", "roadmap", user?.user_id],
+    queryKey: ["dashboard", "mentor", "roadmap", effectiveLearnerId],
     queryFn: async () => {
-      if (!user?.user_id) {
-        throw new Error("Missing user id");
+      if (!effectiveLearnerId) {
+        throw new Error("Missing learner id");
       }
-      return getUserRoadmap(user.user_id);
+      return getUserRoadmap(effectiveLearnerId);
     },
-    enabled: Boolean(user?.user_id),
+    enabled: Boolean(effectiveLearnerId),
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const roadmap = query.state.data?.items?.[0];
       return roadmap && normalizeRoadmapGenerationStatus(roadmap.status) === "generating" ? 2500 : false;
@@ -548,6 +566,7 @@ export function useMentorWorkspace() {
 
     return {
       queries: {
+        learnersQuery,
         suggestionsQuery,
         notificationsQuery,
         progressAnalysisQuery,
@@ -557,6 +576,7 @@ export function useMentorWorkspace() {
       },
       kpis: {
         aiMentorEnabled,
+        learnerCount: learnersQuery.data?.length ?? 0,
         recommendationCount: suggestionsQuery.data?.suggestions.length ?? 0,
         notificationCount: notificationsQuery.data?.notifications.length ?? 0,
         trackedWeakTopics: Object.keys(progressAnalysisQuery.data?.topic_improvements ?? {}).length,
@@ -582,6 +602,12 @@ export function useMentorWorkspace() {
           },
         ],
       },
+      learners: learnersQuery.data ?? [],
+      activeLearner:
+        (learnersQuery.data ?? []).find((item) => item.user_id === effectiveLearnerId) ??
+        (learnersQuery.data ?? [])[0] ??
+        null,
+      activeLearnerId: effectiveLearnerId,
       suggestions: (suggestionsQuery.data?.suggestions ?? []).map((item, index) => ({
         title: `Mentor suggestion ${index + 1}`,
         message: item,
@@ -614,5 +640,5 @@ export function useMentorWorkspace() {
         tone: "default" as const,
       })),
     };
-  }, [agentQuery.data, featureFlagsQuery, notificationsQuery, progressAnalysisQuery, roadmapQuery, suggestionsQuery]);
+  }, [agentQuery, effectiveLearnerId, featureFlagsQuery, learnersQuery, notificationsQuery, progressAnalysisQuery, roadmapQuery, suggestionsQuery]);
 }

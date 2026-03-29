@@ -18,6 +18,9 @@ export type TopicGraphNode = {
   status?: string;
   mastery_score?: number | null;
   cluster?: string;
+  is_completed?: boolean;
+  is_weak?: boolean;
+  is_locked?: boolean;
 };
 
 export type TopicGraphEdge = {
@@ -98,6 +101,8 @@ function computeDepths(nodes: TopicGraphNode[], edges: TopicGraphEdge[]): Map<nu
 }
 
 function nodePalette(node: TopicGraphNode, isWeak: boolean, isHighlighted: boolean, isFocus: boolean) {
+  const isCompleted = Boolean(node.is_completed) || node.status === "completed" || node.status === "mastered";
+  const isLocked = Boolean(node.is_locked) || node.status === "locked";
   if ((node.node_type ?? "topic") === "skill") {
     return {
       border: "rgba(14,165,233,0.35)",
@@ -112,6 +117,22 @@ function nodePalette(node: TopicGraphNode, isWeak: boolean, isHighlighted: boole
       background: "linear-gradient(135deg, rgba(224,231,255,0.98), rgba(255,255,255,0.94))",
       color: "#312e81",
       boxShadow: "0 22px 48px rgba(79,70,229,0.18)",
+    };
+  }
+  if (isCompleted) {
+    return {
+      border: "rgba(16,185,129,0.4)",
+      background: "linear-gradient(135deg, rgba(236,253,245,0.98), rgba(209,250,229,0.9))",
+      color: "#065f46",
+      boxShadow: "0 20px 44px rgba(16,185,129,0.16)",
+    };
+  }
+  if (isLocked) {
+    return {
+      border: "rgba(100,116,139,0.42)",
+      background: "linear-gradient(135deg, rgba(248,250,252,0.98), rgba(226,232,240,0.94))",
+      color: "#334155",
+      boxShadow: "0 16px 36px rgba(100,116,139,0.14)",
     };
   }
   if (isWeak) {
@@ -173,8 +194,17 @@ export default function TopicGraph({
         const isWeak = weakSet.has(topic.id);
         const isHighlighted = pathSet.has(topic.id);
         const isFocus = topic.id === focusTopicId;
+        const isCompleted = Boolean(topic.is_completed) || topic.status === "completed" || topic.status === "mastered";
+        const isLocked = Boolean(topic.is_locked) || topic.status === "locked";
         const palette = nodePalette(topic, isWeak, isHighlighted, isFocus);
         const mastery = topic.mastery_score != null ? `${Math.round(topic.mastery_score)}%` : "new";
+        const statusLabel = isCompleted
+          ? "completed"
+          : isWeak
+            ? "weak"
+            : isLocked
+              ? "locked"
+              : topic.status ?? "unknown";
         graphNodes.push({
           id: String(topic.id),
           data: {
@@ -188,7 +218,7 @@ export default function TopicGraph({
                 </div>
                 <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.18em] opacity-70">
                   <span>{topic.cluster ?? "general"}</span>
-                  <span>{topic.status ?? "unknown"}</span>
+                  <span>{statusLabel}</span>
                 </div>
               </div>
             ),
@@ -205,6 +235,8 @@ export default function TopicGraph({
             fontWeight: 600,
             boxShadow: palette.boxShadow,
             padding: "12px 14px",
+            opacity: isLocked ? 0.82 : 1,
+            borderStyle: isLocked ? "dashed" : "solid",
           },
         });
       });
@@ -253,7 +285,9 @@ export default function TopicGraph({
           return [];
         }
         const onPath = pathSet.has(sourceId) && pathSet.has(targetId);
-        const targetWeak = weakSet.has(targetId);
+        const targetNode = topics.find((item) => item.id === targetId && (item.node_type ?? "topic") === "topic");
+        const targetWeak = weakSet.has(targetId) || Boolean(targetNode?.is_weak) || targetNode?.status === "weak";
+        const targetLocked = Boolean(targetNode?.is_locked) || targetNode?.status === "locked";
         return [
           {
           id: `${sourceId}->${targetId}`,
@@ -263,8 +297,9 @@ export default function TopicGraph({
           markerEnd: { type: MarkerType.ArrowClosed },
           animated: targetWeak || onPath,
           style: {
-            stroke: onPath ? "#10b981" : targetWeak ? "#ef4444" : "#64748b",
+            stroke: onPath ? "#10b981" : targetWeak ? "#ef4444" : targetLocked ? "#94a3b8" : "#64748b",
             strokeWidth: onPath ? 3 : targetWeak ? 2.4 : 1.8,
+            strokeDasharray: targetLocked ? "6 4" : undefined,
           },
           },
         ];
@@ -293,14 +328,22 @@ export default function TopicGraph({
   }, [focusTopicId, pathSet, prerequisites, topics, weakSet]);
 
   return (
-    <div
-      className={`w-full overflow-hidden rounded-[28px] border border-white/70 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.92))] ${heightClassName}`}
-    >
-      <ReactFlow nodes={nodes} edges={edges} fitView>
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+        <span className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700">Completed</span>
+        <span className="rounded-full bg-rose-100 px-3 py-1 text-rose-700">Weak</span>
+        <span className="rounded-full bg-slate-200 px-3 py-1 text-slate-700">Locked</span>
+        <span className="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">Focus</span>
+      </div>
+      <div
+        className={`w-full overflow-hidden rounded-[28px] border border-white/70 bg-[radial-gradient(circle_at_top_left,rgba(45,212,191,0.12),transparent_26%),linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.92))] ${heightClassName}`}
+      >
+        <ReactFlow nodes={nodes} edges={edges} fitView>
         <MiniMap pannable zoomable nodeColor={(node) => (String(node.id).startsWith("skill-") ? "#bae6fd" : "#c7d2fe")} />
         <Controls />
         <Background gap={18} size={1} color="#dbeafe" />
-      </ReactFlow>
+        </ReactFlow>
+      </div>
     </div>
   );
 }

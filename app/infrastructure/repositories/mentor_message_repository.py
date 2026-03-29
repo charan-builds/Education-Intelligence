@@ -59,3 +59,13 @@ class MentorMessageRepository:
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def list_recent_messages(self, *, tenant_id: int, user_id: int, limit: int = 20) -> list[MentorMessage]:
+        stmt = (
+            select(MentorMessage)
+            .where(MentorMessage.tenant_id == tenant_id, MentorMessage.user_id == user_id)
+            .order_by(MentorMessage.created_at.desc(), MentorMessage.id.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(reversed(list(result.scalars().all())))

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.analytics_service import AnalyticsService
+from app.application.services.precomputed_analytics_service import PrecomputedAnalyticsService
 from app.application.services.skill_vector_service import SkillVectorService
 from app.core.dependencies import get_current_user
 from app.core.dependencies import get_pagination_params, require_roles
@@ -15,6 +16,8 @@ from app.schemas.analytics_schema import (
     PlatformAnalyticsOverviewResponse,
     RetentionAnalyticsResponse,
     RoadmapProgressSummaryResponse,
+    StudentPerformanceAnalyticsResponse,
+    TopicPerformanceAnalyticsResponse,
     WeakTopicInsightResponse,
     TopicMasteryAnalyticsResponse,
 )
@@ -114,3 +117,75 @@ async def get_learning_trends(
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
     return await SkillVectorService(db).learning_trends(tenant_id=current_user.tenant_id)
+
+
+@router.get("/student/{user_id}", response_model=StudentPerformanceAnalyticsResponse)
+async def get_student_performance_analytics(
+    user_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
+):
+    try:
+        return await AnalyticsService(db).student_performance_analytics(
+            tenant_id=current_user.tenant_id,
+            user_id=user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/topic/{topic_id}", response_model=TopicPerformanceAnalyticsResponse)
+async def get_topic_performance_analytics(
+    topic_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
+):
+    try:
+        return await AnalyticsService(db).topic_performance_analytics(
+            tenant_id=current_user.tenant_id,
+            topic_id=topic_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.get("/precomputed/tenant-dashboard")
+async def get_precomputed_tenant_dashboard(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
+):
+    service = PrecomputedAnalyticsService(db)
+    snapshot = await service.latest_tenant_dashboard(tenant_id=current_user.tenant_id)
+    if snapshot is None:
+        snapshot = await service.refresh_tenant_dashboard(tenant_id=current_user.tenant_id)
+        await db.commit()
+    return snapshot
+
+
+@router.get("/precomputed/user-learning-summary")
+async def get_precomputed_user_learning_summary(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    service = PrecomputedAnalyticsService(db)
+    snapshot = await service.latest_user_learning_summary(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+    )
+    if snapshot is None:
+        snapshot = await service.refresh_user_learning_summary(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+        )
+        await db.commit()
+    return snapshot
+
+
+@router.post("/precomputed/refresh")
+async def refresh_precomputed_analytics(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("admin", "super_admin")),
+):
+    payload = await PrecomputedAnalyticsService(db).refresh_bundle(tenant_id=current_user.tenant_id)
+    await db.commit()
+    return payload

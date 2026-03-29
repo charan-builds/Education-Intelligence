@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 import hashlib
 import json
 from fastapi.responses import JSONResponse
@@ -7,13 +7,16 @@ from fastapi.responses import JSONResponse
 from app.application.services.audit_log_service import AuditLogService
 from app.core.authorization import require_permission
 from app.core.config import get_settings
-from app.infrastructure.database import get_db_session
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.audit_schema import AuditFeatureNamesResponse, AuditLogEventsResponse, AuditLogMeta
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/ops/audit", tags=["ops"])
 settings = get_settings()
+
+def _audit_log_service() -> AuditLogService:
+    if settings.audit_log_file_path:
+        return AuditLogService(log_file_path=settings.audit_log_file_path)
+    return AuditLogService()
 
 
 @router.get("/feature-flags", response_model=AuditLogEventsResponse)
@@ -28,7 +31,6 @@ async def list_feature_flag_audit_logs(
     until: datetime | None = Query(default=None),
     feature_name: str | None = Query(default=None, min_length=1, max_length=128),
     order: str = Query(default="desc", pattern="^(desc|asc)$"),
-    db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_permission("audit_logs:read")),
 ):
     if since is not None and until is not None and since > until:
@@ -47,12 +49,14 @@ async def list_feature_flag_audit_logs(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    items = await AuditLogService(db).list_events(
+    items = _audit_log_service().list_feature_flag_events(
         tenant_id=scoped_tenant_id,
         limit=limit + 1,
         offset=offset,
-        action="feature_flag_updated",
-        resource=feature_name if feature_name else None,
+        since=since,
+        until=until,
+        feature_name=feature_name,
+        order=order,
     )
     has_more = len(items) > limit
     page_items = items[:limit]
@@ -100,7 +104,6 @@ async def export_feature_flag_audit_logs(
     until: datetime | None = Query(default=None),
     feature_name: str | None = Query(default=None, min_length=1, max_length=128),
     order: str = Query(default="desc", pattern="^(desc|asc)$"),
-    db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_permission("audit_logs:read")),
 ):
     if since is not None and until is not None and since > until:
@@ -119,10 +122,7 @@ async def export_feature_flag_audit_logs(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    csv_text, has_more = await AuditLogService(db).export_csv(
-        tenant_id=scoped_tenant_id,
-        limit=limit,
-    )
+    csv_text, has_more = _audit_log_service().export_feature_flag_events_csv(tenant_id=scoped_tenant_id, limit=limit)
     lines = [line for line in csv_text.splitlines() if line.strip()]
     row_count = max(0, len(lines) - 1)  # exclude header
     checksum = hashlib.sha256(csv_text.encode("utf-8")).hexdigest()
@@ -161,7 +161,6 @@ async def list_feature_flag_audit_names(
     tenant_id: int | None = Query(default=None, ge=1),
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
-    db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_permission("audit_logs:read")),
 ):
     if since is not None and until is not None and since > until:
@@ -180,9 +179,8 @@ async def list_feature_flag_audit_names(
     else:
         scoped_tenant_id = int(current_user.tenant_id)
 
-    records = await AuditLogService(db).list_events(tenant_id=scoped_tenant_id, limit=1000)
-    items = sorted({str(item.get("resource")) for item in records if item.get("action") == "feature_flag_updated" and item.get("resource")})
-    payload = AuditFeatureNamesResponse(items=items)
+    names = _audit_log_service().list_feature_names(tenant_id=scoped_tenant_id)
+    payload = AuditFeatureNamesResponse(items=names)
     payload_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"), default=str)
     etag = f'W/"{hashlib.sha256(payload_json.encode("utf-8")).hexdigest()}"'
     if request.headers.get("if-none-match") == etag:

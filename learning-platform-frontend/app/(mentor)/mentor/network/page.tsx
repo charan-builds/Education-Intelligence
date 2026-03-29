@@ -1,26 +1,40 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { BrainCircuit, CalendarClock, MessagesSquare, Users, Zap } from "lucide-react";
 
 import PageHeader from "@/components/layouts/PageHeader";
 import Button from "@/components/ui/Button";
 import MetricCard from "@/components/ui/MetricCard";
+import Select from "@/components/ui/Select";
 import SurfaceCard from "@/components/ui/SurfaceCard";
-import { useAuth } from "@/hooks/useAuth";
+import { useMentorWorkspace } from "@/hooks/useDashboard";
 import { buildHybridSessionPlan, getHybridMentorNetwork } from "@/services/mentorService";
 
 export default function MentorNetworkPage() {
-  const { user } = useAuth();
+  const [selectedLearnerId, setSelectedLearnerId] = useState<number | null>(null);
+  const workspace = useMentorWorkspace(selectedLearnerId);
+
+  useEffect(() => {
+    if (!selectedLearnerId && workspace.learners.length > 0) {
+      setSelectedLearnerId(workspace.learners[0].user_id);
+    }
+  }, [selectedLearnerId, workspace.learners]);
+
   const networkQuery = useQuery({
-    queryKey: ["mentor", "hybrid-network", user?.user_id],
-    queryFn: () => getHybridMentorNetwork(),
-    enabled: Boolean(user?.user_id),
+    queryKey: ["mentor", "hybrid-network", workspace.activeLearnerId],
+    queryFn: () => getHybridMentorNetwork(workspace.activeLearnerId ?? undefined),
+    enabled: Boolean(workspace.activeLearnerId),
   });
 
   const sessionPlanMutation = useMutation({
-    mutationFn: buildHybridSessionPlan,
+    mutationFn: (payload: { mentor_id?: number | null }) =>
+      buildHybridSessionPlan({
+        learner_id: workspace.activeLearnerId,
+        mentor_id: payload.mentor_id,
+      }),
   });
 
   const network = networkQuery.data;
@@ -34,8 +48,23 @@ export default function MentorNetworkPage() {
         description="The platform now pairs AI guidance with human expertise: AI watches signals, briefs the mentor, and keeps follow-through active between live sessions."
         actions={
           <div className="flex flex-wrap gap-3">
+            {workspace.learners.length > 0 ? (
+              <div className="min-w-[240px]">
+                <Select
+                  aria-label="Select learner"
+                  value={workspace.activeLearnerId ?? ""}
+                  onChange={(event) => setSelectedLearnerId(Number(event.target.value))}
+                >
+                  {workspace.learners.map((learner) => (
+                    <option key={learner.user_id} value={learner.user_id}>
+                      {learner.display_name} ({learner.email})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
             <Link
-              href="/mentor/chat"
+              href={workspace.activeLearnerId ? `/mentor/chat?learner_id=${workspace.activeLearnerId}` : "/mentor/chat"}
               className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-700 via-brand-600 to-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-glow"
             >
               Open AI mentor

@@ -68,3 +68,22 @@ def test_cycle_detection():
             await engine.get_prerequisites(topic_id=1, tenant_id=10)
 
     asyncio.run(_run())
+
+
+def test_get_dependency_depths_batches_multiple_topics():
+    async def _run():
+        engine = KnowledgeGraphEngine(_TopicRepo())
+        depth_map = await engine.get_dependency_depths(topic_ids=[2, 3, 4, 99], tenant_id=10)
+        assert depth_map == {2: 1, 3: 2, 4: 2, 99: 0}
+
+    asyncio.run(_run())
+
+
+def test_generate_learning_paths_batches_targets():
+    async def _run():
+        engine = KnowledgeGraphEngine(_TopicRepo())
+        paths = await engine.generate_learning_paths(target_topic_ids=[3, 4], tenant_id=10)
+        assert paths[3] == [1, 2, 3]
+        assert paths[4] == [1, 2, 5, 4]
+
+    asyncio.run(_run())

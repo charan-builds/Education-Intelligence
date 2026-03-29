@@ -1,10 +1,9 @@
 from __future__ import annotations
-
-import asyncio
+from uuid import uuid4
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.application.services.mentor_service import MentorService
+from app.application.services.outbox_service import OutboxService
 from app.core.security import (
     ACCESS_TOKEN_COOKIE_NAME,
     AuthenticationError,
@@ -141,7 +140,12 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                     continue
                 requested_user_id = raw_requested_user_id
                 requested_tenant_id = raw_requested_tenant_id
-                chat_history = list(message.get("chat_history") or [])
+                chat_history = message.get("chat_history")
+                if not isinstance(chat_history, list):
+                    chat_history = []
+                chat_history = list(chat_history)
+                if not request_id:
+                    request_id = f"ws-{user_id}-{uuid4().hex}"
                 if not message_text or requested_user_id != user_id or requested_tenant_id != tenant_id:
                     await websocket.send_json({"type": "error", "detail": "Forbidden mentor chat"})
                     continue
@@ -149,6 +153,8 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "mentor.response.started", "request_id": request_id})
                 async with AsyncSessionLocal() as session:
                     repository = MentorChatRepository(session)
+                    # Persist inbound message immediately; if the websocket disconnects mid-stream,
+                    # the queued job can still generate the outbound response.
                     await repository.upsert_message(
                         tenant_id=tenant_id,
                         user_id=user_id,
@@ -157,49 +163,14 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                         channel="websocket",
                         status="received",
                         content=message_text,
+                        response_json={"chat_history": chat_history},
                     )
-                    result = await MentorService(session=session).chat(
-                        message=message_text,
-                        user_id=user_id,
+                    await OutboxService(session).add_task_event(
+                        task_name="jobs.process_mentor_chat",
+                        args=[tenant_id, user_id, request_id],
                         tenant_id=tenant_id,
-                        chat_history=chat_history,
+                        idempotency_key=f"mentor-chat:{tenant_id}:{user_id}:{request_id}",
                     )
-                    result["request_id"] = request_id
-                    outbound = await repository.upsert_message(
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        request_id=request_id,
-                        direction="outbound",
-                        channel="websocket",
-                        status="ready",
-                        content=str(result.get("reply") or ""),
-                        response_json=result,
-                    )
-                    await repository.mark_delivered(outbound)
                     await session.commit()
-
-                reply = str(result.get("reply") or "")
-                for index in range(12, len(reply) + 12, 12):
-                    await websocket.send_json(
-                        {
-                            "type": "mentor.response.chunk",
-                            "request_id": request_id,
-                            "content": reply[:index],
-                            "done": index >= len(reply),
-                        }
-                    )
-                    await asyncio.sleep(0.02)
-
-                await websocket.send_json(
-                    {
-                        "type": "mentor.response.ready",
-                        "request_id": request_id,
-                        "reply": reply,
-                        "used_ai": bool(result.get("used_ai")),
-                        "session_summary": result.get("session_summary", ""),
-                        "provider": result.get("provider"),
-                        "why_recommended": result.get("why_recommended", []),
-                    }
-                )
     except WebSocketDisconnect:
         await realtime_hub.disconnect(websocket, tenant_id=tenant_id, user_id=user_id)

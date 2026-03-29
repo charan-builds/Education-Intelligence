@@ -1,13 +1,20 @@
 import { apiClient } from "@/services/apiClient";
 import type { User } from "@/types/user";
-import { notifyAuthChanged } from "@/utils/authToken";
+import { clearStoredToken, notifyAuthChanged, setStoredToken } from "@/utils/authToken";
 
 export type AuthSessionResponse = {
   authenticated: boolean;
   token_type: string;
+  access_token: string;
   access_token_expires_in: number;
   refresh_token_expires_in?: number | null;
   user: User;
+};
+
+export type AuthActionResponse = {
+  success: boolean;
+  detail: string;
+  token?: string | null;
 };
 
 export async function login(
@@ -21,6 +28,7 @@ export async function login(
     tenant_id: tenantContext?.tenant_id ?? undefined,
     tenant_subdomain: tenantContext?.tenant_subdomain ?? undefined,
   });
+  setStoredToken(data.access_token);
   notifyAuthChanged();
   return data;
 }
@@ -30,6 +38,46 @@ export async function register(email: string, password: string, invite_token?: s
     email,
     password,
     invite_token,
+  });
+  return data;
+}
+
+export async function acceptInvite(email: string, password: string, invite_token: string): Promise<User> {
+  const { data } = await apiClient.post<User>("/auth/invite-accept", {
+    email,
+    password,
+    invite_token,
+  });
+  return data;
+}
+
+export async function requestEmailVerification(tenant_id: number, email: string): Promise<AuthActionResponse> {
+  const { data } = await apiClient.post<AuthActionResponse>("/auth/email-verification/request", {
+    tenant_id,
+    email,
+  });
+  return data;
+}
+
+export async function confirmEmailVerification(token: string): Promise<AuthActionResponse> {
+  const { data } = await apiClient.post<AuthActionResponse>("/auth/email-verification", {
+    token,
+  });
+  return data;
+}
+
+export async function requestPasswordReset(tenant_id: number, email: string): Promise<AuthActionResponse> {
+  const { data } = await apiClient.post<AuthActionResponse>("/auth/forgot-password", {
+    tenant_id,
+    email,
+  });
+  return data;
+}
+
+export async function confirmPasswordReset(token: string, password: string): Promise<AuthActionResponse> {
+  const { data } = await apiClient.post<AuthActionResponse>("/auth/reset-password", {
+    token,
+    password,
   });
   return data;
 }
@@ -47,6 +95,7 @@ export async function logout(): Promise<void> {
   try {
     await apiClient.post("/auth/logout");
   } finally {
+    clearStoredToken();
     notifyAuthChanged();
   }
 }

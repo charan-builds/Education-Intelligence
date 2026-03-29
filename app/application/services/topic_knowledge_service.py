@@ -130,19 +130,38 @@ class TopicKnowledgeService:
         return profiles
 
     @staticmethod
-    def _topic_status(topic_id: int, topic_scores: dict[int, float], roadmap_status: dict[int, str], prerequisites: list[int]) -> str:
+    def _is_completed(topic_id: int, topic_scores: dict[int, float], roadmap_status: dict[int, str]) -> bool:
         progress = str(roadmap_status.get(topic_id, "pending")).lower()
         score = float(topic_scores.get(topic_id, 0.0))
-        if progress == "completed" or score >= 85.0:
-            return "mastered"
+        return progress == "completed" or score >= 85.0
+
+    @staticmethod
+    def _is_locked(topic_scores: dict[int, float], prerequisites: list[int]) -> bool:
+        return bool(prerequisites) and not all(float(topic_scores.get(item, 0.0)) >= MASTERY_THRESHOLD for item in prerequisites)
+
+    @staticmethod
+    def _is_weak(topic_id: int, topic_scores: dict[int, float], roadmap_status: dict[int, str], prerequisites: list[int]) -> bool:
+        if TopicKnowledgeService._is_completed(topic_id, topic_scores, roadmap_status):
+            return False
+        if TopicKnowledgeService._is_locked(topic_scores, prerequisites):
+            return False
+        score = float(topic_scores.get(topic_id, 0.0))
+        return 0.0 < score < WEAK_THRESHOLD
+
+    @staticmethod
+    def _topic_status(topic_id: int, topic_scores: dict[int, float], roadmap_status: dict[int, str], prerequisites: list[int]) -> str:
+        progress = str(roadmap_status.get(topic_id, "pending")).lower()
+        if TopicKnowledgeService._is_completed(topic_id, topic_scores, roadmap_status):
+            return "completed"
         if progress == "in_progress":
             return "in_progress"
-        if prerequisites and not all(float(topic_scores.get(item, 0.0)) >= MASTERY_THRESHOLD for item in prerequisites):
+        if TopicKnowledgeService._is_locked(topic_scores, prerequisites):
             return "locked"
+        if TopicKnowledgeService._is_weak(topic_id, topic_scores, roadmap_status, prerequisites):
+            return "weak"
+        score = float(topic_scores.get(topic_id, 0.0))
         if score >= MASTERY_THRESHOLD:
             return "ready"
-        if score > 0:
-            return "developing"
         return "unseen"
 
     @staticmethod
@@ -231,11 +250,24 @@ class TopicKnowledgeService:
             cluster_counts[profile.cluster_key] += 1
 
         nodes = []
+        completed_topic_count = 0
+        weak_topic_count = 0
+        locked_topic_count = 0
         for topic in topics:
             topic_id = int(topic.id)
             profile = profiles[topic_id]
             prerequisites = prerequisites_by_topic.get(topic_id, [])
             score = topic_scores.get(topic_id)
+            status = self._topic_status(topic_id, topic_scores, roadmap_status, prerequisites)
+            is_completed = self._is_completed(topic_id, topic_scores, roadmap_status)
+            is_locked = self._is_locked(topic_scores, prerequisites) and not is_completed
+            is_weak = self._is_weak(topic_id, topic_scores, roadmap_status, prerequisites)
+            if is_completed:
+                completed_topic_count += 1
+            if is_weak:
+                weak_topic_count += 1
+            if is_locked:
+                locked_topic_count += 1
             nodes.append(
                 {
                     "id": topic_id,
@@ -244,7 +276,10 @@ class TopicKnowledgeService:
                     "description": topic.description,
                     "mastery_score": score,
                     "cluster": profile.cluster_key,
-                    "status": self._topic_status(topic_id, topic_scores, roadmap_status, prerequisites),
+                    "status": status,
+                    "is_completed": is_completed,
+                    "is_weak": is_weak,
+                    "is_locked": is_locked,
                     "skill_names": sorted(skill_names_by_topic.get(topic_id, [])),
                     "prerequisite_count": len(prerequisites),
                 }
@@ -266,6 +301,9 @@ class TopicKnowledgeService:
                     "mastery_score": round(sum(related_scores) / len(related_scores), 2) if related_scores else None,
                     "cluster": "skills",
                     "status": "connected",
+                    "is_completed": False,
+                    "is_weak": False,
+                    "is_locked": False,
                     "skill_names": [skill_name],
                     "prerequisite_count": 0,
                 }
@@ -306,7 +344,9 @@ class TopicKnowledgeService:
                 "topic_count": len(nodes),
                 "skill_count": len(skill_nodes),
                 "edge_count": len(graph_edges),
-                "weak_topic_count": sum(1 for score in topic_scores.values() if float(score) < MASTERY_THRESHOLD),
+                "completed_topic_count": completed_topic_count,
+                "weak_topic_count": weak_topic_count,
+                "locked_topic_count": locked_topic_count,
             },
         }
 

@@ -5,9 +5,14 @@ from app.presentation.analytics_routes import (
     get_analytics_overview,
     get_learning_trends,
     get_platform_analytics_overview,
+    get_precomputed_tenant_dashboard,
+    get_precomputed_user_learning_summary,
     get_roadmap_progress_analytics,
+    refresh_precomputed_analytics,
     get_skill_vectors,
+    get_student_performance_analytics,
     get_student_insights,
+    get_topic_performance_analytics,
     get_topic_mastery_analytics,
     get_weak_topics,
 )
@@ -87,6 +92,81 @@ class StubAnalyticsService:
                     "average_mastery_percent": 70,
                 }
             ],
+        }
+
+    async def student_performance_analytics(self, *, tenant_id: int, user_id: int):
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "learning_efficiency_score": 78.4,
+            "topic_mastery_heatmap": [
+                {
+                    "topic_id": 4,
+                    "topic_name": "SQL",
+                    "mastery_score": 44.0,
+                    "average_accuracy": 52.0,
+                    "average_time_taken_seconds": 31.5,
+                    "average_attempts": 1.7,
+                    "last_activity_at": "2026-03-28T00:00:00Z",
+                }
+            ],
+            "weak_topics": [
+                {
+                    "topic_id": 4,
+                    "topic_name": "SQL",
+                    "mastery_score": 44.0,
+                    "average_accuracy": 52.0,
+                    "average_time_taken_seconds": 31.5,
+                    "average_attempts": 1.7,
+                }
+            ],
+            "performance_trend": [
+                {
+                    "label": "2026-03-28",
+                    "average_score": 61.0,
+                    "average_accuracy": 65.0,
+                    "average_time_taken_seconds": 28.0,
+                    "answered_questions": 6,
+                }
+            ],
+            "sql_queries": {
+                "topic_mastery_heatmap": "select ...",
+                "performance_trend": "select ...",
+            },
+        }
+
+    async def topic_performance_analytics(self, *, tenant_id: int, topic_id: int):
+        return {
+            "tenant_id": tenant_id,
+            "topic_id": topic_id,
+            "topic_name": "SQL",
+            "learner_count": 3,
+            "average_mastery_score": 58.0,
+            "average_accuracy": 63.0,
+            "average_time_taken_seconds": 26.5,
+            "learning_efficiency_score": 74.1,
+            "weakest_learners": [
+                {
+                    "user_id": 11,
+                    "mastery_score": 41.0,
+                    "average_accuracy": 49.0,
+                    "average_time_taken_seconds": 34.0,
+                    "average_attempts": 1.8,
+                }
+            ],
+            "performance_trend": [
+                {
+                    "label": "2026-03-28",
+                    "learner_count": 3,
+                    "average_score": 58.0,
+                    "average_accuracy": 63.0,
+                    "average_time_taken_seconds": 26.5,
+                }
+            ],
+            "sql_queries": {
+                "learner_summary": "select ...",
+                "performance_trend": "select ...",
+            },
         }
 
 
@@ -203,3 +283,78 @@ def test_teacher_intelligence_endpoints(monkeypatch):
 
     trends = asyncio.run(get_learning_trends(db=object(), current_user=current_user))
     assert trends[0]["events"] == 12
+
+
+def test_student_performance_analytics_endpoint(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsService", StubAnalyticsService)
+    current_user = SimpleNamespace(tenant_id=7)
+
+    response = asyncio.run(get_student_performance_analytics(user_id=11, db=object(), current_user=current_user))
+
+    assert response["user_id"] == 11
+    assert response["learning_efficiency_score"] == 78.4
+    assert response["topic_mastery_heatmap"][0]["topic_name"] == "SQL"
+
+
+def test_topic_performance_analytics_endpoint(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsService", StubAnalyticsService)
+    current_user = SimpleNamespace(tenant_id=7)
+
+    response = asyncio.run(get_topic_performance_analytics(topic_id=4, db=object(), current_user=current_user))
+
+    assert response["topic_id"] == 4
+    assert response["topic_name"] == "SQL"
+    assert response["weakest_learners"][0]["user_id"] == 11
+
+
+class StubPrecomputedAnalyticsService:
+    def __init__(self, _db):
+        self.db = _db
+
+    async def latest_tenant_dashboard(self, *, tenant_id: int):
+        return {
+            "tenant_id": tenant_id,
+            "active_learners": 14,
+            "weekly_event_count": 200,
+            "average_topic_mastery": 68.2,
+            "updated_at": "2026-03-27T00:00:00Z",
+        }
+
+    async def refresh_tenant_dashboard(self, *, tenant_id: int):
+        return {"tenant_id": tenant_id, "active_learners": 15}
+
+    async def latest_user_learning_summary(self, *, tenant_id: int, user_id: int):
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "weekly_event_count": 18,
+            "average_score": 72.5,
+            "updated_at": "2026-03-27T00:00:00Z",
+        }
+
+    async def refresh_user_learning_summary(self, *, tenant_id: int, user_id: int):
+        return {"tenant_id": tenant_id, "user_id": user_id, "average_score": 70.0}
+
+    async def refresh_bundle(self, *, tenant_id: int, user_id: int | None = None, limit_users: int = 250):
+        return {"tenant_id": tenant_id, "refreshed_users": 11, "tenant_dashboard": {"tenant_id": tenant_id}}
+
+
+def test_precomputed_analytics_endpoints(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.PrecomputedAnalyticsService", StubPrecomputedAnalyticsService)
+
+    class _Db:
+        async def commit(self):
+            return None
+
+    teacher = SimpleNamespace(tenant_id=6)
+    learner = SimpleNamespace(tenant_id=6, id=21)
+    admin = SimpleNamespace(tenant_id=6)
+
+    tenant_snapshot = asyncio.run(get_precomputed_tenant_dashboard(db=_Db(), current_user=teacher))
+    assert tenant_snapshot["active_learners"] == 14
+
+    user_snapshot = asyncio.run(get_precomputed_user_learning_summary(db=_Db(), current_user=learner))
+    assert user_snapshot["average_score"] == 72.5
+
+    refresh_result = asyncio.run(refresh_precomputed_analytics(db=_Db(), current_user=admin))
+    assert refresh_result["refreshed_users"] == 11

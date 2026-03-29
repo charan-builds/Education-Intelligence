@@ -13,6 +13,11 @@ export async function chatWithMentor(payload: MentorChatRequest): Promise<Mentor
   return data;
 }
 
+export async function recoverMentorChat(payload: MentorChatRequest): Promise<MentorChatResponse> {
+  const { data } = await apiClient.post<MentorChatResponse>("/mentor/chat/fallback", payload);
+  return data;
+}
+
 export async function getMentorChatStatus(requestId: string): Promise<MentorChatStatusResponse> {
   const { data } = await apiClient.get<MentorChatStatusResponse>(`/mentor/chat/status/${requestId}`);
   return data;

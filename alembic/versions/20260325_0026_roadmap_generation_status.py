@@ -38,6 +38,17 @@ def upgrade() -> None:
         """
     )
 
+    op.execute(
+        """
+        DELETE FROM roadmaps r
+        USING roadmaps duplicate
+        WHERE r.user_id = duplicate.user_id
+          AND r.goal_id = duplicate.goal_id
+          AND r.test_id = duplicate.test_id
+          AND r.id < duplicate.id
+        """
+    )
+
     op.alter_column("roadmaps", "test_id", nullable=False)
     op.create_unique_constraint("uq_roadmaps_user_goal_test", "roadmaps", ["user_id", "goal_id", "test_id"])
 

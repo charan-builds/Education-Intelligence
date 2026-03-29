@@ -12,7 +12,7 @@ import {
 
 import { getCurrentUser, login as loginRequest, logout as logoutRequest } from "@/services/authService";
 import type { User } from "@/types/user";
-import { AUTH_CHANGED_EVENT } from "@/utils/authToken";
+import { AUTH_CHANGED_EVENT, clearStoredToken } from "@/utils/authToken";
 import { canonicalizeRole } from "@/utils/roleRedirect";
 
 export type AuthUser = {
@@ -37,6 +37,8 @@ type AuthContextValue = {
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const ACTIVE_TENANT_STORAGE_KEY = "active_tenant_id";
+const AUTH_ROLE_STORAGE_KEY = "auth_user_role";
 
 function normalizeUser(payload: User | null): AuthUser | null {
   if (!payload) {
@@ -50,12 +52,28 @@ function normalizeUser(payload: User | null): AuthUser | null {
   };
 }
 
+function syncStoredAuthState(user: AuthUser | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (!user?.role) {
+    window.localStorage.removeItem(AUTH_ROLE_STORAGE_KEY);
+    window.localStorage.removeItem(ACTIVE_TENANT_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(AUTH_ROLE_STORAGE_KEY, user.role);
+  if (user.role !== "super_admin") {
+    window.localStorage.removeItem(ACTIVE_TENANT_STORAGE_KEY);
+  }
+}
+
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   const refresh = async () => {
     const nextUser = normalizeUser(await getCurrentUser());
+    syncStoredAuthState(nextUser);
     startTransition(() => {
       setUser(nextUser);
       setIsReady(true);
@@ -88,6 +106,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   ) => {
     const session = await loginRequest(email, password, tenantContext);
     const nextUser = normalizeUser(session.user);
+    syncStoredAuthState(nextUser);
     setUser(nextUser);
     return nextUser;
   };
@@ -95,7 +114,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const logout = () => {
     void logoutRequest();
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem("active_tenant_id");
+      clearStoredToken();
+      window.localStorage.removeItem(ACTIVE_TENANT_STORAGE_KEY);
+      window.localStorage.removeItem(AUTH_ROLE_STORAGE_KEY);
     }
     setUser(null);
   };

@@ -8,6 +8,7 @@ export type MentorChatRequest = {
 
 export type MentorChatResponse = {
   request_id?: string | null;
+  status?: string;
   reply: string;
   advisor_type: string;
   used_ai: boolean;
@@ -51,6 +52,12 @@ export type MentorNotificationItem = {
 
 export type MentorNotificationsResponse = {
   notifications: MentorNotificationItem[];
+};
+
+export type MentorLearner = {
+  user_id: number;
+  email: string;
+  display_name: string;
 };
 
 export type AgentObservedState = {

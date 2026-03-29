@@ -32,7 +32,7 @@ class OutboxRepository:
                 OutboxEvent.tenant_id == tenant_id,
                 OutboxEvent.payload_json == payload_json,
             )
-        stmt = stmt.where(OutboxEvent.status.in_(["pending", "processing"])).order_by(OutboxEvent.id.desc()).limit(1)
+        stmt = stmt.order_by(OutboxEvent.id.desc()).limit(1)
         existing = (await self.session.execute(stmt)).scalar_one_or_none()
         if existing is not None:
             return existing

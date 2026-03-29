@@ -22,7 +22,9 @@ class TopicScore(Base):
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     retention_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     review_interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    revision_interval_days: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     review_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     user = relationship("User", back_populates="topic_scores")

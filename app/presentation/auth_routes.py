@@ -87,6 +87,11 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db_s
     return _serialize_user(user, tenant_id=tenant_id, role=user.role)
 
 
+@router.post("/invite-accept", response_model=UserResponse)
+async def accept_invite(payload: RegisterRequest, db: AsyncSession = Depends(get_db_session)):
+    return await register(payload=payload, db=db)
+
+
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
@@ -102,6 +107,7 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
     _set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
     settings = get_settings()
     return TokenResponse(
+        access_token=access_token,
         access_token_expires_in=settings.access_token_expire_minutes * 60,
         refresh_token_expires_in=settings.refresh_token_expire_minutes * 60,
         user=_serialize_user(
@@ -125,6 +131,7 @@ async def refresh_session(request: Request, response: Response, db: AsyncSession
     _set_auth_cookies(response, access_token=access_token, refresh_token=next_refresh_token)
     settings = get_settings()
     return TokenResponse(
+        access_token=access_token,
         access_token_expires_in=settings.access_token_expire_minutes * 60,
         refresh_token_expires_in=settings.refresh_token_expire_minutes * 60,
         user=_serialize_user(
@@ -169,7 +176,7 @@ async def request_email_verification(
     db: AsyncSession = Depends(get_db_session),
 ):
     token = await AuthService(db).request_email_verification(tenant_id=payload.tenant_id, email=payload.email)
-    return AuthActionResponse(detail="Email verification token issued", token=token)
+    return AuthActionResponse(detail="Email verification instructions sent", token=token)
 
 
 @router.post("/email-verification/confirm", response_model=AuthActionResponse)
@@ -181,13 +188,29 @@ async def confirm_email_verification(
     return AuthActionResponse(detail=f"Email verified for user {user.id}")
 
 
+@router.post("/email-verification", response_model=AuthActionResponse)
+async def confirm_email_verification_alias(
+    payload: EmailVerificationConfirmRequest,
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await confirm_email_verification(payload=payload, db=db)
+
+
 @router.post("/password-reset/request", response_model=AuthActionResponse)
 async def request_password_reset(
     payload: PasswordResetRequest,
     db: AsyncSession = Depends(get_db_session),
 ):
     token = await AuthService(db).request_password_reset(tenant_id=payload.tenant_id, email=payload.email)
-    return AuthActionResponse(detail="Password reset token issued", token=token)
+    return AuthActionResponse(detail="Password reset instructions sent", token=token)
+
+
+@router.post("/forgot-password", response_model=AuthActionResponse)
+async def forgot_password(
+    payload: PasswordResetRequest,
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await request_password_reset(payload=payload, db=db)
 
 
 @router.post("/password-reset/confirm", response_model=AuthActionResponse)
@@ -197,6 +220,14 @@ async def confirm_password_reset(
 ):
     user = await AuthService(db).reset_password(token=payload.token, password=payload.password)
     return AuthActionResponse(detail=f"Password reset for user {user.id}")
+
+
+@router.post("/reset-password", response_model=AuthActionResponse)
+async def reset_password_alias(
+    payload: PasswordResetConfirmRequest,
+    db: AsyncSession = Depends(get_db_session),
+):
+    return await confirm_password_reset(payload=payload, db=db)
 
 
 @router.post("/invites", response_model=InviteResponse)
@@ -213,13 +244,13 @@ async def create_invite(
         email=payload.email,
     )
     settings = get_settings()
-    frontend_origin = next(
+    frontend_origin = settings.app_base_url.strip().rstrip("/") or next(
         (origin.strip().rstrip("/") for origin in settings.cors_origins.split(",") if origin.strip()),
         str(request.base_url).rstrip("/"),
     )
     return InviteResponse(
         invite_token=invite_token,
-        invite_url=f"{frontend_origin}/auth?invite={invite_token}",
+        invite_url=f"{frontend_origin}/auth?mode=invite&invite={invite_token}",
         email=payload.email,
         role=payload.role,
         expires_in_hours=settings.invite_token_expire_hours,

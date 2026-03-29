@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.notification_service import NotificationService
-from app.core.dependencies import get_current_user
+from app.core.dependencies import get_current_user, require_roles
 from app.infrastructure.database import get_db_session
 from app.schemas.notification_schema import NotificationListResponse, NotificationReadResponse
 
@@ -39,3 +39,17 @@ async def mark_notification_read(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+@router.post("/generate")
+async def generate_notifications(
+    limit_users: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("admin", "super_admin")),
+):
+    created = await NotificationService(db).generate_due_notifications(
+        tenant_id=current_user.tenant_id,
+        limit_users=limit_users,
+    )
+    await db.commit()
+    return {"tenant_id": current_user.tenant_id, "created": created}

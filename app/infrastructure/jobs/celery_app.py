@@ -1,8 +1,14 @@
+import time
+
 from celery import Celery
+from celery.signals import before_task_publish, task_failure, task_postrun, task_prerun, task_retry
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
+from app.core.metrics import queue_wait_duration_seconds, task_retries_total
 
 settings = get_settings()
+logger = get_logger()
 
 celery_app = Celery(
     "learning_platform",
@@ -18,8 +24,12 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_acks_late=True,
+    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     broker_connection_retry_on_startup=True,
+    task_time_limit=300,
+    task_soft_time_limit=240,
+    result_expires=3600,
     beat_schedule={
         "process-outbox-events-every-minute": {
             "task": "jobs.process_outbox_events",
@@ -63,3 +73,76 @@ celery_app.conf.update(
 )
 
 celery_app.autodiscover_tasks(["app.infrastructure.jobs"])
+
+
+@before_task_publish.connect
+def attach_publish_timestamp(headers=None, **_kwargs):  # pragma: no cover
+    if headers is not None and headers.get("published_at_epoch_ms") is None:
+        headers["published_at_epoch_ms"] = int(time.time() * 1000)
+        logger.info(
+            "celery task published",
+            extra={"log_data": {"task_headers": {"id": headers.get("id"), "task": headers.get("task")}}},
+        )
+
+
+@task_prerun.connect
+def record_queue_wait(task=None, **_kwargs):  # pragma: no cover
+    if task is None or getattr(task, "request", None) is None:
+        return
+    raw_published_at = getattr(task.request, "headers", {}).get("published_at_epoch_ms")
+    try:
+        published_at_ms = int(raw_published_at)
+    except (TypeError, ValueError):
+        return
+    wait_seconds = max((time.time() * 1000 - published_at_ms) / 1000, 0.0)
+    queue_wait_duration_seconds.labels(task_name=task.name or "unknown").observe(wait_seconds)
+    logger.info(
+        "celery task started",
+        extra={
+            "log_data": {
+                "task_id": getattr(task.request, "id", None),
+                "task_name": task.name or "unknown",
+                "queue_wait_seconds": round(wait_seconds, 4),
+            }
+        },
+    )
+
+
+@task_retry.connect
+def record_task_retry(request=None, **_kwargs):  # pragma: no cover
+    task_name = getattr(request, "task", None) or "unknown"
+    task_retries_total.labels(task_name=task_name).inc()
+    logger.warning(
+        "celery task retry scheduled",
+        extra={"log_data": {"task_id": getattr(request, "id", None), "task_name": task_name}},
+    )
+
+
+@task_postrun.connect
+def log_task_postrun(task_id=None, task=None, state=None, retval=None, **_kwargs):  # pragma: no cover
+    logger.info(
+        "celery task completed",
+        extra={
+            "log_data": {
+                "task_id": task_id,
+                "task_name": getattr(task, "name", "unknown"),
+                "state": state,
+                "result_type": type(retval).__name__ if retval is not None else None,
+            }
+        },
+    )
+
+
+@task_failure.connect
+def log_task_failure(task_id=None, exception=None, sender=None, **_kwargs):  # pragma: no cover
+    logger.error(
+        "celery task failed",
+        extra={
+            "log_data": {
+                "task_id": task_id,
+                "task_name": getattr(sender, "name", "unknown"),
+                "error_type": type(exception).__name__ if exception is not None else None,
+                "error_message": str(exception) if exception is not None else None,
+            }
+        },
+    )

@@ -15,7 +15,7 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { useRealtime } from "@/components/providers/RealtimeProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { useMentorWorkspace } from "@/hooks/useDashboard";
-import { ackMentorChat, chatWithMentor } from "@/services/mentorService";
+import { ackMentorChat, getMentorChatStatus, recoverMentorChat } from "@/services/mentorService";
 
 type ChatMessage = {
   id: number;
@@ -46,7 +46,8 @@ export default function MentorChatPage() {
     },
   ]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const fallbackTimerRef = useRef<number | null>(null);
+  const statusPollTimerRef = useRef<number | null>(null);
+  const pendingRequestIdRef = useRef<string | null>(null);
 
   const canSend = useMemo(() => Boolean(input.trim() && user?.user_id && user?.tenant_id), [input, user?.tenant_id, user?.user_id]);
 
@@ -94,11 +95,12 @@ export default function MentorChatPage() {
     setStreamingId(null);
     setDraftResponse("");
     setPendingRequestId(null);
+    pendingRequestIdRef.current = null;
     setIsSending(false);
     setInput("");
-    if (fallbackTimerRef.current) {
-      window.clearTimeout(fallbackTimerRef.current);
-      fallbackTimerRef.current = null;
+    if (statusPollTimerRef.current) {
+      window.clearTimeout(statusPollTimerRef.current);
+      statusPollTimerRef.current = null;
     }
     void ackMentorChat(lastMentorReply.requestId).catch(() => undefined);
   }, [lastMentorReply, pendingRequestId, streamingId]);
@@ -109,59 +111,102 @@ export default function MentorChatPage() {
 
   useEffect(() => {
     return () => {
-      if (fallbackTimerRef.current) {
-        window.clearTimeout(fallbackTimerRef.current);
+      if (statusPollTimerRef.current) {
+        window.clearTimeout(statusPollTimerRef.current);
       }
     };
   }, []);
 
-  async function handleHttpFallback(payload: { prompt: string; requestId: string; responseMessageId: number }) {
-    if (!user?.user_id || !user?.tenant_id || pendingRequestId !== payload.requestId) {
+  async function pollMentorStatus(payload: { prompt: string; requestId: string; responseMessageId: number; attempt: number }) {
+    if (!user?.user_id || !user?.tenant_id || pendingRequestIdRef.current !== payload.requestId) {
       return;
     }
     try {
-      const response = await chatWithMentor({
-        message: payload.prompt,
-        user_id: user.user_id,
-        tenant_id: user.tenant_id,
-        request_id: payload.requestId,
-        chat_history: messages.slice(-6).map((message) => ({
-          role: message.role === "learner" ? "user" : "assistant",
-          content: message.text,
-        })),
-      });
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === payload.responseMessageId
-            ? {
-                ...message,
-                text: response.reply,
-                metadata: `HTTP fallback reply • ${payload.requestId}`,
-                provider: response.provider ?? null,
-                whyRecommended: response.why_recommended ?? [],
-              }
-            : message,
-        ),
-      );
-      setStreamingId(null);
-      setDraftResponse("");
-      setPendingRequestId(null);
-      setIsSending(false);
-      setInput("");
-      await ackMentorChat(payload.requestId);
-      toast({
-        title: "Mentor fallback used",
-        description: "The realtime reply took too long, so the response was recovered through HTTP.",
-        variant: "info",
-      });
+      const status = await getMentorChatStatus(payload.requestId);
+      if (status.reply) {
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === payload.responseMessageId
+              ? {
+                  ...message,
+                  text: status.reply ?? "",
+                  metadata: `Recovered async reply • ${payload.requestId}`,
+                }
+              : message,
+          ),
+        );
+        setStreamingId(null);
+        setDraftResponse("");
+        setPendingRequestId(null);
+        pendingRequestIdRef.current = null;
+        setIsSending(false);
+        setInput("");
+        await ackMentorChat(payload.requestId);
+        toast({
+          title: "Mentor response recovered",
+          description: "Realtime delivery lagged, so the queued reply was recovered from chat status.",
+          variant: "info",
+        });
+        return;
+      }
     } catch {
+      if (payload.attempt >= 5) {
+        try {
+          const response = await recoverMentorChat({
+            message: payload.prompt,
+            user_id: user.user_id,
+            tenant_id: user.tenant_id,
+            request_id: payload.requestId,
+            chat_history: messages.slice(-6).map((message) => ({
+              role: message.role === "learner" ? "user" : "assistant",
+              content: message.text,
+            })),
+          });
+          if (response.reply) {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === payload.responseMessageId
+                  ? {
+                      ...message,
+                      text: response.reply,
+                      metadata: `Recovered async reply • ${payload.requestId}`,
+                      provider: response.provider ?? null,
+                      whyRecommended: response.why_recommended ?? [],
+                    }
+                  : message,
+              ),
+            );
+            setStreamingId(null);
+            setDraftResponse("");
+            setPendingRequestId(null);
+            pendingRequestIdRef.current = null;
+            setIsSending(false);
+            setInput("");
+            await ackMentorChat(payload.requestId);
+            return;
+          }
+        } catch {
+          // Keep polling below.
+        }
+      }
+    }
+
+    if (payload.attempt >= 10) {
       setIsSending(false);
       toast({
         title: "Mentor reply delayed",
-        description: "The realtime and fallback paths are both delayed. Please retry in a moment.",
+        description: "The queued response is still processing. Please retry in a moment.",
         variant: "error",
       });
+      return;
     }
+
+    statusPollTimerRef.current = window.setTimeout(() => {
+      void pollMentorStatus({
+        ...payload,
+        attempt: payload.attempt + 1,
+      });
+    }, 1500);
   }
 
   function submitPrompt(prompt: string) {
@@ -184,6 +229,7 @@ export default function MentorChatPage() {
     setStreamingId(baseId + 1);
     setDraftResponse("");
     setPendingRequestId(requestId);
+    pendingRequestIdRef.current = requestId;
     setIsSending(true);
     setLastPrompt(learnerMessage);
     sendMentorMessage({
@@ -196,16 +242,17 @@ export default function MentorChatPage() {
         content: message.text,
       })),
     });
-    if (fallbackTimerRef.current) {
-      window.clearTimeout(fallbackTimerRef.current);
+    if (statusPollTimerRef.current) {
+      window.clearTimeout(statusPollTimerRef.current);
     }
-    fallbackTimerRef.current = window.setTimeout(() => {
-      void handleHttpFallback({
+    statusPollTimerRef.current = window.setTimeout(() => {
+      void pollMentorStatus({
         prompt: learnerMessage,
         requestId,
         responseMessageId: baseId + 1,
+        attempt: 1,
       });
-    }, 6000);
+    }, 4000);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

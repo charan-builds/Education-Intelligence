@@ -66,7 +66,7 @@ Required variables:
 - `POSTGRES_HOST_PORT=5433` for host access to the Compose Postgres container
 - `REDIS_HOST_PORT=6380` for host access to the Compose Redis container
 - `CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000`
-- `SECRET_KEY=supersecret`
+- `JWT_SECRET=<generate-a-long-random-secret>`
 - `ALGORITHM=HS256`
 - `ACCESS_TOKEN_EXPIRE_MINUTES=60`
 - `DEFAULT_TENANT_ID=1`
@@ -151,7 +151,8 @@ Gateway entrypoint:
 Notes:
 - API container is internal-only in compose; Nginx is the public edge.
 - Frontend runs as a separate container and talks to the API gateway through `NEXT_PUBLIC_API_URL`.
-- API startup automatically runs Alembic migrations and the seed bootstrap before starting Uvicorn.
+- API startup automatically runs Alembic migrations and only seeds when `RUN_SEED_ON_STARTUP=true` before starting Gunicorn.
+- Automatic startup seeding is disabled by default in Docker; set `RUN_SEED_ON_STARTUP=true` only for intentional demo/bootstrap environments.
 - Compose binds Postgres to `127.0.0.1:5433` and Redis to `127.0.0.1:6380` by default to avoid conflicts with local developer services. Override with `POSTGRES_HOST_PORT` or `REDIS_HOST_PORT` if needed.
 - `docker compose up` credentials from `scripts/bootstrap_seed.py`:
   - `superadmin@platform.example.com` / `SuperAdmin123!`

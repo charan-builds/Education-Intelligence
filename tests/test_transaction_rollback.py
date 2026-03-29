@@ -50,12 +50,15 @@ def test_auth_register_rolls_back_on_create_failure():
 
 def test_diagnostic_submit_rolls_back_on_missing_question():
     class _DiagRepo:
-        async def get_test_for_user(self, test_id, user_id, tenant_id):
+        async def get_test_for_user(self, test_id, user_id, tenant_id, for_update=False):
             return object()
 
     class _TopicRepo:
         async def get_question(self, question_id):
             return None
+
+        async def list_questions_by_ids(self, *, tenant_id, question_ids):
+            return []
 
     async def _run():
         session = _Session()

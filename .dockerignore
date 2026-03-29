@@ -16,6 +16,7 @@ htmlcov/
 # Virtual environments
 venv/
 .venv/
+.venv-1/
 
 # Local env/config
 .env
@@ -30,11 +31,15 @@ build/
 logs/
 
 # Frontend local artifacts
+node_modules/
+.next/
 learning-platform-frontend/node_modules/
 learning-platform-frontend/.next/
 learning-platform-frontend/.turbo/
 learning-platform-frontend/playwright-report/
 learning-platform-frontend/test-results/
+Premiumsaaslandingpage/node_modules/
+Premiumsaaslandingpage/.next/
 
 # Tooling/editor
 .vscode/
@@ -45,4 +50,5 @@ learning-platform-frontend/test-results/
 *.log
 
 # Docs and local outputs (optional for runtime image)
-/tests/
+tests/
+docs/

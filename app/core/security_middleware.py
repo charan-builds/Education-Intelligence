@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from app.core.config import get_settings
 from app.core.security import (
@@ -27,14 +28,18 @@ def _build_content_security_policy() -> str:
         elif origin.startswith("http://"):
             connect_sources.add("ws://" + origin.removeprefix("http://"))
 
+    # The API itself does not render HTML with inline scripts/styles in production.
+    # We keep a more permissive policy in non-production to avoid breaking interactive docs.
+    is_production = str(getattr(settings, "environment", "development")).lower() == "production"
+
     directives = {
         "default-src": ["'self'"],
         "base-uri": ["'self'"],
         "frame-ancestors": ["'none'"],
         "object-src": ["'none'"],
         "img-src": ["'self'", "data:", "blob:"],
-        "style-src": ["'self'", "'unsafe-inline'"],
-        "script-src": ["'self'", "'unsafe-inline'"],
+        "style-src": ["'self'"] + ([] if is_production else ["'unsafe-inline'"]),
+        "script-src": ["'self'"] + ([] if is_production else ["'unsafe-inline'"]),
         "font-src": ["'self'", "data:"],
         "connect-src": sorted(connect_sources),
         "form-action": ["'self'"],
@@ -82,6 +87,24 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class CommunityAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Ensure /community endpoints cannot be accessed without an auth token even if a route
+    forgets to attach auth dependencies.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path.startswith("/community"):
+            token = get_token_from_headers_and_cookies(
+                request.headers,
+                request.cookies,
+                cookie_name=ACCESS_TOKEN_COOKIE_NAME,
+            )
+            if not token:
+                return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+        return await call_next(request)
+
+
 class TenantContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
@@ -127,5 +150,6 @@ def register_security_middleware(app: FastAPI) -> None:
         allow_headers=["*"],
     )
     app.add_middleware(TenantContextMiddleware)
+    app.add_middleware(CommunityAuthMiddleware)
     app.add_middleware(CSRFMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)

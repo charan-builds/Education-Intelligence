@@ -14,6 +14,11 @@ export async function getUserRoadmap(user_id: number): Promise<RoadmapPageRespon
   return data;
 }
 
+export async function getCurrentRoadmapPage(): Promise<RoadmapPageResponse> {
+  const { data } = await apiClient.get<RoadmapPageResponse>("/roadmap/view");
+  return data;
+}
+
 export async function getLatestRoadmap(user_id: number): Promise<Roadmap | null> {
   const data = await getUserRoadmap(user_id);
   return data.items[0] ?? null;

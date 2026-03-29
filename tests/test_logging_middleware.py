@@ -23,7 +23,7 @@ class _CaptureLogger:
         self.error_calls.append((message, kwargs))
 
 
-def _request(path: str = "/diagnostic/submit", method: str = "POST") -> Request:
+def _request(path: str = "/diagnostic/submit", method: str = "POST", headers: list[tuple[bytes, bytes]] | None = None) -> Request:
     async def _receive():
         return {"type": "http.request", "body": b"", "more_body": False}
 
@@ -36,7 +36,7 @@ def _request(path: str = "/diagnostic/submit", method: str = "POST") -> Request:
         "path": path,
         "raw_path": path.encode(),
         "query_string": b"",
-        "headers": [],
+        "headers": headers or [],
         "client": ("127.0.0.1", 12345),
         "server": ("testserver", 80),
     }
@@ -62,12 +62,14 @@ def test_middleware_logs_success_request():
         data = kwargs["extra"]["log_data"]
         assert message == "request completed"
         assert data["method"] == "POST"
+        assert data["route"] == "/diagnostic/submit"
         assert data["path"] == "/diagnostic/submit"
         assert data["status_code"] == 200
         assert data["tenant_id"] is None
         assert data["user_id"] is None
         assert isinstance(data["duration_ms"], int)
         assert data["request_id"]
+        assert response.headers["X-Request-ID"] == data["request_id"]
 
     asyncio.run(_run())
 
@@ -95,6 +97,7 @@ def test_middleware_logs_error_request():
 
         assert message == "request failed"
         assert data["method"] == "GET"
+        assert data["route"] == "/roadmap/12"
         assert data["path"] == "/roadmap/12"
         assert data["status_code"] == 500
         assert data["error_type"] == "ValueError"
@@ -102,5 +105,89 @@ def test_middleware_logs_error_request():
         assert data["tenant_id"] is None
         assert data["user_id"] is None
         assert data["request_id"]
+
+    asyncio.run(_run())
+
+
+def test_middleware_reuses_incoming_request_id_header():
+    async def _run():
+        middleware = RequestLoggingMiddleware(_DummyApp())
+        logger = _CaptureLogger()
+        middleware.logger = logger
+
+        request = _request(headers=[(b"x-request-id", b"req-123")])
+
+        async def call_next(_request_obj):
+            return Response(status_code=204)
+
+        response = await middleware.dispatch(request, call_next)
+        _, kwargs = logger.info_calls[0]
+        data = kwargs["extra"]["log_data"]
+
+        assert data["request_id"] == "req-123"
+        assert response.headers["X-Request-ID"] == "req-123"
+
+    asyncio.run(_run())
+
+
+def test_middleware_reuses_incoming_correlation_id_header():
+    async def _run():
+        middleware = RequestLoggingMiddleware(_DummyApp())
+        logger = _CaptureLogger()
+        middleware.logger = logger
+
+        request = _request(headers=[(b"x-request-id", b"req-456"), (b"x-correlation-id", b"corr-789")])
+
+        async def call_next(_request_obj):
+            return Response(status_code=202)
+
+        response = await middleware.dispatch(request, call_next)
+        _, kwargs = logger.info_calls[0]
+        data = kwargs["extra"]["log_data"]
+
+        assert data["request_id"] == "req-456"
+        assert data["correlation_id"] == "corr-789"
+        assert response.headers["X-Request-ID"] == "req-456"
+        assert response.headers["X-Correlation-ID"] == "corr-789"
+
+    asyncio.run(_run())
+
+
+def test_middleware_avoids_detached_user_property_access():
+    class _DetachedAuthContext:
+        actor_user_id = 42
+        effective_tenant_id = 7
+
+        @property
+        def id(self):
+            raise RuntimeError("detached user access")
+
+        @property
+        def tenant_id(self):
+            raise RuntimeError("detached tenant access")
+
+    async def _run():
+        middleware = RequestLoggingMiddleware(_DummyApp())
+        logger = _CaptureLogger()
+        middleware.logger = logger
+
+        request = _request(path="/diagnostic/answer", method="POST")
+        request.state.user = _DetachedAuthContext()
+
+        async def call_next(_request_obj):
+            raise ValueError("boom")
+
+        try:
+            await middleware.dispatch(request, call_next)
+            assert False, "Expected ValueError"
+        except ValueError:
+            pass
+
+        assert len(logger.error_calls) == 1
+        _, kwargs = logger.error_calls[0]
+        data = kwargs["extra"]["log_data"]
+        assert data["tenant_id"] == 7
+        assert data["user_id"] == 42
+        assert data["error_message"] == "boom"
 
     asyncio.run(_run())

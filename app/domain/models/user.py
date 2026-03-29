@@ -43,5 +43,8 @@ class User(Base):
     mentor_memory_profiles = relationship("MentorMemoryProfile", back_populates="user", cascade="all, delete-orphan")
     mentor_session_memories = relationship("MentorSessionMemory", back_populates="user", cascade="all, delete-orphan")
     refresh_sessions = relationship("RefreshSession", cascade="all, delete-orphan")
+    sessions = relationship("SessionRecord", cascade="all, delete-orphan")
     skill_vectors = relationship("UserSkillVector", cascade="all, delete-orphan")
     notifications = relationship("Notification", cascade="all, delete-orphan")
+    gamification_profile = relationship("GamificationProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    gamification_events = relationship("GamificationEvent", back_populates="user", cascade="all, delete-orphan")

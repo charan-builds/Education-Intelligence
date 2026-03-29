@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, BrainCircuit, MessagesSquare, Sparkles, ToggleLeft } from "lucide-react";
 
@@ -12,23 +13,31 @@ import PageHeader from "@/components/layouts/PageHeader";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
 import MetricCard from "@/components/ui/MetricCard";
+import Select from "@/components/ui/Select";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import StatusPill from "@/components/ui/StatusPill";
 import { normalizeRoadmapGenerationStatus, useMentorWorkspace } from "@/hooks/useDashboard";
 import { runAutonomousAgent } from "@/services/mentorInsightsService";
 
 export default function MentorDashboardPage() {
-  const workspace = useMentorWorkspace();
+  const [selectedLearnerId, setSelectedLearnerId] = useState<number | null>(null);
+  const workspace = useMentorWorkspace(selectedLearnerId);
   const queryClient = useQueryClient();
   const roadmapState = normalizeRoadmapGenerationStatus(workspace.roadmap?.status);
 
+  useEffect(() => {
+    if (!selectedLearnerId && workspace.learners.length > 0) {
+      setSelectedLearnerId(workspace.learners[0].user_id);
+    }
+  }, [selectedLearnerId, workspace.learners]);
+
   const runAgentMutation = useMutation({
-    mutationFn: runAutonomousAgent,
+    mutationFn: () => runAutonomousAgent({ learnerId: workspace.activeLearnerId }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "agent"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "suggestions"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "notifications"] });
-      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "roadmap", workspace.queries.roadmapQuery.data?.items?.[0]?.user_id] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "agent", workspace.activeLearnerId] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "suggestions", workspace.activeLearnerId] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "notifications", workspace.activeLearnerId] });
+      await queryClient.invalidateQueries({ queryKey: ["dashboard", "mentor", "roadmap", workspace.activeLearnerId] });
     },
   });
 
@@ -39,13 +48,30 @@ export default function MentorDashboardPage() {
         title="Guide learners with live recommendation signals"
         description="The mentor panel surfaces current suggestions, weak-topic focus, notifications, and the visibility of the `ai_mentor_enabled` feature flag."
         actions={
-          <Link
-            href="/mentor/chat"
-            className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-700 via-brand-600 to-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-glow"
-          >
-            Open mentor chat
-            <MessagesSquare className="h-4 w-4" />
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            {workspace.learners.length > 0 ? (
+              <div className="min-w-[240px]">
+                <Select
+                  aria-label="Select learner"
+                  value={workspace.activeLearnerId ?? ""}
+                  onChange={(event) => setSelectedLearnerId(Number(event.target.value))}
+                >
+                  {workspace.learners.map((learner) => (
+                    <option key={learner.user_id} value={learner.user_id}>
+                      {learner.display_name} ({learner.email})
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            ) : null}
+            <Link
+              href={workspace.activeLearnerId ? `/mentor/chat?learner_id=${workspace.activeLearnerId}` : "/mentor/chat"}
+              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-brand-700 via-brand-600 to-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-glow"
+            >
+              Open mentor chat
+              <MessagesSquare className="h-4 w-4" />
+            </Link>
+          </div>
         }
         meta={
           <StatusPill
@@ -56,13 +82,21 @@ export default function MentorDashboardPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-4">
+        <MetricCard title="Learners" value={workspace.kpis.learnerCount} tone="default" icon={<MessagesSquare className="h-5 w-5" />} />
         <MetricCard title="AI visibility" value={workspace.kpis.aiMentorEnabled ? "Enabled" : "Disabled"} tone="info" icon={<ToggleLeft className="h-5 w-5" />} />
         <MetricCard title="Suggestions" value={workspace.kpis.recommendationCount} tone="success" icon={<Bot className="h-5 w-5" />} />
         <MetricCard title="Notifications" value={workspace.kpis.notificationCount} tone="warning" icon={<BrainCircuit className="h-5 w-5" />} />
         <MetricCard title="Agent decisions" value={workspace.kpis.agentDecisions} icon={<Sparkles className="h-5 w-5" />} />
       </div>
 
-      {roadmapState !== "ready" ? (
+      {workspace.learners.length === 0 ? (
+        <EmptyState
+          title="No learners assigned yet"
+          description="This mentor workspace activates as soon as a learner is assigned or a student opens mentor guidance."
+        />
+      ) : null}
+
+      {workspace.learners.length > 0 && roadmapState !== "ready" ? (
         <EmptyState
           title={roadmapState === "failed" ? "Learner roadmap failed" : "Learner roadmap still generating"}
           description={
@@ -73,7 +107,7 @@ export default function MentorDashboardPage() {
         />
       ) : null}
 
-      {roadmapState === "ready" ? (
+      {workspace.learners.length > 0 && roadmapState === "ready" ? (
         <>
           <SurfaceCard
             title="Autonomous agent"

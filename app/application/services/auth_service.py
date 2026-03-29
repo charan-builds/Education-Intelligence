@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.exceptions import ConflictError, UnauthorizedError, ValidationError
 from app.application.services.audit_log_service import AuditLogService
+from app.application.services.email_service import EmailService
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import (
@@ -23,7 +24,7 @@ from app.core.security import (
     verify_password,
 )
 from app.domain.models.user import User, UserRole
-from app.infrastructure.repositories.refresh_session_repository import RefreshSessionRepository
+from app.infrastructure.repositories.session_repository import SessionRepository
 from app.infrastructure.repositories.tenant_repository import TenantRepository
 from app.infrastructure.repositories.user_repository import UserRepository
 from app.infrastructure.repositories.user_tenant_role_repository import UserTenantRoleRepository
@@ -32,17 +33,28 @@ from app.infrastructure.repositories.user_tenant_role_repository import UserTena
 class AuthService:
     def __init__(self, session: AsyncSession):
         self.user_repository = UserRepository(session)
-        self.refresh_session_repository = RefreshSessionRepository(session)
+        self.session_repository = SessionRepository(session)
+        self.refresh_session_repository = self.session_repository
         self.tenant_repository = TenantRepository(session)
         self.user_tenant_role_repository = UserTenantRoleRepository(session)
         self.session = session
         self.logger = get_logger()
         self.audit_log_service = AuditLogService(session)
+        self.email_service = EmailService()
 
     @staticmethod
     def _refresh_session_expiry() -> datetime:
         settings = get_settings()
         return datetime.now(timezone.utc) + timedelta(minutes=settings.refresh_token_expire_minutes)
+
+    async def _next_token_version(self, *, user_id: int) -> int:
+        repository = self.refresh_session_repository
+        if hasattr(repository, "next_token_version_for_user"):
+            return await repository.next_token_version_for_user(user_id=user_id)
+        try:
+            return await self.session_repository.next_token_version_for_user(user_id=user_id)
+        except AttributeError:
+            return 1
 
     async def _create_refresh_session(
         self,
@@ -51,15 +63,24 @@ class AuthService:
         tenant_id: int,
         role: UserRole,
         device: str | None,
+        token_version: int | None = None,
     ) -> str:
         session_id = uuid4().hex
+        resolved_token_version = token_version or await self._next_token_version(user_id=int(user.id))
         await self.refresh_session_repository.create(
             session_id=session_id,
             user_id=int(user.id),
+            tenant_id=tenant_id,
+            token_version=resolved_token_version,
             device=device,
             expires_at=self._refresh_session_expiry(),
         )
-        token_payload = {"sub": str(user.id), "tenant_id": tenant_id, "role": role.value}
+        token_payload = {
+            "sub": str(user.id),
+            "tenant_id": tenant_id,
+            "role": role.value,
+            "tv": resolved_token_version,
+        }
         return create_refresh_token_with_jti(token_payload, token_id=session_id)
 
     async def register(self, *, email: str, password: str, invite_token: str | None = None) -> User:
@@ -190,14 +211,21 @@ class AuthService:
             tenant_id=resolved_tenant_id,
         )
         effective_role = membership.role if membership is not None else user.role
-        token_payload = {"sub": str(user.id), "tenant_id": resolved_tenant_id, "role": effective_role.value}
-        access_token = create_access_token(token_payload)
+        token_version = await self._next_token_version(user_id=int(user.id))
+        token_payload = {
+            "sub": str(user.id),
+            "tenant_id": resolved_tenant_id,
+            "role": effective_role.value,
+            "tv": token_version,
+        }
         refresh_token = await self._create_refresh_session(
             user=user,
             tenant_id=resolved_tenant_id,
             role=effective_role,
             device=device,
+            token_version=token_version,
         )
+        access_token = create_access_token(token_payload, token_id=decode_refresh_token(refresh_token)["jti"])
         await self.session.commit()
         await self.audit_log_service.record(
             tenant_id=resolved_tenant_id,
@@ -232,6 +260,8 @@ class AuthService:
         refresh_session = await self.refresh_session_repository.get_active(session_id=session_id)
         if refresh_session is None or refresh_session.expires_at <= datetime.now(timezone.utc):
             raise UnauthorizedError("Refresh session expired or revoked")
+        if int(payload.get("tv", refresh_session.token_version)) != int(refresh_session.token_version):
+            raise UnauthorizedError("Refresh token version mismatch")
 
         user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
         if user is None:
@@ -239,16 +269,22 @@ class AuthService:
 
         membership = await self.user_tenant_role_repository.get_membership(user_id=int(user.id), tenant_id=tenant_id)
         effective_role = membership.role if membership is not None else user.role
-        token_payload = {"sub": str(user.id), "tenant_id": tenant_id, "role": effective_role.value}
         await self.refresh_session_repository.revoke(refresh_session)
+        token_payload = {
+            "sub": str(user.id),
+            "tenant_id": tenant_id,
+            "role": effective_role.value,
+            "tv": int(refresh_session.token_version),
+        }
         next_refresh_token = await self._create_refresh_session(
             user=user,
             tenant_id=tenant_id,
             role=effective_role,
             device=device or refresh_session.device,
+            token_version=int(refresh_session.token_version),
         )
         await self.session.commit()
-        return create_access_token(token_payload), next_refresh_token, user, effective_role
+        return create_access_token(token_payload, token_id=decode_refresh_token(next_refresh_token)["jti"]), next_refresh_token, user, effective_role
 
     async def logout(self, refresh_token: str | None) -> None:
         if not refresh_token:
@@ -304,7 +340,9 @@ class AuthService:
         user = await self.user_repository.get_by_email(email, tenant_id=tenant_id)
         if user is None:
             raise ValidationError("User not found")
-        return create_email_verification_token(user_id=int(user.id), tenant_id=tenant_id, email=user.email)
+        token = create_email_verification_token(user_id=int(user.id), tenant_id=tenant_id, email=user.email)
+        await self._queue_email_verification_email(email=user.email, token=token)
+        return token
 
     async def verify_email(self, *, token: str) -> User:
         payload = decode_email_verification_token(token)
@@ -330,7 +368,9 @@ class AuthService:
         user = await self.user_repository.get_by_email(email, tenant_id=tenant_id)
         if user is None:
             raise ValidationError("User not found")
-        return create_password_reset_token(user_id=int(user.id), tenant_id=tenant_id, email=user.email)
+        token = create_password_reset_token(user_id=int(user.id), tenant_id=tenant_id, email=user.email)
+        await self._queue_password_reset_email(email=user.email, token=token)
+        return token
 
     async def reset_password(self, *, token: str, password: str) -> User:
         try:
@@ -374,4 +414,47 @@ class AuthService:
             UserRole.admin,
         }:
             raise UnauthorizedError("Only admins can invite privileged users")
-        return create_invite_token(tenant_id=tenant_id, role=role.value, email=email)
+        invite_token = create_invite_token(tenant_id=tenant_id, role=role.value, email=email)
+        if email:
+            await self._queue_invite_email(email=email, role=role, invite_token=invite_token)
+        return invite_token
+
+    async def _queue_email_verification_email(self, *, email: str, token: str) -> None:
+        verification_url = f"{self._frontend_origin()}/auth?mode=email-verification&token={token}"
+        payload = self.email_service.build_verification_email(to_email=email, verification_url=verification_url)
+        await self._enqueue_email(payload)
+
+    async def _queue_password_reset_email(self, *, email: str, token: str) -> None:
+        reset_url = f"{self._frontend_origin()}/auth?mode=reset-password&token={token}"
+        payload = self.email_service.build_password_reset_email(to_email=email, reset_url=reset_url)
+        await self._enqueue_email(payload)
+
+    async def _queue_invite_email(self, *, email: str, role: UserRole, invite_token: str) -> None:
+        invite_url = f"{self._frontend_origin()}/auth?mode=invite&invite={invite_token}"
+        payload = self.email_service.build_invite_email(to_email=email, invite_url=invite_url, role_label=role.value)
+        await self._enqueue_email(payload)
+
+    async def _enqueue_email(self, payload) -> None:
+        try:
+            from app.infrastructure.jobs.tasks import send_email
+
+            send_email.delay(
+                to_email=payload.to_email,
+                subject=payload.subject,
+                html_content=payload.html_content,
+                text_content=payload.text_content,
+            )
+        except Exception:
+            self.logger.exception("email enqueue failed; falling back to inline send")
+            await self.email_service.send(payload)
+
+    @staticmethod
+    def _frontend_origin() -> str:
+        settings = get_settings()
+        configured = settings.app_base_url.strip().rstrip("/")
+        if configured:
+            return configured
+        return next(
+            (origin.strip().rstrip("/") for origin in settings.cors_origins.split(",") if origin.strip()),
+            "http://localhost:3000",
+        )

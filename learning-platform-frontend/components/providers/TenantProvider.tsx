@@ -4,6 +4,7 @@ import {
   createContext,
   PropsWithChildren,
   startTransition,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -61,7 +62,7 @@ export function TenantProvider({ children }: PropsWithChildren) {
     };
   }, []);
 
-  const setActiveTenantScope = (tenantId: string | null) => {
+  const setActiveTenantScope = useCallback((tenantId: string | null) => {
     if (typeof window === "undefined") {
       return;
     }
@@ -77,7 +78,7 @@ export function TenantProvider({ children }: PropsWithChildren) {
     startTransition(() => {
       setActiveTenantScopeState(readTenantScope());
     });
-  };
+  }, [queryClient]);
 
   const contextValue = useMemo<TenantContextValue>(
     () => ({
@@ -85,7 +86,7 @@ export function TenantProvider({ children }: PropsWithChildren) {
       setActiveTenantScope,
       clearActiveTenantScope: () => setActiveTenantScope(null),
     }),
-    [activeTenantScope],
+    [activeTenantScope, setActiveTenantScope],
   );
 
   return <TenantContext.Provider value={contextValue}>{children}</TenantContext.Provider>;

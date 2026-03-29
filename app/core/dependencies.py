@@ -11,6 +11,7 @@ from app.core.security import (
 from app.infrastructure.database import get_db_session
 from app.infrastructure.repositories.user_tenant_role_repository import UserTenantRoleRepository
 from app.infrastructure.repositories.user_repository import UserRepository
+from app.infrastructure.repositories.session_repository import SessionRepository
 from app.schemas.common_schema import PaginationParams
 
 
@@ -34,11 +35,23 @@ async def get_current_user(
         payload = decode_access_token(token)
         user_id = int(payload["sub"])
         actor_tenant_id = int(payload.get("tenant_id", get_request_tenant_id(request)))
+        session_id = str(payload["jti"])
+        token_version = int(payload.get("tv", 0))
     except (AuthenticationError, KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",
         )
+
+    session_repository = SessionRepository(db)
+    active_session = await session_repository.get_active(session_id=session_id)
+    if (
+        active_session is None
+        or int(active_session.user_id) != user_id
+        or int(active_session.tenant_id) != actor_tenant_id
+        or int(active_session.token_version) != token_version
+    ):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session is no longer active")
 
     user_repository = UserRepository(db)
     membership_repository = UserTenantRoleRepository(db)

@@ -2,6 +2,7 @@ from celery.exceptions import CeleryError
 from fastapi import FastAPI
 from sqlalchemy import text
 
+from app.core.config import get_settings
 from app.core.metrics import metrics_router
 from app.core.security_middleware import register_security_middleware
 from app.core.tracing import configure_tracing
@@ -16,6 +17,24 @@ from app.realtime.distributed_bus import distributed_realtime_bus
 from app.realtime.hub import realtime_hub
 
 app = FastAPI(title="Learning Intelligence Platform", version="0.1.0")
+
+try:  # pragma: no cover
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+except Exception:  # pragma: no cover
+    sentry_sdk = None  # type: ignore
+    FastApiIntegration = None  # type: ignore
+
+settings = get_settings()
+if sentry_sdk is not None and FastApiIntegration is not None and settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.environment,
+        integrations=[FastApiIntegration()],
+        traces_sample_rate=0.1,
+        send_default_pii=False,
+    )
+
 configure_tracing()
 register_exception_handlers(app)
 register_rate_limiter(app)
@@ -33,6 +52,16 @@ async def startup_event() -> None:
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
     await distributed_realtime_bus.close()
+
+
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {
+        "service": "Learning Intelligence Platform API",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/health",
+    }
 
 
 @app.get("/health")

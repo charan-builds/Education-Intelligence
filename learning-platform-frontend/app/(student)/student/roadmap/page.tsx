@@ -1,28 +1,28 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
 import { CheckCircle2, PlayCircle, Route, Sparkles, Wand2 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import ProgressLineChart from "@/components/charts/ProgressLineChart";
 import PageHeader from "@/components/layouts/PageHeader";
-import ImmersiveQuestBoard from "@/components/student/ImmersiveQuestBoard";
-import InteractiveChallengeLab from "@/components/student/InteractiveChallengeLab";
-import RoadmapFlow from "@/components/student/RoadmapFlow";
 import Button from "@/components/ui/Button";
 import EmptyState from "@/components/ui/EmptyState";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import StatusPill from "@/components/ui/StatusPill";
 import { useToast } from "@/components/providers/ToastProvider";
-import { useAuth } from "@/hooks/useAuth";
 import { normalizeRoadmapGenerationStatus, normalizeRoadmapStatus, useStudentDashboard } from "@/hooks/useDashboard";
 import { updateRoadmapStep } from "@/services/roadmapService";
 
+const ProgressLineChart = dynamic(() => import("@/components/charts/ProgressLineChart"));
+const ImmersiveQuestBoard = dynamic(() => import("@/components/student/ImmersiveQuestBoard"));
+const InteractiveChallengeLab = dynamic(() => import("@/components/student/InteractiveChallengeLab"));
+const RoadmapFlow = dynamic(() => import("@/components/student/RoadmapFlow"));
+
 export default function StudentRoadmapPage() {
   const dashboard = useStudentDashboard();
-  const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -96,7 +96,7 @@ export default function StudentRoadmapPage() {
           title={roadmapState === "failed" ? "Roadmap generation failed" : "Roadmap is being prepared"}
           description={
             roadmapState === "failed"
-              ? dashboard.roadmapErrorMessage ?? "We could not build your roadmap from the latest diagnostic yet."
+              ? dashboard.roadmapErrorMessage ?? "We could not build your roadmap from the latest diagnostic yet. Your last synchronized progress remains available elsewhere in the workspace."
               : "Your diagnostic is complete and the roadmap is still generating. This page will become available as soon as it is ready."
           }
         />

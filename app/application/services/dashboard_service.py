@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.services.analytics_service import AnalyticsService
 from app.application.services.learning_intelligence_service import LearningIntelligenceService
 from app.application.services.mentor_service import MentorService
+from app.application.services.precomputed_analytics_service import PrecomputedAnalyticsService
 from app.domain.models.diagnostic_test import DiagnosticTest
 from app.domain.models.user import User, UserRole
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
@@ -15,6 +16,7 @@ class DashboardService:
         self.session = session
         self.analytics_service = AnalyticsService(session)
         self.learning_intelligence_service = LearningIntelligenceService(session)
+        self.precomputed_analytics_service = PrecomputedAnalyticsService(session)
         self.roadmap_repository = RoadmapRepository(session)
         self.mentor_service = MentorService(session=session)
 
@@ -31,17 +33,22 @@ class DashboardService:
         return await self.learning_intelligence_service.community_summary(tenant_id=tenant_id)
 
     async def admin_dashboard(self, *, tenant_id: int) -> dict:
+        snapshot = await self.precomputed_analytics_service.latest_tenant_dashboard(tenant_id=tenant_id)
+
         total_users_result = await self.session.execute(
             select(func.count(func.distinct(User.id))).where(user_belongs_to_tenant(User, tenant_id))
         )
         total_users = int(total_users_result.scalar_one() or 0)
 
-        active_learners_result = await self.session.execute(
-            select(func.count(func.distinct(User.id))).where(
-                user_has_tenant_role(User, tenant_id, UserRole.student.value)
+        if snapshot is not None:
+            active_learners = int(snapshot.get("active_learners") or 0)
+        else:
+            active_learners_result = await self.session.execute(
+                select(func.count(func.distinct(User.id))).where(
+                    user_has_tenant_role(User, tenant_id, UserRole.student.value)
+                )
             )
-        )
-        active_learners = int(active_learners_result.scalar_one() or 0)
+            active_learners = int(active_learners_result.scalar_one() or 0)
 
         diagnostics_taken_result = await self.session.execute(
             select(func.count(DiagnosticTest.id))

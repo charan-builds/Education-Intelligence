@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -18,16 +19,8 @@ import {
   Wand2,
 } from "lucide-react";
 
-import ActivityFeed from "@/components/dashboard/ActivityFeed";
-import RecommendationPanel from "@/components/dashboard/RecommendationPanel";
-import DistributionBarChart from "@/components/charts/DistributionBarChart";
-import ProgressLineChart from "@/components/charts/ProgressLineChart";
-import MasteryPieChart from "@/components/charts/MasteryPieChart";
 import PageHeader from "@/components/layouts/PageHeader";
 import { useRealtime } from "@/components/providers/RealtimeProvider";
-import DemoModeShowcase from "@/components/student/DemoModeShowcase";
-import AdaptiveGuidancePanel from "@/components/student/AdaptiveGuidancePanel";
-import ProgressStoryTimeline from "@/components/student/ProgressStoryTimeline";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import EmptyState from "@/components/ui/EmptyState";
@@ -36,10 +29,19 @@ import Skeleton from "@/components/ui/Skeleton";
 import { useAdaptiveStudentUI } from "@/hooks/useAdaptiveStudentUI";
 import { useStudentDashboard } from "@/hooks/useDashboard";
 
+const ActivityFeed = dynamic(() => import("@/components/dashboard/ActivityFeed"));
+const RecommendationPanel = dynamic(() => import("@/components/dashboard/RecommendationPanel"));
+const DistributionBarChart = dynamic(() => import("@/components/charts/DistributionBarChart"));
+const ProgressLineChart = dynamic(() => import("@/components/charts/ProgressLineChart"));
+const MasteryPieChart = dynamic(() => import("@/components/charts/MasteryPieChart"));
+const DemoModeShowcase = dynamic(() => import("@/components/student/DemoModeShowcase"));
+const AdaptiveGuidancePanel = dynamic(() => import("@/components/student/AdaptiveGuidancePanel"));
+const ProgressStoryTimeline = dynamic(() => import("@/components/student/ProgressStoryTimeline"));
+
 export default function StudentDashboardPage() {
   const dashboard = useStudentDashboard();
   const { activeUsers, connectionStatus, liveEvents } = useRealtime();
-  const isLoading = dashboard.queries.dashboardQuery.isLoading;
+  const isLoading = dashboard.queries.dashboardQuery.isLoading && !dashboard.queries.dashboardQuery.data;
   const topWeakTopic = dashboard.weakTopics[0];
   const nextReview = dashboard.retention.due_reviews[0];
   const activeBadges = dashboard.badges.slice(0, 3);
@@ -155,6 +157,12 @@ export default function StudentDashboardPage() {
 
       {!isLoading ? (
         <>
+          {dashboard.roadmapStatus === "failed" ? (
+            <EmptyState
+              title="Roadmap refresh needs attention"
+              description={dashboard.roadmapErrorMessage ?? "Your previous progress is still visible, but the latest roadmap refresh did not complete."}
+            />
+          ) : null}
           <AdaptiveGuidancePanel
             emotionalState={adaptiveUI.emotionalState}
             nextBestAction={adaptiveUI.nextBestAction}
@@ -165,8 +173,8 @@ export default function StudentDashboardPage() {
 
           {adaptiveUI.smartNotifications.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-3">
-              {adaptiveUI.smartNotifications.map((item) => (
-                <div key={item.title} className="story-card">
+              {adaptiveUI.smartNotifications.map((item, index) => (
+                <div key={`${item.title}-${index}`} className="story-card">
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">{item.title}</p>
                   <p className="mt-3 text-sm leading-7 text-slate-700">{item.message}</p>
                 </div>
@@ -242,8 +250,8 @@ export default function StudentDashboardPage() {
                   <div className="mt-3 space-y-2 text-sm leading-7 text-amber-950">
                     {(dashboard.cognitiveModel.confusion_signals.length
                       ? dashboard.cognitiveModel.confusion_signals
-                      : ["No major confusion signals detected right now."]).map((item) => (
-                      <p key={item}>- {item}</p>
+                      : ["No major confusion signals detected right now."]).map((item, index) => (
+                      <p key={`${item}-${index}`}>- {item}</p>
                     ))}
                   </div>
                 </div>
@@ -252,8 +260,8 @@ export default function StudentDashboardPage() {
                   <div className="mt-3 space-y-2 text-sm leading-7 text-indigo-950">
                     {(dashboard.cognitiveModel.misunderstanding_patterns.length
                       ? dashboard.cognitiveModel.misunderstanding_patterns
-                      : ["No repeated misunderstanding pattern is dominant yet."]).map((item) => (
-                      <p key={item}>- {item}</p>
+                      : ["No repeated misunderstanding pattern is dominant yet."]).map((item, index) => (
+                      <p key={`${item}-${index}`}>- {item}</p>
                     ))}
                   </div>
                 </div>
@@ -264,8 +272,8 @@ export default function StudentDashboardPage() {
               <div className="mt-3 grid gap-2 text-sm leading-7 text-emerald-950 md:grid-cols-2">
                 {(dashboard.cognitiveModel.adaptive_actions.length
                   ? dashboard.cognitiveModel.adaptive_actions
-                  : ["Keep alternating explanation and practice."]).map((item) => (
-                  <p key={item}>- {item}</p>
+                  : ["Keep alternating explanation and practice."]).map((item, index) => (
+                  <p key={`${item}-${index}`}>- {item}</p>
                 ))}
               </div>
             </div>
@@ -484,9 +492,9 @@ export default function StudentDashboardPage() {
                       {dashboard.retention.due_reviews.length === 0 ? (
                         <p className="text-sm text-slate-600 dark:text-slate-400">No reviews are due right now.</p>
                       ) : (
-                        dashboard.retention.due_reviews.map((review) => (
+                        dashboard.retention.due_reviews.map((review, index) => (
                           <div
-                            key={review.topic_id}
+                            key={`${review.topic_id}-${review.topic_name}-${index}`}
                             className="rounded-[22px] border border-white/70 bg-white/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70"
                           >
                             <div className="flex items-center justify-between gap-4">
@@ -506,9 +514,9 @@ export default function StudentDashboardPage() {
                     description="Targeted materials chosen for topics with the highest review pressure."
                   >
                     <div className="space-y-3">
-                      {dashboard.retention.recommended_resources.map((resource) => (
+                      {dashboard.retention.recommended_resources.map((resource, index) => (
                         <a
-                          key={resource.id}
+                          key={`${resource.id ?? resource.title ?? "resource"}-${index}`}
                           href={resource.url}
                           target="_blank"
                           rel="noreferrer"
@@ -636,9 +644,9 @@ export default function StudentDashboardPage() {
                     {dashboard.retention.due_reviews.length === 0 ? (
                       <p className="text-sm text-slate-600 dark:text-slate-400">No reviews are due right now.</p>
                     ) : (
-                      dashboard.retention.due_reviews.map((review) => (
+                      dashboard.retention.due_reviews.map((review, index) => (
                         <div
-                          key={review.topic_id}
+                          key={`${review.topic_id}-${review.topic_name}-${index}`}
                           className="rounded-[22px] border border-white/70 bg-white/80 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70"
                         >
                           <div className="flex items-center justify-between gap-4">
@@ -658,9 +666,9 @@ export default function StudentDashboardPage() {
                   description="Targeted materials chosen for topics with the highest review pressure."
                 >
                   <div className="space-y-3">
-                    {dashboard.retention.recommended_resources.map((resource) => (
+                    {dashboard.retention.recommended_resources.map((resource, index) => (
                       <a
-                        key={resource.id}
+                        key={`${resource.id ?? resource.title ?? "resource"}-${index}`}
                         href={resource.url}
                         target="_blank"
                         rel="noreferrer"
@@ -709,9 +717,9 @@ export default function StudentDashboardPage() {
                 {adaptiveUI.visibleSections.badges ? (
                 <SurfaceCard title="Badges earned" description="Milestones and recognition from your learning journey.">
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {dashboard.badges.map((badge) => (
+                    {dashboard.badges.map((badge, index) => (
                       <div
-                        key={`${badge.name}-${badge.awarded_at}`}
+                        key={`${badge.name}-${badge.awarded_at ?? "badge"}-${index}`}
                         className="rounded-[22px] border border-amber-200/70 bg-[linear-gradient(135deg,rgba(255,251,235,0.95),rgba(254,243,199,0.68))] px-4 py-3 transition duration-200 hover:-translate-y-1 dark:border-amber-300/20 dark:bg-amber-300/10"
                       >
                         <div className="flex items-center gap-2 text-amber-700 dark:text-amber-200">

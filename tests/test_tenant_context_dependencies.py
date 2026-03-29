@@ -29,8 +29,13 @@ def test_super_admin_can_override_effective_tenant(monkeypatch):
 
     monkeypatch.setattr(
         "app.core.dependencies.decode_access_token",
-        lambda token: {"sub": "1", "tenant_id": 1, "role": "super_admin"},
+        lambda token: {"sub": "1", "tenant_id": 1, "role": "super_admin", "jti": "sess-1", "tv": 3},
     )
+    async def fake_get_active(self, session_id: str):
+        assert session_id == "sess-1"
+        return SimpleNamespace(id="sess-1", user_id=1, tenant_id=1, token_version=3, revoked=False)
+
+    monkeypatch.setattr("app.core.dependencies.SessionRepository.get_active", fake_get_active)
     monkeypatch.setattr(
         "app.core.dependencies.UserRepository.get_by_id_in_tenant",
         fake_get_by_id_in_tenant,
@@ -59,8 +64,13 @@ def test_non_super_admin_cannot_override_effective_tenant(monkeypatch):
 
     monkeypatch.setattr(
         "app.core.dependencies.decode_access_token",
-        lambda token: {"sub": "2", "tenant_id": 5, "role": "admin"},
+        lambda token: {"sub": "2", "tenant_id": 5, "role": "admin", "jti": "sess-2", "tv": 4},
     )
+    async def fake_get_active(self, session_id: str):
+        assert session_id == "sess-2"
+        return SimpleNamespace(id="sess-2", user_id=2, tenant_id=5, token_version=4, revoked=False)
+
+    monkeypatch.setattr("app.core.dependencies.SessionRepository.get_active", fake_get_active)
     monkeypatch.setattr(
         "app.core.dependencies.UserRepository.get_by_id_in_tenant",
         fake_get_by_id_in_tenant,
