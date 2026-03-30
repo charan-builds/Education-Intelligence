@@ -22,7 +22,7 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
       return;
     }
     if (!isAuthenticated) {
-      router.replace(normalizeAppPath("/auth"));
+      router.replace(normalizeAppPath("/login"));
       return;
     }
     if (role && !roleHasAccess(role, allowedRoles)) {

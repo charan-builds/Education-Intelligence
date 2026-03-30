@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from "@/utils/authToken";
-import { getRolePrefix, normalizeAppPath } from "@/utils/appRoutes";
+import { getRolePrefix, normalizeAppPath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
 import { canonicalizeRole, getRoleRedirectPath } from "@/utils/roleRedirect";
 
 const PROTECTED_PREFIXES = [
@@ -12,18 +12,40 @@ const PROTECTED_PREFIXES = [
   "/super-admin",
   "/mentor",
   "/community",
+  "/dashboard",
+  "/goals",
+  "/diagnostic",
+  "/roadmap",
+  "/progress",
 ];
+
+const PUBLIC_ROUTES = ["/", "/login", "/register"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
   const normalizedPath = normalizeAppPath(pathname);
+
   if (normalizedPath !== pathname) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = normalizedPath;
     return NextResponse.redirect(redirectUrl);
   }
 
-  const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+  if ((pathname === "/login" || pathname === "/register") && request.nextUrl.searchParams.has("next")) {
+    const sanitizedNext = sanitizeAuthRedirectTarget(request.nextUrl.searchParams.get("next"), pathname);
+    if (!sanitizedNext) {
+      const redirectUrl = request.nextUrl.clone();
+      redirectUrl.searchParams.delete("next");
+      return NextResponse.redirect(redirectUrl);
+    }
+  }
+
+  if (PUBLIC_ROUTES.includes(pathname)) {
+    return NextResponse.next();
+  }
+
+  const isProtected = PROTECTED_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
   if (!isProtected) {
     return NextResponse.next();
   }
@@ -32,7 +54,7 @@ export function middleware(request: NextRequest) {
   const refreshToken = request.cookies.get(REFRESH_TOKEN_KEY)?.value;
   if (!accessToken && !refreshToken) {
     const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/auth";
+    redirectUrl.pathname = "/login";
     redirectUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(redirectUrl);
   }
@@ -65,17 +87,5 @@ function extractRoleFromToken(token: string | undefined): string | null {
 }
 
 export const config = {
-  matcher: [
-    "/student/:path*",
-    "/teacher/:path*",
-    "/admin/:path*",
-    "/super-admin/:path*",
-    "/mentor/:path*",
-    "/community/:path*",
-    "/dashboard/:path*",
-    "/goals/:path*",
-    "/diagnostic/:path*",
-    "/roadmap/:path*",
-    "/progress",
-  ],
+  matcher: ["/((?!_next|favicon.ico).*)"],
 };

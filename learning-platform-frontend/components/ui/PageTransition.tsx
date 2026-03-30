@@ -4,8 +4,15 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { PropsWithChildren } from "react";
 
+const STATIC_ROUTES = new Set(["/", "/login", "/register", "/auth"]);
+
 export default function PageTransition({ children }: PropsWithChildren) {
   const pathname = usePathname();
+  const shouldAnimate = pathname ? !STATIC_ROUTES.has(pathname) : true;
+
+  if (!shouldAnimate) {
+    return <>{children}</>;
+  }
 
   return (
     <AnimatePresence mode="wait" initial={false}>

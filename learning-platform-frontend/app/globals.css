@@ -52,6 +52,20 @@ body {
   font-family: var(--font-body), sans-serif;
 }
 
+html[data-landing-route="true"] {
+  background: #fffdf5 !important;
+  color-scheme: light !important;
+}
+
+body[data-landing-route="true"] {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(250, 204, 21, 0.2), transparent 22%),
+    radial-gradient(circle at 84% 16%, rgba(251, 191, 36, 0.12), transparent 18%),
+    radial-gradient(circle at 34% 86%, rgba(252, 211, 77, 0.12), transparent 24%),
+    linear-gradient(180deg, #fffdf6 0%, #fffef9 100%) !important;
+  color: #111827 !important;
+}
+
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.8) transparent;

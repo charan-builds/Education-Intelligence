@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import AuthPage from "@/app/auth/page";
+import AuthPageClient from "@/components/auth/AuthPageClient";
 
 const replaceMock = vi.fn();
 const loginMock = vi.fn().mockResolvedValue({ role: "student" });
@@ -22,14 +22,14 @@ vi.mock("@/hooks/useAuth", () => ({
   }),
 }));
 
-describe("AuthPage", () => {
+describe("AuthPageClient", () => {
   it("redirects to the requested next path after login", async () => {
-    window.history.replaceState({}, "", "/auth?next=/student/roadmap");
+    window.history.replaceState({}, "", "/login?next=/student/roadmap");
     const client = new QueryClient();
 
     render(
       <QueryClientProvider client={client}>
-        <AuthPage />
+        <AuthPageClient initialMode="login" />
       </QueryClientProvider>,
     );
 

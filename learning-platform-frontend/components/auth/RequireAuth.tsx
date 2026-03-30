@@ -11,7 +11,7 @@ type RequireAuthProps = {
   children: ReactNode;
 };
 
-const PUBLIC_ROUTES = ["/", "/auth"];
+const PUBLIC_ROUTES = ["/", "/login", "/register"];
 
 export default function RequireAuth({ children }: RequireAuthProps) {
   const pathname = usePathname();
@@ -24,7 +24,7 @@ export default function RequireAuth({ children }: RequireAuthProps) {
     }
     if (!isAuthenticated && pathname && !PUBLIC_ROUTES.includes(pathname)) {
       const next = pathname ? `?next=${encodeURIComponent(pathname)}` : "";
-      router.replace(`/auth${next}`);
+      router.replace(`/login${next}`);
     }
   }, [isAuthenticated, isReady, pathname, router]);
 

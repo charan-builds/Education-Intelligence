@@ -12,6 +12,12 @@ import SmartLoadingState from "@/components/ui/SmartLoadingState";
 import { useToast } from "@/components/providers/ToastProvider";
 import { getAIChatHistory, sendAIChatMessage } from "@/services/aiService";
 
+type ConversationItem = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+};
+
 export default function StudentMentorPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -24,7 +30,7 @@ export default function StudentMentorPage() {
 
   const conversation = useMemo(() => {
     return (historyQuery.data ?? []).flatMap((item) => {
-      const base = [
+      const base: ConversationItem[] = [
         { id: `${item.request_id}-user`, role: "user" as const, content: item.message },
       ];
       if (item.response) {

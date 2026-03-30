@@ -1,7 +1,7 @@
 import type { UserRole } from "@/utils/roleRedirect";
 
 export const appRoutes = {
-  auth: "/auth",
+  auth: "/login",
   student: {
     dashboard: "/student/dashboard",
     goals: "/student/goals",
@@ -44,6 +44,9 @@ export const appRoutes = {
 } as const;
 
 const LEGACY_ROUTE_MAP: Record<string, string> = {
+  "/auth": appRoutes.auth,
+  "/auth/login": appRoutes.auth,
+  "/auth/register": "/register",
   "/dashboard": appRoutes.auth,
   "/dashboard/student": appRoutes.student.dashboard,
   "/dashboard/teacher": appRoutes.teacher.dashboard,
@@ -68,6 +71,35 @@ export function normalizeAppPath(path: string | null | undefined): string {
   const [pathname, query = ""] = path.split("?");
   const normalizedPath = LEGACY_ROUTE_MAP[pathname] ?? pathname;
   return query ? `${normalizedPath}?${query}` : normalizedPath;
+}
+
+export function isAuthEntryPath(path: string | null | undefined): boolean {
+  if (!path) {
+    return false;
+  }
+
+  return path === "/login" || path === "/register" || path === "/auth";
+}
+
+export function sanitizeAuthRedirectTarget(
+  rawNextPath: string | null | undefined,
+  currentAuthPath: "/login" | "/register",
+): string | null {
+  if (!rawNextPath || !rawNextPath.startsWith("/")) {
+    return null;
+  }
+
+  const normalizedPath = normalizeAppPath(rawNextPath);
+  if (!normalizedPath.startsWith("/")) {
+    return null;
+  }
+
+  const [pathname] = normalizedPath.split("?");
+  if (isAuthEntryPath(pathname) || pathname === currentAuthPath) {
+    return null;
+  }
+
+  return normalizedPath;
 }
 
 export function getRoleHomePath(role: UserRole | null | undefined): string {

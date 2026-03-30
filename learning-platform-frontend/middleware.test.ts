@@ -4,12 +4,12 @@ import { NextRequest } from "next/server";
 import { middleware } from "@/middleware";
 
 describe("middleware", () => {
-  it("redirects unauthenticated protected requests to auth", () => {
+  it("redirects unauthenticated protected requests to login", () => {
     const request = new NextRequest("http://localhost:3000/student/dashboard");
     const response = middleware(request);
 
     expect(response?.status).toBe(307);
-    expect(response?.headers.get("location")).toContain("/auth");
+    expect(response?.headers.get("location")).toContain("/login");
   });
 
   it("allows protected requests when an auth cookie is present", () => {

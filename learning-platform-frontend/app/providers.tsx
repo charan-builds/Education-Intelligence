@@ -1,6 +1,7 @@
 "use client";
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import { PropsWithChildren, useState } from "react";
 
 import { AuthProvider } from "@/components/providers/AuthProvider";
@@ -12,6 +13,7 @@ import { ToastProvider } from "@/components/providers/ToastProvider";
 import PageTransition from "@/components/ui/PageTransition";
 
 export default function Providers({ children }: PropsWithChildren) {
+  const pathname = usePathname();
   const [queryClient] = useState(
     () =>
       new QueryClient({
@@ -29,17 +31,23 @@ export default function Providers({ children }: PropsWithChildren) {
       }),
   );
 
+  const isLandingRoute = pathname === "/";
+
   return (
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <TenantProvider>
-            <ToastProvider>
-              <RealtimeProvider>
-                <PageTransition>{children}</PageTransition>
-                <DevAccessPanel />
-              </RealtimeProvider>
-            </ToastProvider>
+            {isLandingRoute ? (
+              children
+            ) : (
+              <ToastProvider>
+                <RealtimeProvider>
+                  <PageTransition>{children}</PageTransition>
+                  <DevAccessPanel />
+                </RealtimeProvider>
+              </ToastProvider>
+            )}
           </TenantProvider>
         </AuthProvider>
       </QueryClientProvider>
