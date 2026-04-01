@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import sys
 import urllib.error
 import urllib.parse
@@ -19,13 +20,14 @@ class Account:
     label: str
     email: str
     password: str
+    tenant_id: int
 
 
-STUDENT = Account("student", "student@example.com", "Student123!")
-TEACHER = Account("teacher", "teacher@example.com", "Teacher123!")
-MENTOR = Account("mentor", "mentor@example.com", "Mentor123!")
-ADMIN = Account("admin", "admin@example.com", "admin123")
-SUPER_ADMIN = Account("super_admin", "superadmin@platform.example.com", "SuperAdmin123!")
+STUDENT = Account("student", "student@example.com", "Student123!", 2)
+TEACHER = Account("teacher", "teacher@example.com", "Teacher123!", 2)
+MENTOR = Account("mentor", "mentor@example.com", "Mentor123!", 2)
+ADMIN = Account("admin", "admin@example.com", "admin123", 2)
+SUPER_ADMIN = Account("super_admin", "superadmin@platform.example.com", "SuperAdmin123!", 1)
 
 
 class SmokeFailure(RuntimeError):
@@ -71,7 +73,7 @@ def login(account: Account) -> str:
     payload = request_json(
         "POST",
         "/auth/login",
-        data={"email": account.email, "password": account.password},
+        data={"email": account.email, "password": account.password, "tenant_id": account.tenant_id},
     )
     token = payload.get("access_token")
     if not token:
@@ -121,31 +123,46 @@ def run() -> None:
     test_id = int(assert_truthy(diagnostic.get("id"), "diagnostic id"))
     log(f"student: diagnostic start ok (test_id={test_id})")
 
-    next_question = request_json(
-        "POST",
-        "/diagnostic/next-question",
-        token=student_token,
-        data={"goal_id": goal_id, "previous_answers": []},
-    )
-    question_id = int(assert_truthy(next_question.get("id"), "next question id"))
-    options = next_question.get("answer_options") or []
-    user_answer = options[1] if len(options) > 1 else "3"
-    log(f"student: next question ok (question_id={question_id})")
+    answered_questions = 0
+    seen_question_ids: set[int] = set()
+    for _ in range(200):
+        next_question = request_json(
+            "GET",
+            f"/diagnostic/next/{test_id}",
+            token=student_token,
+        )
+        if next_question is None:
+            break
+        question_id = int(assert_truthy(next_question.get("id"), "next question id"))
+        if question_id in seen_question_ids:
+            raise SmokeFailure(f"diagnostic repeated question_id={question_id} before completion")
+        seen_question_ids.add(question_id)
+        options = next_question.get("answer_options") or []
+        user_answer = options[1] if len(options) > 1 else "3"
+        log(f"student: next question ok (question_id={question_id})")
+
+        request_json(
+            "POST",
+            "/diagnostic/answer",
+            token=student_token,
+            data={
+                "test_id": test_id,
+                "question_id": question_id,
+                "user_answer": user_answer,
+                "time_taken": 12.5,
+            },
+        )
+        answered_questions += 1
+        time.sleep(1.3)
+
+    assert_truthy(answered_questions, "student answered diagnostic questions")
+    log(f"student: diagnostic answers ok ({answered_questions} questions)")
 
     request_json(
         "POST",
         "/diagnostic/submit",
         token=student_token,
-        data={
-            "test_id": test_id,
-            "answers": [
-                {
-                    "question_id": question_id,
-                    "user_answer": user_answer,
-                    "time_taken": 12.5,
-                }
-            ],
-        },
+        data={"test_id": test_id},
     )
     log("student: diagnostic submit ok")
 
@@ -160,6 +177,20 @@ def run() -> None:
         data={"goal_id": goal_id, "test_id": test_id},
     )
     steps = roadmap.get("steps") or []
+    if not steps:
+        for _ in range(90):
+            time.sleep(1.0)
+            roadmap_page = request_json("GET", "/roadmap/view", token=student_token)
+            items = roadmap_page.get("items") or []
+            matching = [
+                item for item in items
+                if int(item.get("goal_id", 0)) == goal_id and int(item.get("test_id", 0)) == test_id
+            ]
+            if matching:
+                roadmap = matching[0]
+                steps = roadmap.get("steps") or []
+                if roadmap.get("status") == "ready" and steps:
+                    break
     assert_truthy(steps, "roadmap steps")
     log(f"student: roadmap generate ok ({len(steps)} steps)")
 

@@ -40,7 +40,7 @@ export default function LandingPricing({ dashboardHref, isAuthenticated }: Landi
 
               <div className="mt-8">
                 <Link
-                  href={isAuthenticated ? dashboardHref : tier.name === "Enterprise" ? "/login" : "/register"}
+                  href={isAuthenticated ? dashboardHref : tier.name === "Enterprise" ? "/auth?mode=login" : "/auth?mode=register"}
                   className={`inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition ${
                     tier.featured ? "bg-slate-950 text-white hover:bg-slate-900" : "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50"
                   }`}

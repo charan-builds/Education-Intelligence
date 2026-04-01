@@ -300,8 +300,8 @@ class TopicService:
             await self.repository.session.rollback()
             raise
 
-    async def update_question(self, question_id: int, **updates):
-        question = await self.repository.get_question(question_id)
+    async def update_question(self, question_id: int, tenant_id: int = 1, **updates):
+        question = await self.repository.get_question(question_id, tenant_id=tenant_id)
         if question is None:
             raise NotFoundError("Question not found")
         try:
@@ -318,8 +318,8 @@ class TopicService:
             await self.repository.session.rollback()
             raise
 
-    async def delete_question(self, question_id: int) -> None:
-        question = await self.repository.get_question(question_id)
+    async def delete_question(self, question_id: int, tenant_id: int = 1) -> None:
+        question = await self.repository.get_question(question_id, tenant_id=tenant_id)
         if question is None:
             raise NotFoundError("Question not found")
         await self.repository.delete_question(question)

@@ -17,16 +17,24 @@ export type AuthActionResponse = {
   token?: string | null;
 };
 
+export type MFASetupResponse = {
+  secret: string;
+  otp_auth_url: string;
+  manual_entry_code: string;
+};
+
 export async function login(
   email: string,
   password: string,
   tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
+  mfa_code?: string | null,
 ): Promise<AuthSessionResponse> {
   const { data } = await apiClient.post<AuthSessionResponse>("/auth/login", {
     email,
     password,
     tenant_id: tenantContext?.tenant_id ?? undefined,
     tenant_subdomain: tenantContext?.tenant_subdomain ?? undefined,
+    mfa_code: mfa_code ?? undefined,
   });
   setStoredToken(data.access_token);
   notifyAuthChanged();
@@ -98,4 +106,22 @@ export async function logout(): Promise<void> {
     clearStoredToken();
     notifyAuthChanged();
   }
+}
+
+export async function setupMfa(): Promise<MFASetupResponse> {
+  const { data } = await apiClient.post<MFASetupResponse>("/auth/mfa/setup");
+  return data;
+}
+
+export async function enableMfa(code: string): Promise<AuthActionResponse> {
+  const { data } = await apiClient.post<AuthActionResponse>("/auth/mfa/enable", { code });
+  notifyAuthChanged();
+  return data;
+}
+
+export async function disableMfa(code: string): Promise<AuthActionResponse> {
+  const { data } = await apiClient.post<AuthActionResponse>("/auth/mfa/disable", { code });
+  clearStoredToken();
+  notifyAuthChanged();
+  return data;
 }

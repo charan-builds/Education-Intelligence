@@ -16,6 +16,8 @@ from app.schemas.auth_schema import (
     InviteCreateRequest,
     InviteResponse,
     LoginRequest,
+    MFASetupResponse,
+    MFAVerifyRequest,
     PasswordResetConfirmRequest,
     PasswordResetRequest,
     RegisterRequest,
@@ -33,6 +35,10 @@ def _serialize_user(user, *, tenant_id: int, role) -> UserResponse:
             "tenant_id": tenant_id,
             "email": user.email,
             "role": role,
+            "display_name": getattr(user, "display_name", None),
+            "avatar_url": getattr(user, "avatar_url", None),
+            "preferences": getattr(user, "preferences_json", None) or {},
+            "mfa_enabled": bool(getattr(user, "mfa_enabled", False)),
             "email_verified_at": getattr(user, "email_verified_at", None),
             "created_at": user.created_at,
         }
@@ -103,6 +109,7 @@ async def login(request: Request, response: Response, payload: LoginRequest, db:
         tenant_subdomain=payload.tenant_subdomain,
         request_host=request.headers.get("host"),
         device=request.headers.get("user-agent"),
+        mfa_code=payload.mfa_code,
     )
     _set_auth_cookies(response, access_token=access_token, refresh_token=refresh_token)
     settings = get_settings()
@@ -255,3 +262,31 @@ async def create_invite(
         role=payload.role,
         expires_in_hours=settings.invite_token_expire_hours,
     )
+
+
+@router.post("/mfa/setup", response_model=MFASetupResponse)
+async def setup_mfa(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    return await AuthService(db).begin_mfa_setup(user_id=current_user.id, tenant_id=current_user.tenant_id)
+
+
+@router.post("/mfa/enable", response_model=AuthActionResponse)
+async def enable_mfa(
+    payload: MFAVerifyRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    await AuthService(db).enable_mfa(user_id=current_user.id, tenant_id=current_user.tenant_id, code=payload.code)
+    return AuthActionResponse(detail="Multi-factor authentication enabled")
+
+
+@router.post("/mfa/disable", response_model=AuthActionResponse)
+async def disable_mfa(
+    payload: MFAVerifyRequest,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    await AuthService(db).disable_mfa(user_id=current_user.id, tenant_id=current_user.tenant_id, code=payload.code)
+    return AuthActionResponse(detail="Multi-factor authentication disabled")

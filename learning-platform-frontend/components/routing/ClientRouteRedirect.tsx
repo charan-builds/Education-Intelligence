@@ -27,7 +27,7 @@ export default function ClientRouteRedirect({
       return;
     }
     const query = searchParams.toString();
-    const targetBase = useRoleRedirect ? getRoleRedirectPath(role) : normalizeAppPath(fallbackPath);
+    const targetBase = useRoleRedirect && role ? getRoleRedirectPath(role) : normalizeAppPath(fallbackPath);
     const target = query ? `${targetBase}?${query}` : targetBase;
     if (target !== `${pathname}${query ? `?${query}` : ""}`) {
       router.replace(target);

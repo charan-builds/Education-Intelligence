@@ -7,6 +7,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -30,6 +31,7 @@ type AuthContextValue = {
     email: string,
     password: string,
     tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
+    mfaCode?: string | null,
   ) => Promise<AuthUser | null>;
   logout: () => void;
   refresh: () => Promise<void>;
@@ -70,9 +72,14 @@ function syncStoredAuthState(user: AuthUser | null): void {
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isReady, setIsReady] = useState(false);
+  const authRequestVersionRef = useRef(0);
 
   const refresh = async () => {
+    const requestVersion = ++authRequestVersionRef.current;
     const nextUser = normalizeUser(await getCurrentUser());
+    if (requestVersion !== authRequestVersionRef.current) {
+      return;
+    }
     syncStoredAuthState(nextUser);
     startTransition(() => {
       setUser(nextUser);
@@ -103,22 +110,34 @@ export function AuthProvider({ children }: PropsWithChildren) {
     email: string,
     password: string,
     tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
+    mfaCode?: string | null,
   ) => {
-    const session = await loginRequest(email, password, tenantContext);
+    const requestVersion = ++authRequestVersionRef.current;
+    const session = await loginRequest(email, password, tenantContext, mfaCode);
+    if (requestVersion !== authRequestVersionRef.current) {
+      return normalizeUser(session.user);
+    }
     const nextUser = normalizeUser(session.user);
     syncStoredAuthState(nextUser);
-    setUser(nextUser);
+    startTransition(() => {
+      setUser(nextUser);
+      setIsReady(true);
+    });
     return nextUser;
   };
 
   const logout = () => {
+    authRequestVersionRef.current += 1;
     void logoutRequest();
     if (typeof window !== "undefined") {
       clearStoredToken();
       window.localStorage.removeItem(ACTIVE_TENANT_STORAGE_KEY);
       window.localStorage.removeItem(AUTH_ROLE_STORAGE_KEY);
     }
-    setUser(null);
+    startTransition(() => {
+      setUser(null);
+      setIsReady(true);
+    });
   };
 
   const value = useMemo<AuthContextValue>(

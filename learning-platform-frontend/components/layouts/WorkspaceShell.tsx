@@ -43,12 +43,12 @@ function SidebarContent({
         <div className="flex items-center gap-3">
           <Logo
             showWordmark={!condensed}
-            labelClassName="text-white [&>p:first-child]:text-teal-200 [&>p:last-child]:text-white"
+            labelClassName="text-white [&>p:first-child]:text-sky-200 [&>p:last-child]:text-white"
           />
           {!condensed ? (
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-indigo-200">{roleLabel}</p>
-              <p className="mt-1 text-xs text-slate-400">Adaptive learning intelligence workspace</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.35em] text-sky-200">{roleLabel}</p>
+              <p className="mt-1 text-xs text-slate-300">Adaptive learning intelligence workspace</p>
             </div>
           ) : null}
         </div>
@@ -129,13 +129,14 @@ export default function WorkspaceShell({
 
   return (
     <RequireRole allowedRoles={allowedRoles}>
-      <div className="app-shell relative">
-        <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.16),_transparent_26%),radial-gradient(circle_at_80%_20%,_rgba(14,165,145,0.1),_transparent_22%),radial-gradient(circle_at_bottom_right,_rgba(16,185,129,0.08),_transparent_24%)]" />
+      <div className="app-shell workspace-theme relative overflow-hidden">
+        <div className="absolute inset-0 -z-10 workspace-surface" />
+        <div className="absolute inset-0 -z-10 bg-[linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] bg-[size:30px_30px] opacity-70" />
 
         <div className="flex min-h-screen">
           <aside
             className={cn(
-              "hidden shrink-0 border-r border-white/10 bg-[linear-gradient(180deg,rgba(2,6,23,0.98),rgba(15,23,42,0.9))] px-4 py-5 text-white backdrop-blur-xl lg:block",
+              "hidden shrink-0 border-r border-slate-800/80 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(30,41,59,0.94))] px-4 py-5 text-white backdrop-blur-xl lg:block",
               condensed ? "w-24" : "w-80",
             )}
           >
@@ -143,7 +144,7 @@ export default function WorkspaceShell({
               <button
                 type="button"
                 onClick={() => setCondensed((value) => !value)}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 transition hover:bg-white/10"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-700 bg-white/5 transition hover:bg-white/10"
                 aria-label="Toggle sidebar"
               >
                 {condensed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
@@ -163,7 +164,7 @@ export default function WorkspaceShell({
                   onClick={() => setSidebarOpen(false)}
                 />
                 <motion.aside
-                  className="fixed inset-y-0 left-0 z-50 w-80 bg-slate-950 px-4 py-5 text-white shadow-2xl lg:hidden"
+                  className="fixed inset-y-0 left-0 z-50 w-80 bg-[linear-gradient(180deg,rgba(15,23,42,0.99),rgba(30,41,59,0.97))] px-4 py-5 text-white shadow-2xl lg:hidden"
                   initial={{ x: -24, opacity: 0 }}
                   animate={{ x: 0, opacity: 1 }}
                   exit={{ x: -24, opacity: 0 }}
@@ -172,7 +173,7 @@ export default function WorkspaceShell({
                     <button
                       type="button"
                       onClick={() => setSidebarOpen(false)}
-                      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5"
+                      className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-700 bg-white/5"
                     >
                       <X className="h-4 w-4" />
                     </button>

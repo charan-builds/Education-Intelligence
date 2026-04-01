@@ -70,7 +70,7 @@ export default function LandingJourney({ dashboardHref, isAuthenticated }: Landi
 
         <div className="mt-16 text-center">
           <Link
-            href={isAuthenticated ? dashboardHref : "/register"}
+            href={isAuthenticated ? dashboardHref : "/auth?mode=register"}
             className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 px-8 py-4 text-base font-bold text-white shadow-2xl shadow-yellow-500/25 transition hover:-translate-y-0.5 hover:from-yellow-500 hover:to-amber-600"
           >
             {isAuthenticated ? "Go to Dashboard" : "Get Started"}

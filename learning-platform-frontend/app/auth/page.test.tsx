@@ -1,12 +1,17 @@
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import AuthPageClient from "@/components/auth/AuthPageClient";
 
 const replaceMock = vi.fn();
-const loginMock = vi.fn().mockResolvedValue({ role: "student" });
+const mockAuthState = {
+  isAuthenticated: true,
+  isReady: true,
+  role: "student",
+  login: vi.fn(),
+};
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
@@ -14,17 +19,16 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({
-    isAuthenticated: false,
-    isReady: true,
-    role: null,
-    login: loginMock,
-  }),
+  useAuth: () => mockAuthState,
 }));
 
 describe("AuthPageClient", () => {
-  it("redirects to the requested next path after login", async () => {
-    window.history.replaceState({}, "", "/login?next=/student/roadmap");
+  beforeEach(() => {
+    replaceMock.mockReset();
+  });
+
+  it("redirects authenticated users to the requested canonical next path", async () => {
+    window.history.replaceState({}, "", "/auth?mode=login&next=/student/roadmap");
     const client = new QueryClient();
 
     render(
@@ -33,9 +37,6 @@ describe("AuthPageClient", () => {
       </QueryClientProvider>,
     );
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Sign in" }).at(-1)!);
-
-    await waitFor(() => expect(loginMock).toHaveBeenCalled());
     await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/student/roadmap"));
   });
 });

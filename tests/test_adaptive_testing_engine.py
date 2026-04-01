@@ -50,3 +50,9 @@ def test_selection_is_deterministic():
     q2 = engine.select_next_question(_questions(), previous_answers, topic_scores)
     assert q1 is not None and q2 is not None
     assert q1.id == q2.id
+
+
+def test_selection_stops_after_max_questions():
+    engine = AdaptiveTestingEngine()
+    previous_answers = [{"question_id": index + 1, "score": 80.0} for index in range(engine.MAX_QUESTIONS)]
+    assert engine.select_next_question(_questions(), previous_answers, {10: 50.0, 20: 50.0}) is None

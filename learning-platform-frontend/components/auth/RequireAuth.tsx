@@ -6,12 +6,13 @@ import { usePathname, useRouter } from "next/navigation";
 
 import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
+import { buildAuthPath } from "@/utils/appRoutes";
 
 type RequireAuthProps = {
   children: ReactNode;
 };
 
-const PUBLIC_ROUTES = ["/", "/login", "/register"];
+const PUBLIC_ROUTES = ["/", "/auth", "/login", "/register"];
 
 export default function RequireAuth({ children }: RequireAuthProps) {
   const pathname = usePathname();
@@ -23,8 +24,7 @@ export default function RequireAuth({ children }: RequireAuthProps) {
       return;
     }
     if (!isAuthenticated && pathname && !PUBLIC_ROUTES.includes(pathname)) {
-      const next = pathname ? `?next=${encodeURIComponent(pathname)}` : "";
-      router.replace(`/login${next}`);
+      router.replace(buildAuthPath("login", pathname));
     }
   }, [isAuthenticated, isReady, pathname, router]);
 

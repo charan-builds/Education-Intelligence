@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,7 +12,7 @@ class AISettings(BaseSettings):
 
     openai_api_key: str | None = None
     openai_base_url: str | None = None
-    openai_model: str = "gpt-5.4-mini"
+    openai_model: str = "gpt-5-mini"
     openai_timeout_seconds: float = 20.0
 
     fallback_api_key: str | None = None
@@ -28,6 +28,12 @@ class AISettings(BaseSettings):
     ai_temperature: float = Field(default=0.2, ge=0.0, le=2.0)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def validate_model_names(self) -> "AISettings":
+        if self.openai_model.strip() == "gpt-5.4-mini":
+            self.openai_model = "gpt-5-mini"
+        return self
 
 
 @lru_cache

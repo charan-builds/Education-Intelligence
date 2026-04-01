@@ -1,5 +1,9 @@
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from hashlib import sha1
+import base64
+import hmac
+import struct
 from uuid import uuid4
 from typing import Any
 
@@ -218,3 +222,49 @@ def validate_password_strength(password: str) -> None:
         raise PasswordValidationError("Password must contain at least one letter")
     if not any(ch.isdigit() for ch in password):
         raise PasswordValidationError("Password must contain at least one number")
+
+
+def generate_totp_secret(length: int = 32) -> str:
+    raw = base64.b32encode(uuid4().bytes + uuid4().bytes).decode("ascii").rstrip("=")
+    return raw[:length]
+
+
+def build_totp_uri(*, secret: str, account_name: str, issuer: str) -> str:
+    normalized_account = account_name.replace(" ", "%20")
+    normalized_issuer = issuer.replace(" ", "%20")
+    return f"otpauth://totp/{normalized_issuer}:{normalized_account}?secret={secret}&issuer={normalized_issuer}&digits=6&period=30"
+
+
+def _totp_counter(for_time: datetime | None = None, period_seconds: int = 30) -> int:
+    current = for_time or datetime.now(timezone.utc)
+    return int(current.timestamp()) // period_seconds
+
+
+def generate_totp_code(secret: str, *, for_time: datetime | None = None, period_seconds: int = 30) -> str:
+    normalized_secret = secret.strip().replace(" ", "").upper()
+    padding = "=" * ((8 - len(normalized_secret) % 8) % 8)
+    key = base64.b32decode(f"{normalized_secret}{padding}")
+    counter = _totp_counter(for_time=for_time, period_seconds=period_seconds)
+    digest = hmac.new(key, struct.pack(">Q", counter), sha1).digest()
+    offset = digest[-1] & 0x0F
+    code_int = struct.unpack(">I", digest[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(code_int % 1_000_000).zfill(6)
+
+
+def verify_totp_code(
+    secret: str,
+    code: str,
+    *,
+    at_time: datetime | None = None,
+    period_seconds: int = 30,
+    allowed_drift_steps: int = 1,
+) -> bool:
+    normalized_code = "".join(ch for ch in code if ch.isdigit())
+    if len(normalized_code) != 6:
+        return False
+    reference_time = at_time or datetime.now(timezone.utc)
+    for offset in range(-allowed_drift_steps, allowed_drift_steps + 1):
+        candidate_time = reference_time + timedelta(seconds=offset * period_seconds)
+        if hmac.compare_digest(generate_totp_code(secret, for_time=candidate_time, period_seconds=period_seconds), normalized_code):
+            return True
+    return False

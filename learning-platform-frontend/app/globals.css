@@ -94,6 +94,36 @@ body[data-landing-route="true"] {
     @apply min-h-screen;
   }
 
+  .workspace-theme {
+    --background: 241 245 249;
+    --foreground: 15 23 42;
+    --surface: 255 255 255;
+    --surface-muted: 226 232 240;
+    --border: 203 213 225;
+    --muted: 100 116 139;
+    --brand-start: 37 99 235;
+    --brand-end: 14 165 233;
+    --brand-soft: 219 234 254;
+    --success: 22 163 74;
+    --warning: 217 119 6;
+    --danger: 220 38 38;
+  }
+
+  .dark .workspace-theme {
+    --background: 2 6 23;
+    --foreground: 226 232 240;
+    --surface: 15 23 42;
+    --surface-muted: 30 41 59;
+    --border: 51 65 85;
+    --muted: 148 163 184;
+    --brand-start: 96 165 250;
+    --brand-end: 34 211 238;
+    --brand-soft: 30 41 59;
+    --success: 74 222 128;
+    --warning: 251 191 36;
+    --danger: 248 113 113;
+  }
+
   .glass-surface {
     @apply border shadow-panel backdrop-blur-xl;
     background:
@@ -178,6 +208,35 @@ body[data-landing-route="true"] {
   .hero-orb {
     @apply absolute rounded-full blur-[140px];
     animation: float 16s ease-in-out infinite;
+  }
+
+  .workspace-surface {
+    background:
+      radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 24%),
+      radial-gradient(circle at 85% 18%, rgba(14, 165, 233, 0.1), transparent 24%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.98));
+  }
+
+  .dark .workspace-surface {
+    background:
+      radial-gradient(circle at top left, rgba(96, 165, 250, 0.14), transparent 24%),
+      radial-gradient(circle at 85% 18%, rgba(34, 211, 238, 0.12), transparent 24%),
+      linear-gradient(180deg, rgba(15, 23, 42, 0.94), rgba(2, 6, 23, 0.98));
+  }
+
+  .workspace-button-primary {
+    @apply text-white;
+    background: linear-gradient(135deg, rgb(37 99 235), rgb(14 165 233));
+    box-shadow: 0 20px 45px rgba(37, 99, 235, 0.22);
+  }
+
+  .workspace-button-primary:hover {
+    filter: brightness(1.05);
+  }
+
+  .dark .workspace-button-primary {
+    background: linear-gradient(135deg, rgb(59 130 246), rgb(34 211 238));
+    box-shadow: 0 20px 45px rgba(14, 165, 233, 0.2);
   }
 }
 

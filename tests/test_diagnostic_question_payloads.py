@@ -102,3 +102,47 @@ def test_get_next_question_uses_planned_question_ids_from_state():
         assert question["question_text"] == "Question 9"
 
     asyncio.run(_run())
+
+
+def test_get_next_question_stops_when_state_has_max_answers():
+    async def _run():
+        service = DiagnosticService(session=SimpleNamespace())
+        service.topic_repository = _TopicRepository()
+        service.feature_flag_service = _FeatureFlags()
+        persisted_updates: list[dict] = []
+        max_answers = [
+            {
+                "question_id": index + 1,
+                "score": 100.0,
+                "time_taken": 10.0,
+                "accuracy": 1.0,
+                "attempt_count": 1,
+            }
+            for index in range(service.adaptive_engine.MAX_QUESTIONS)
+        ]
+        service.diagnostic_repository = SimpleNamespace(
+            get_test_for_user=lambda test_id, user_id, tenant_id: _async_return(
+                SimpleNamespace(id=test_id, user_id=user_id, goal_id=9, completed_at=None)
+            ),
+            get_test_state=lambda **kwargs: _async_return(
+                SimpleNamespace(
+                    test_id=55,
+                    tenant_id=1,
+                    user_id=7,
+                    goal_id=9,
+                    answered_question_ids=[item["question_id"] for item in max_answers],
+                    previous_answers=max_answers,
+                    planned_question_ids=[],
+                    expected_next_question_id=99,
+                )
+            ),
+            upsert_test_state=lambda **kwargs: persisted_updates.append(kwargs) or _async_return(SimpleNamespace(**kwargs)),
+        )
+
+        question = await service.get_next_question(test_id=55, user_id=7, tenant_id=1)
+
+        assert question is None
+        assert persisted_updates
+        assert persisted_updates[-1]["expected_next_question_id"] is None
+
+    asyncio.run(_run())

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
-import { normalizeAppPath } from "@/utils/appRoutes";
+import { buildAuthPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath, roleHasAccess } from "@/utils/roleRedirect";
 
 type RequireRoleProps = {
@@ -22,7 +22,7 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
       return;
     }
     if (!isAuthenticated) {
-      router.replace(normalizeAppPath("/login"));
+      router.replace(buildAuthPath("login"));
       return;
     }
     if (role && !roleHasAccess(role, allowedRoles)) {

@@ -351,7 +351,13 @@ def generate_notifications(tenant_id: int | None = None, limit_users: int = 100)
     try:
         result = _run_async(_run_generate_notifications(tenant_id=tenant_id, limit_users=limit_users))
         _record_task_duration("jobs.generate_notifications", "success", started_at)
-        logger.info("generate_notifications completed", extra=result)
+        logger.info(
+            "generate_notifications completed",
+            extra={
+                "tenant_id": result.get("tenant_id"),
+                "notifications_created": result.get("created", 0),
+            },
+        )
         return result
     except Exception as exc:  # pragma: no cover
         _record_task_duration("jobs.generate_notifications", "failed", started_at)

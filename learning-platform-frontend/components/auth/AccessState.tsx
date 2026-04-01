@@ -18,7 +18,7 @@ export default function AccessState({
   mode,
   title,
   description,
-  redirectHref = "/login",
+  redirectHref = "/auth?mode=login",
   redirectLabel = "Open sign in",
 }: AccessStateProps) {
   if (mode === "loading") {

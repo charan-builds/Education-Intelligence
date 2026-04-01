@@ -46,6 +46,33 @@ class UserService:
     async def list_users(self, tenant_id: int, limit: int, offset: int) -> list[User]:
         return await self.repository.list_by_tenant(tenant_id, limit=limit, offset=offset)
 
+    async def get_profile(self, *, user_id: int, tenant_id: int) -> User:
+        user = await self.repository.get_by_id_in_tenant(user_id, tenant_id)
+        if user is None:
+            raise ValidationError("User not found")
+        return user
+
+    async def update_profile(
+        self,
+        *,
+        user_id: int,
+        tenant_id: int,
+        display_name: str | None,
+        avatar_url: str | None,
+        preferences: dict[str, object],
+    ) -> User:
+        try:
+            user = await self.get_profile(user_id=user_id, tenant_id=tenant_id)
+            user.display_name = (display_name or "").strip() or None
+            user.avatar_url = (avatar_url or "").strip() or None
+            user.preferences_json = preferences or {}
+            await self.session.commit()
+            await self.session.refresh(user)
+            return user
+        except Exception:
+            await self.session.rollback()
+            raise
+
     async def list_users_page(
         self,
         tenant_id: int,

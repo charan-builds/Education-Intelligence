@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
 import { ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY } from "@/utils/authToken";
-import { getRolePrefix, normalizeAppPath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
+import { appRoutes, buildAuthPath, getRolePrefix, normalizeAppPath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
 import { canonicalizeRole, getRoleRedirectPath } from "@/utils/roleRedirect";
 
 const PROTECTED_PREFIXES = [
@@ -19,10 +19,17 @@ const PROTECTED_PREFIXES = [
   "/progress",
 ];
 
-const PUBLIC_ROUTES = ["/", "/login", "/register"];
+const PUBLIC_ROUTES = ["/", appRoutes.auth, "/login", "/register"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (pathname === "/auth/login" || pathname === "/auth/register") {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = appRoutes.auth;
+    redirectUrl.searchParams.set("mode", pathname.endsWith("/register") ? "register" : "login");
+    return NextResponse.redirect(redirectUrl);
+  }
 
   const normalizedPath = normalizeAppPath(pathname);
 
@@ -32,13 +39,22 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(redirectUrl);
   }
 
-  if ((pathname === "/login" || pathname === "/register") && request.nextUrl.searchParams.has("next")) {
+  if ((pathname === appRoutes.auth || pathname === "/login" || pathname === "/register") && request.nextUrl.searchParams.has("next")) {
     const sanitizedNext = sanitizeAuthRedirectTarget(request.nextUrl.searchParams.get("next"), pathname);
     if (!sanitizedNext) {
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.searchParams.delete("next");
       return NextResponse.redirect(redirectUrl);
     }
+  }
+
+  if (pathname === "/login" || pathname === "/register") {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.href = new URL(
+      buildAuthPath(pathname === "/register" ? "register" : "login", request.nextUrl.searchParams.get("next")),
+      request.url,
+    ).toString();
+    return NextResponse.redirect(redirectUrl);
   }
 
   if (PUBLIC_ROUTES.includes(pathname)) {
@@ -53,10 +69,10 @@ export function middleware(request: NextRequest) {
   const accessToken = request.cookies.get(ACCESS_TOKEN_KEY)?.value;
   const refreshToken = request.cookies.get(REFRESH_TOKEN_KEY)?.value;
   if (!accessToken && !refreshToken) {
-    const redirectUrl = request.nextUrl.clone();
-    redirectUrl.pathname = "/login";
-    redirectUrl.searchParams.set("next", pathname);
-    return NextResponse.redirect(redirectUrl);
+    // Workspace routes already enforce auth client-side via RequireAuth/RequireRole.
+    // Avoid forcing a server-side redirect here because local token-first login flows
+    // can complete before the cookie-backed middleware state is available.
+    return NextResponse.next();
   }
 
   const routeRole = getRolePrefix(pathname);

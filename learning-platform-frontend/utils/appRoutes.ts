@@ -1,13 +1,14 @@
 import type { UserRole } from "@/utils/roleRedirect";
 
 export const appRoutes = {
-  auth: "/login",
+  auth: "/auth",
   student: {
     dashboard: "/student/dashboard",
     goals: "/student/goals",
     diagnostic: "/student/diagnostic",
     diagnosticResult: "/student/diagnostic/result",
     roadmap: "/student/roadmap",
+    profile: "/student/profile",
     mentor: "/student/mentor",
     progress: "/student/progress",
     network: "/student/network",
@@ -45,8 +46,6 @@ export const appRoutes = {
 
 const LEGACY_ROUTE_MAP: Record<string, string> = {
   "/auth": appRoutes.auth,
-  "/auth/login": appRoutes.auth,
-  "/auth/register": "/register",
   "/dashboard": appRoutes.auth,
   "/dashboard/student": appRoutes.student.dashboard,
   "/dashboard/teacher": appRoutes.teacher.dashboard,
@@ -60,6 +59,7 @@ const LEGACY_ROUTE_MAP: Record<string, string> = {
   "/roadmap": appRoutes.student.roadmap,
   "/roadmap/view": appRoutes.student.roadmap,
   "/progress": appRoutes.student.progress,
+  "/profile": appRoutes.student.profile,
   "/mentor": appRoutes.mentor.dashboard,
 };
 
@@ -81,9 +81,24 @@ export function isAuthEntryPath(path: string | null | undefined): boolean {
   return path === "/login" || path === "/register" || path === "/auth";
 }
 
+export function buildAuthPath(
+  mode: "login" | "register" = "login",
+  nextPath?: string | null,
+): string {
+  const params = new URLSearchParams();
+  params.set("mode", mode);
+
+  const sanitizedNext = sanitizeAuthRedirectTarget(nextPath, appRoutes.auth);
+  if (sanitizedNext) {
+    params.set("next", sanitizedNext);
+  }
+
+  return `${appRoutes.auth}?${params.toString()}`;
+}
+
 export function sanitizeAuthRedirectTarget(
   rawNextPath: string | null | undefined,
-  currentAuthPath: "/login" | "/register",
+  currentAuthPath: "/auth" | "/login" | "/register" = appRoutes.auth,
 ): string | null {
   if (!rawNextPath || !rawNextPath.startsWith("/")) {
     return null;

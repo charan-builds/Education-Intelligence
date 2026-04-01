@@ -51,6 +51,7 @@ class AdaptiveTestingEngine:
     EASY = 1
     MEDIUM = 2
     HARD = 3
+    MAX_QUESTIONS = 12
     CORRECT_THRESHOLD = 70.0
     FAST_THRESHOLD_SECONDS = 20.0
     SLOW_THRESHOLD_SECONDS = 45.0
@@ -153,6 +154,8 @@ class AdaptiveTestingEngine:
     ) -> AdaptiveSelectionResult | None:
         normalized_questions = [self._normalize_question(question) for question in questions]
         if not normalized_questions:
+            return None
+        if len(previous_answers) >= self.MAX_QUESTIONS:
             return None
 
         flags = feature_flags or {}

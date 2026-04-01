@@ -6,6 +6,11 @@ export type User = {
   tenant_id: number;
   email: string;
   role: UserRole;
+  display_name?: string | null;
+  avatar_url?: string | null;
+  preferences?: Record<string, unknown>;
+  mfa_enabled?: boolean;
+  email_verified_at?: string | null;
   created_at: string;
 };
 
@@ -26,4 +31,10 @@ export type CreateUserPayload = {
   email: string;
   password: string;
   role: AssignableUserRole;
+};
+
+export type UpdateUserProfilePayload = {
+  display_name?: string | null;
+  avatar_url?: string | null;
+  preferences?: Record<string, unknown>;
 };

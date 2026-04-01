@@ -5,7 +5,7 @@ services:
       dockerfile: learning-platform-frontend/Dockerfile
     container_name: learning_platform_frontend
     environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://127.0.0.1:8000}
     depends_on:
       nginx:
         condition: service_healthy
@@ -31,6 +31,7 @@ services:
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai_service:8100}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
     volumes:
       - ./logs:/app/logs
     healthcheck:

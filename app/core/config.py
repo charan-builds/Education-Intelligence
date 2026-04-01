@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     email_from_name: str = "Learning Intelligence Platform"
     email_reply_to: str | None = None
     email_sendgrid_api_key: str | None = None
+    email_smtp_host: str | None = None
+    email_smtp_port: int = 587
+    email_smtp_username: str | None = None
+    email_smtp_password: str | None = None
+    email_smtp_use_tls: bool = True
+    email_smtp_use_ssl: bool = False
     email_template_logo_url: str | None = None
     sentry_dsn: str | None = None
     csrf_cookie_name: str = "csrf_token"
@@ -121,6 +127,16 @@ class Settings(BaseSettings):
                 raise ValueError("JWT_SECRET/SECRET_KEY must be a strong production secret")
             if not self.auth_cookie_secure:
                 raise ValueError("AUTH_COOKIE_SECURE must be true in production")
+            if not self.app_base_url.startswith("https://"):
+                raise ValueError("APP_BASE_URL must use https in production")
+
+        provider = self.email_provider.strip().lower()
+        if provider not in {"log", "sendgrid", "smtp"}:
+            raise ValueError("EMAIL_PROVIDER must be one of: log, sendgrid, smtp")
+        if provider == "sendgrid" and self.email_enabled and not self.email_sendgrid_api_key:
+            raise ValueError("EMAIL_SENDGRID_API_KEY is required when EMAIL_PROVIDER=sendgrid and email is enabled")
+        if provider == "smtp" and self.email_enabled and not self.email_smtp_host:
+            raise ValueError("EMAIL_SMTP_HOST is required when EMAIL_PROVIDER=smtp and email is enabled")
 
         return self
 

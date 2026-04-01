@@ -109,6 +109,8 @@ async def _resolve_learner_id(
         )
         if learner_id is None and mapped_ids:
             return mapped_ids[0]
+        if learner_id is None:
+            return current_user.id
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
@@ -155,38 +157,27 @@ async def mentor_chat(
     current_user=Depends(require_tenant_membership),
 ):
     request_id = payload.request_id or f"http-{current_user.id}-{int(asyncio.get_running_loop().time() * 1000)}"
-    await _queue_mentor_chat(
-        db=db,
-        tenant_id=current_user.tenant_id,
-        user_id=current_user.id,
-        request_id=request_id,
+    result = await MentorService(session=db).chat(
         message=payload.message,
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
         chat_history=payload.chat_history,
-        channel="http",
-    )
-    await realtime_hub.send_user(
-        current_user.tenant_id,
-        current_user.id,
-        {
-            "type": "mentor.response.started",
-            "request_id": request_id,
-        },
     )
     return MentorChatResponse(
         request_id=request_id,
-        status="queued",
-        reply="",
-        advisor_type="queued",
-        used_ai=False,
-        fallback_used=False,
-        fallback_reason=None,
-        suggested_focus_topics=[],
-        why_recommended=[],
-        provider=None,
-        latency_ms=None,
-        next_checkin_date=None,
-        session_summary="Queued for async processing.",
-        memory_summary={},
+        status="ready",
+        reply=str(result.get("reply") or ""),
+        advisor_type=str(result.get("advisor_type") or "MentorService"),
+        used_ai=bool(result.get("used_ai")),
+        fallback_used=bool(result.get("fallback_used")),
+        fallback_reason=result.get("fallback_reason"),
+        suggested_focus_topics=list(result.get("suggested_focus_topics") or []),
+        why_recommended=list(result.get("why_recommended") or []),
+        provider=result.get("provider"),
+        latency_ms=result.get("latency_ms"),
+        next_checkin_date=result.get("next_checkin_date"),
+        session_summary=str(result.get("session_summary") or ""),
+        memory_summary=dict(result.get("memory_summary") or {}),
     )
 
 

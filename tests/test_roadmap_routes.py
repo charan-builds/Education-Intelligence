@@ -28,6 +28,14 @@ class _FakeCelery:
     def autodiscover_tasks(self, *args, **kwargs):
         _ = args, kwargs
 
+    def task(self, *args, **kwargs):
+        _ = args, kwargs
+
+        def _decorator(func):
+            return func
+
+        return _decorator
+
 
 fake_celery.Celery = _FakeCelery
 sys.modules.setdefault("celery", fake_celery)
@@ -46,8 +54,10 @@ async def _noop(*args, **kwargs):
 
 class _FakeRoadmapService:
     should_raise_not_found = False
+    should_enqueue = False
     last_update = None
     last_generation = None
+    generated_now = None
 
     def __init__(self, session):
         self.session = session
@@ -62,9 +72,22 @@ class _FakeRoadmapService:
             status="ready",
             error_message=None,
             generated_at="2026-03-14T00:00:00Z",
-            steps=[],
+            steps=[{"id": 99}],
         )
-        return roadmap, False
+        return roadmap, self.should_enqueue
+
+    async def generate(self, **kwargs):
+        _FakeRoadmapService.generated_now = kwargs
+        return SimpleNamespace(
+            id=45,
+            user_id=kwargs["user_id"],
+            goal_id=kwargs["goal_id"],
+            test_id=kwargs["test_id"],
+            status="ready",
+            error_message=None,
+            generated_at="2026-03-15T00:00:00Z",
+            steps=[{"id": 1}],
+        )
 
     def serialize_roadmap(self, roadmap):
         return {
@@ -75,7 +98,7 @@ class _FakeRoadmapService:
             "status": roadmap.status,
             "error_message": roadmap.error_message,
             "generated_at": roadmap.generated_at,
-            "steps": [],
+            "steps": list(roadmap.steps),
         }
 
     async def update_step_status(self, **kwargs):
@@ -181,3 +204,30 @@ def test_generate_roadmap_returns_serialized_response(monkeypatch):
         }
 
     asyncio.run(_run())
+
+
+def test_generate_roadmap_runs_synchronously_when_requested(monkeypatch):
+    monkeypatch.setattr(roadmap_routes, "RoadmapService", _FakeRoadmapService)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_user", _noop)
+    monkeypatch.setattr(roadmap_routes.realtime_hub, "send_tenant", _noop)
+    _FakeRoadmapService.should_enqueue = True
+    _FakeRoadmapService.generated_now = None
+
+    async def _run():
+        result = await roadmap_routes.generate_roadmap(
+            request=SimpleNamespace(),
+            payload=SimpleNamespace(goal_id=10, test_id=77),
+            db=SimpleNamespace(),
+            current_user=_user("student"),
+        )
+        assert result["id"] == 45
+        assert result["status"] == "ready"
+        assert _FakeRoadmapService.generated_now == {
+            "user_id": 7,
+            "tenant_id": 3,
+            "goal_id": 10,
+            "test_id": 77,
+        }
+
+    asyncio.run(_run())
+    _FakeRoadmapService.should_enqueue = False

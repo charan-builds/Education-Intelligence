@@ -45,14 +45,14 @@ export default function LandingHero({ dashboardHref, isAuthenticated }: LandingH
             ) : (
               <>
                 <Link
-                  href="/register"
+                  href="/auth?mode=register"
                   className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 px-8 py-4 text-base font-semibold text-white shadow-2xl shadow-yellow-500/25 transition hover:-translate-y-0.5 hover:from-yellow-500 hover:to-amber-600"
                 >
                   Get Started
                   <ArrowRight className="h-5 w-5" />
                 </Link>
                 <Link
-                  href="/login"
+                  href="/auth?mode=login"
                   className="inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-slate-200 bg-white px-8 py-4 text-base font-semibold text-slate-900 shadow-xl transition hover:-translate-y-0.5 hover:bg-slate-50"
                 >
                   <PlayCircle className="h-5 w-5 text-yellow-600" />

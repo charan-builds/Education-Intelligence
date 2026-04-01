@@ -1,5 +1,6 @@
 "use client";
 
+import axios from "axios";
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -14,7 +15,8 @@ export default function DashboardShell() {
   const { data, isLoading, isError } = useHealthCheck();
   const { isAuthenticated, role, login, logout, user } = useAuth();
   const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("Admin@123");
+  const [password, setPassword] = useState("admin123");
+  const [tenantContext, setTenantContext] = useState("2");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState<string | null>(null);
@@ -41,10 +43,21 @@ export default function DashboardShell() {
     setError("");
 
     try {
-      const authenticatedUser = await login(email, password);
+      const trimmedTenantContext = tenantContext.trim();
+      const numericTenantId = Number(trimmedTenantContext);
+      const resolvedTenantId = Number.isInteger(numericTenantId) && numericTenantId > 0 ? numericTenantId : null;
+      const resolvedSubdomain =
+        Number.isInteger(numericTenantId) && numericTenantId > 0 ? null : (trimmedTenantContext || null);
+      const authenticatedUser = await login(email, password, {
+        tenant_id: resolvedTenantId,
+        tenant_subdomain: resolvedSubdomain,
+      });
       router.replace(nextPath ?? getRoleRedirectPath(authenticatedUser?.role ?? role));
-    } catch {
-      setError("Login failed. Check credentials and backend availability.");
+    } catch (submitError) {
+      const apiMessage = axios.isAxiosError(submitError)
+        ? (submitError.response?.data?.detail ?? submitError.response?.data?.error)
+        : null;
+      setError(apiMessage || "Login failed. Check credentials, tenant context, and backend availability.");
     } finally {
       setSubmitting(false);
     }
@@ -135,6 +148,20 @@ export default function DashboardShell() {
                     className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-sky-400"
                     type="password"
                   />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-300" htmlFor="home-tenant">
+                    Tenant ID or workspace
+                  </label>
+                  <input
+                    id="home-tenant"
+                    value={tenantContext}
+                    onChange={(event) => setTenantContext(event.target.value)}
+                    className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-3 text-white outline-none placeholder:text-slate-500 focus:border-sky-400"
+                    placeholder="2 or demo-university"
+                    type="text"
+                  />
+                  <p className="mt-2 text-xs text-slate-400">Demo defaults: tenant `2`, user `admin@example.com`, password `admin123`.</p>
                 </div>
                 <button
                   type="submit"

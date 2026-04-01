@@ -35,27 +35,6 @@ async def start_diagnostic(
     return await DiagnosticService(db).start_test(current_user.id, payload.goal_id, current_user.tenant_id)
 
 
-@router.get("/{test_id}", response_model=DiagnosticResumeResponse)
-async def get_diagnostic_session(
-    test_id: int,
-    db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
-):
-    test, answers = await DiagnosticService(db).get_or_resume_test(
-        test_id=test_id,
-        user_id=current_user.id,
-        tenant_id=current_user.tenant_id,
-    )
-    return {
-        "id": test.id,
-        "user_id": test.user_id,
-        "goal_id": test.goal_id,
-        "started_at": test.started_at,
-        "completed_at": test.completed_at,
-        "answered_count": len(answers),
-    }
-
-
 @router.post("/answer", response_model=DiagnosticAnswerResponse)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
@@ -115,6 +94,27 @@ async def diagnostic_result(
 ):
     result = await DiagnosticService(db).get_result(test_id, current_user.id, current_user.tenant_id)
     return DiagnosticResultResponse(**result)
+
+
+@router.get("/{test_id}", response_model=DiagnosticResumeResponse)
+async def get_diagnostic_session(
+    test_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(get_current_user),
+):
+    test, answers = await DiagnosticService(db).get_or_resume_test(
+        test_id=test_id,
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+    )
+    return {
+        "id": test.id,
+        "user_id": test.user_id,
+        "goal_id": test.goal_id,
+        "started_at": test.started_at,
+        "completed_at": test.completed_at,
+        "answered_count": len(answers),
+    }
 
 
 @router.get("/next/{test_id}", response_model=DiagnosticQuestionResponse | None)

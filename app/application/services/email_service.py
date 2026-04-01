@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
+import smtplib
+from email.message import EmailMessage
 
 import httpx
 
@@ -108,6 +111,8 @@ class EmailService:
         provider = self._provider()
         if provider == "sendgrid":
             return await self._send_via_sendgrid(payload)
+        if provider == "smtp":
+            return await self._send_via_smtp(payload)
         if provider == "log":
             self.logger.info(
                 "email payload logged",
@@ -152,3 +157,32 @@ class EmailService:
             extra=bind_log_data(event="email.delivered", provider="sendgrid", to_email=payload.to_email, subject=payload.subject),
         )
         return {"status": "queued", "provider": "sendgrid", "delivered": True}
+
+    async def _send_via_smtp(self, payload: EmailPayload) -> dict[str, str | bool]:
+        if not self.settings.email_smtp_host:
+            raise ValueError("SMTP host is not configured")
+
+        message = EmailMessage()
+        message["From"] = f"{self.settings.email_from_name} <{self.settings.email_from_address}>"
+        message["To"] = payload.to_email
+        message["Subject"] = payload.subject
+        if self.settings.email_reply_to:
+            message["Reply-To"] = self.settings.email_reply_to
+        message.set_content(payload.text_content)
+        message.add_alternative(payload.html_content, subtype="html")
+
+        def _send() -> None:
+            smtp_cls = smtplib.SMTP_SSL if self.settings.email_smtp_use_ssl else smtplib.SMTP
+            with smtp_cls(self.settings.email_smtp_host, self.settings.email_smtp_port, timeout=15) as client:
+                if not self.settings.email_smtp_use_ssl and self.settings.email_smtp_use_tls:
+                    client.starttls()
+                if self.settings.email_smtp_username:
+                    client.login(self.settings.email_smtp_username, self.settings.email_smtp_password or "")
+                client.send_message(message)
+
+        await asyncio.to_thread(_send)
+        self.logger.info(
+            "email delivered",
+            extra=bind_log_data(event="email.delivered", provider="smtp", to_email=payload.to_email, subject=payload.subject),
+        )
+        return {"status": "queued", "provider": "smtp", "delivered": True}

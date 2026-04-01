@@ -15,6 +15,7 @@ class LoginRequest(BaseModel):
     password: str
     tenant_id: int | None = None
     tenant_subdomain: str | None = None
+    mfa_code: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -62,6 +63,16 @@ class AuthActionResponse(BaseModel):
     success: bool = True
     detail: str
     token: str | None = None
+
+
+class MFASetupResponse(BaseModel):
+    secret: str
+    otp_auth_url: str
+    manual_entry_code: str
+
+
+class MFAVerifyRequest(BaseModel):
+    code: str
 
 
 class ActiveSessionResponse(BaseModel):

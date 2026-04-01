@@ -1,5 +1,5 @@
 import { apiClient } from "@/services/apiClient";
-import type { CreateUserPayload, User, UserPageResponse } from "@/types/user";
+import type { CreateUserPayload, UpdateUserProfilePayload, User, UserPageResponse } from "@/types/user";
 
 export async function getUsers(): Promise<UserPageResponse> {
   const { data } = await apiClient.get<UserPageResponse>("/users");
@@ -8,5 +8,15 @@ export async function getUsers(): Promise<UserPageResponse> {
 
 export async function createUser(payload: CreateUserPayload): Promise<User> {
   const { data } = await apiClient.post<User>("/users", payload);
+  return data;
+}
+
+export async function getMyProfile(): Promise<User> {
+  const { data } = await apiClient.get<User>("/users/me");
+  return data;
+}
+
+export async function updateMyProfile(payload: UpdateUserProfilePayload): Promise<User> {
+  const { data } = await apiClient.patch<User>("/users/me", payload);
   return data;
 }

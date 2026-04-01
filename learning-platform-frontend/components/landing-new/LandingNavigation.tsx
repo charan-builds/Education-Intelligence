@@ -64,14 +64,14 @@ export default function LandingNavigation({ dashboardHref, isAuthenticated }: La
           ) : (
             <>
               <Link
-                href="/login"
+                href="/auth?mode=login"
                 className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
               >
                 <LogIn className="h-4 w-4" />
                 Login
               </Link>
               <Link
-                href="/register"
+                href="/auth?mode=register"
                 className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-yellow-500/25 transition hover:-translate-y-0.5 hover:from-yellow-500 hover:to-amber-600"
               >
                 <UserPlus className="h-4 w-4" />
@@ -118,7 +118,7 @@ export default function LandingNavigation({ dashboardHref, isAuthenticated }: La
             ) : (
               <>
                 <Link
-                  href="/login"
+                  href="/auth?mode=login"
                   onClick={() => setIsOpen(false)}
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-900"
                 >
@@ -126,7 +126,7 @@ export default function LandingNavigation({ dashboardHref, isAuthenticated }: La
                   Login
                 </Link>
                 <Link
-                  href="/register"
+                  href="/auth?mode=register"
                   onClick={() => setIsOpen(false)}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-yellow-400 to-amber-500 px-4 py-3 text-sm font-semibold text-white"
                 >

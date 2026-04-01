@@ -143,6 +143,19 @@ class DiagnosticService:
             return None
 
         state, _, previous_answers, planned_question_ids = await self._get_or_build_test_state(test_id=test_id, user_id=user_id, tenant_id=tenant_id)
+        if len(previous_answers) >= self.adaptive_engine.MAX_QUESTIONS:
+            if state.expected_next_question_id is not None:
+                await self.diagnostic_repository.upsert_test_state(
+                    test_id=test.id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    goal_id=test.goal_id,
+                    answered_question_ids=[int(a.get("question_id")) for a in previous_answers if a.get("question_id") is not None],
+                    previous_answers=previous_answers,
+                    expected_next_question_id=None,
+                    updated_at=datetime.now(timezone.utc),
+                )
+            return None
         if state.expected_next_question_id is not None:
             question_id = int(state.expected_next_question_id)
             question = await self.topic_repository.get_question(question_id, tenant_id)

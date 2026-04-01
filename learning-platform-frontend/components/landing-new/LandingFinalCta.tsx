@@ -42,17 +42,17 @@ export default function LandingFinalCta({ dashboardHref, isAuthenticated }: Land
                 </Link>
               ) : (
                 <>
-                  <Link
-                    href="/register"
-                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 px-8 py-4 text-base font-bold text-white shadow-xl transition hover:from-yellow-500 hover:to-amber-600"
-                  >
+                <Link
+                  href="/auth?mode=register"
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-yellow-400 to-amber-500 px-8 py-4 text-base font-bold text-white shadow-xl transition hover:from-yellow-500 hover:to-amber-600"
+                >
                     Get Started
                     <ArrowRight className="h-5 w-5" />
                   </Link>
-                  <Link
-                    href="/login"
-                    className="inline-flex items-center justify-center rounded-2xl border-2 border-slate-200 bg-white px-8 py-4 text-base font-bold text-slate-900 shadow-lg transition hover:bg-slate-50"
-                  >
+                <Link
+                  href="/auth?mode=login"
+                  className="inline-flex items-center justify-center rounded-2xl border-2 border-slate-200 bg-white px-8 py-4 text-base font-bold text-slate-900 shadow-lg transition hover:bg-slate-50"
+                >
                     Login
                   </Link>
                 </>

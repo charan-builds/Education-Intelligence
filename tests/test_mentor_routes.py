@@ -1,7 +1,51 @@
 import asyncio
+import sys
 from types import SimpleNamespace
+from types import ModuleType
 
 from starlette.requests import Request
+
+fake_celery = ModuleType("celery")
+fake_celery_signals = ModuleType("celery.signals")
+
+
+class _FakeSignal:
+    def connect(self, *_args, **_kwargs):
+        return None
+
+
+class _FakeCelery:
+    def __init__(self, *args, **kwargs):
+        _ = args, kwargs
+        self.conf = SimpleNamespace(update=lambda **kw: None)
+
+    def config_from_object(self, *args, **kwargs):
+        _ = args, kwargs
+
+    def send_task(self, *args, **kwargs):
+        _ = args, kwargs
+        return None
+
+    def autodiscover_tasks(self, *args, **kwargs):
+        _ = args, kwargs
+
+    def task(self, *args, **kwargs):
+        _ = args, kwargs
+
+        def _decorator(func):
+            return func
+
+        return _decorator
+
+
+fake_celery.Celery = _FakeCelery
+fake_celery_signals.before_task_publish = _FakeSignal()
+fake_celery_signals.task_failure = _FakeSignal()
+fake_celery_signals.task_postrun = _FakeSignal()
+fake_celery_signals.task_prerun = _FakeSignal()
+fake_celery_signals.task_retry = _FakeSignal()
+sys.modules.setdefault("celery", fake_celery)
+sys.modules.setdefault("celery.signals", fake_celery_signals)
 
 from app.presentation import mentor_routes
 from app.schemas.mentor_schema import MentorChatAckRequest, MentorChatRequest
@@ -99,27 +143,43 @@ def _user():
 
 
 def test_mentor_chat_route_uses_authenticated_scope(monkeypatch):
-    monkeypatch.setattr(mentor_routes, "MentorChatRepository", _FakeMentorChatRepository)
-    monkeypatch.setattr(mentor_routes, "MentorMessageRepository", _FakeMentorMessageRepository)
-    enqueue_calls = []
-    monkeypatch.setattr(
-        mentor_routes,
-        "enqueue_job",
-        lambda task_name, args=None, kwargs=None: enqueue_calls.append((task_name, args, kwargs)) or True,
-    )
-    monkeypatch.setattr(
-        mentor_routes,
-        "realtime_hub",
-        SimpleNamespace(send_user=lambda *args, **kwargs: asyncio.sleep(0)),
-    )
+    service_calls = []
+
+    class _FakeMentorService:
+        def __init__(self, session):
+            self.session = session
+
+        async def chat(self, *, message, user_id, tenant_id, chat_history):
+            service_calls.append(
+                {
+                    "message": message,
+                    "user_id": user_id,
+                    "tenant_id": tenant_id,
+                    "chat_history": chat_history,
+                }
+            )
+            return {
+                "reply": "Start with your next roadmap topic.",
+                "advisor_type": "RuleBasedAdvisor",
+                "used_ai": False,
+                "fallback_used": True,
+                "fallback_reason": "rule_based_fallback",
+                "suggested_focus_topics": [11, 12],
+                "why_recommended": ["Weak topics were prioritized first."],
+                "provider": None,
+                "latency_ms": 12.5,
+                "next_checkin_date": None,
+                "session_summary": "Immediate mentor guidance returned.",
+                "memory_summary": {"learner_summary": "Needs practice"},
+            }
+
+    monkeypatch.setattr(mentor_routes, "MentorService", _FakeMentorService)
     request = Request({"type": "http", "method": "POST", "path": "/mentor/chat", "headers": []})
 
     async def _run():
         response = await mentor_routes.mentor_chat(
             request=request,
             payload=MentorChatRequest(
-                user_id=9,
-                tenant_id=4,
                 message="What should I do next?",
                 request_id="req-1",
                 chat_history=[],
@@ -127,10 +187,18 @@ def test_mentor_chat_route_uses_authenticated_scope(monkeypatch):
             db=_DummySession(),
             current_user=_user(),
         )
-        assert response.reply == ""
+        assert response.reply == "Start with your next roadmap topic."
         assert response.request_id == "req-1"
-        assert response.status == "queued"
-        assert enqueue_calls == [("jobs.process_mentor_chat", [4, 9, "req-1"], None)]
+        assert response.status == "ready"
+        assert response.advisor_type == "RuleBasedAdvisor"
+        assert service_calls == [
+            {
+                "message": "What should I do next?",
+                "user_id": 9,
+                "tenant_id": 4,
+                "chat_history": [],
+            }
+        ]
 
     asyncio.run(_run())
 
@@ -171,5 +239,42 @@ def test_mentor_chat_ack_marks_delivery(monkeypatch):
         assert response.acked is True
         assert call_log["chat_repo_acked"] is True
         assert call_log["msg_repo_acked"] is True
+
+    asyncio.run(_run())
+
+
+def test_mentor_suggestions_allows_unmapped_mentor_fallback(monkeypatch):
+    class _NoMappingRepo:
+        def __init__(self, session=None):
+            self.session = session
+
+        async def has_mapping(self, *, tenant_id, mentor_id, student_id):
+            _ = tenant_id, mentor_id, student_id
+            return False
+
+        async def list_student_ids_for_mentor(self, *, tenant_id, mentor_id):
+            _ = tenant_id, mentor_id
+            return []
+
+    class _FakeMentorService:
+        def __init__(self, session=None):
+            self.session = session
+
+        async def contextual_suggestions(self, *, user_id, tenant_id):
+            return {
+                "suggestions": [f"Focus learner {user_id} in tenant {tenant_id}."],
+                "reasons": ["Fallback access path works."],
+            }
+
+    monkeypatch.setattr(mentor_routes, "MentorStudentRepository", _NoMappingRepo)
+    monkeypatch.setattr(mentor_routes, "MentorService", _FakeMentorService)
+
+    async def _run():
+        response = await mentor_routes.mentor_suggestions(
+            learner_id=None,
+            db=_DummySession(),
+            current_user=SimpleNamespace(id=14, tenant_id=4, role=SimpleNamespace(value="mentor")),
+        )
+        assert response.suggestions == ["Focus learner 14 in tenant 4."]
 
     asyncio.run(_run())

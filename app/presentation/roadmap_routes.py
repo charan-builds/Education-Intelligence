@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.roadmap_service import RoadmapService
-from app.application.services.outbox_service import OutboxService
 from app.core.dependencies import get_current_user, get_pagination_params
 from app.infrastructure.database import get_db_session
 from app.infrastructure.repositories.mentor_student_repository import MentorStudentRepository
@@ -37,15 +36,13 @@ async def generate_roadmap(
         goal_id=payload.goal_id,
         test_id=payload.test_id,
     )
-    if should_enqueue:
-        # Always enqueue via transactional outbox to make job dispatch idempotent.
-        await OutboxService(db).add_task_event(
-            task_name="jobs.generate_roadmap",
-            args=[current_user.id, current_user.tenant_id, payload.goal_id, payload.test_id],
+    if should_enqueue or roadmap.status != "ready" or not getattr(roadmap, "steps", None):
+        roadmap = await roadmap_service.generate(
+            user_id=current_user.id,
             tenant_id=current_user.tenant_id,
-            idempotency_key=f"roadmap-generate:{current_user.id}:{payload.goal_id}:{payload.test_id}",
+            goal_id=payload.goal_id,
+            test_id=payload.test_id,
         )
-        await db.commit()
     return roadmap_service.serialize_roadmap(roadmap)
 
 

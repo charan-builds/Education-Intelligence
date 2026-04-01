@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import (
     PasswordValidationError,
+    build_totp_uri,
     create_access_token,
     create_email_verification_token,
     create_invite_token,
@@ -19,8 +20,10 @@ from app.core.security import (
     decode_invite_token,
     decode_password_reset_token,
     decode_refresh_token,
+    generate_totp_secret,
     hash_password,
     validate_password_strength,
+    verify_totp_code,
     verify_password,
 )
 from app.domain.models.user import User, UserRole
@@ -187,6 +190,7 @@ class AuthService:
         tenant_subdomain: str | None = None,
         request_host: str | None = None,
         device: str | None = None,
+        mfa_code: str | None = None,
     ) -> tuple[str, str, User, UserRole]:
         resolved_tenant_id = await self._resolve_login_tenant(
             tenant_id=tenant_id,
@@ -206,6 +210,14 @@ class AuthService:
                 },
             )
             raise UnauthorizedError("Invalid email or password")
+        if bool(getattr(user, "mfa_enabled", False)):
+            secret = getattr(user, "mfa_secret", None)
+            if not secret:
+                raise UnauthorizedError("MFA is enabled but not configured correctly")
+            if not mfa_code:
+                raise UnauthorizedError("MFA code required")
+            if not verify_totp_code(secret, mfa_code):
+                raise UnauthorizedError("Invalid MFA code")
         membership = await self.user_tenant_role_repository.get_membership(
             user_id=int(user.id),
             tenant_id=resolved_tenant_id,
@@ -247,6 +259,49 @@ class AuthService:
             },
         )
         return access_token, refresh_token, user, effective_role
+
+    async def begin_mfa_setup(self, *, user_id: int, tenant_id: int) -> dict[str, str]:
+        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
+        if user is None:
+            raise ValidationError("User not found")
+        secret = generate_totp_secret()
+        user.mfa_secret = secret
+        user.mfa_enabled = False
+        await self.session.commit()
+        issuer = "Learnova AI"
+        return {
+            "secret": secret,
+            "manual_entry_code": secret,
+            "otp_auth_url": build_totp_uri(secret=secret, account_name=user.email, issuer=issuer),
+        }
+
+    async def enable_mfa(self, *, user_id: int, tenant_id: int, code: str) -> User:
+        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
+        if user is None:
+            raise ValidationError("User not found")
+        secret = getattr(user, "mfa_secret", None)
+        if not secret:
+            raise ValidationError("Start MFA setup before enabling it")
+        if not verify_totp_code(secret, code):
+            raise ValidationError("Invalid MFA code")
+        user.mfa_enabled = True
+        await self.session.commit()
+        return user
+
+    async def disable_mfa(self, *, user_id: int, tenant_id: int, code: str) -> User:
+        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
+        if user is None:
+            raise ValidationError("User not found")
+        secret = getattr(user, "mfa_secret", None)
+        if not user.mfa_enabled or not secret:
+            raise ValidationError("MFA is not enabled")
+        if not verify_totp_code(secret, code):
+            raise ValidationError("Invalid MFA code")
+        user.mfa_enabled = False
+        user.mfa_secret = None
+        await self.refresh_session_repository.revoke_for_user(user_id=user_id)
+        await self.session.commit()
+        return user
 
     async def refresh_session(self, refresh_token: str, *, device: str | None = None) -> tuple[str, str, User, UserRole]:
         payload = decode_refresh_token(refresh_token)

@@ -77,10 +77,10 @@ export default function LandingFooter({ dashboardHref }: LandingFooterProps) {
           <div className="mt-10 flex flex-col gap-4 border-t border-slate-200 pt-6 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <p>© 2026 Learnova AI. All rights reserved.</p>
             <div className="flex flex-wrap gap-4">
-              <Link href="/login" className="transition hover:text-slate-900">
+              <Link href="/auth?mode=login" className="transition hover:text-slate-900">
                 Login
               </Link>
-              <Link href="/register" className="transition hover:text-slate-900">
+              <Link href="/auth?mode=register" className="transition hover:text-slate-900">
                 Register
               </Link>
               <Link href={dashboardHref} className="transition hover:text-slate-900">

@@ -242,7 +242,7 @@ async def update_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).update_question(question_id, **payload.model_dump())
+    return await TopicService(db).update_question(question_id, tenant_id=_current_user.tenant_id, **payload.model_dump())
 
 
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -251,7 +251,7 @@ async def delete_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    await TopicService(db).delete_question(question_id)
+    await TopicService(db).delete_question(question_id, tenant_id=_current_user.tenant_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

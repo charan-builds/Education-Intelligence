@@ -17,8 +17,9 @@ import {
   register,
   requestEmailVerification,
   requestPasswordReset,
+  setupMfa,
 } from "@/services/authService";
-import { sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
+import { appRoutes, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 type AuthPageClientProps = {
@@ -36,6 +37,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
   const [password, setPassword] = useState("");
   const [tenantContext, setTenantContext] = useState("");
   const [token, setToken] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -45,7 +47,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
   useEffect(() => {
     const rawMode = (searchParams.get("mode") as AuthMode | null) ?? initialMode;
     const rawNextPath = searchParams.get("next");
-    setNextPath(sanitizeAuthRedirectTarget(rawNextPath, `/${initialMode}`));
+    setNextPath(sanitizeAuthRedirectTarget(rawNextPath, appRoutes.auth));
     const tenantId = searchParams.get("tenant_id");
     const tenantSubdomain = searchParams.get("tenant");
     const verificationToken = searchParams.get("token") ?? searchParams.get("verification");
@@ -74,10 +76,13 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
       const tenantSubdomain = Number.isInteger(numericTenantId) && numericTenantId > 0 ? null : (trimmedTenantContext || null);
 
       if (mode === "login") {
+        if (!tenantId && !tenantSubdomain) {
+          throw new Error("Tenant ID or workspace is required for login. Try tenant 2 for Demo University.");
+        }
         const authenticatedUser = await login(email, password, {
           tenant_id: tenantId,
           tenant_subdomain: tenantSubdomain,
-        });
+        }, mfaCode);
         router.replace(nextPath ?? getRoleRedirectPath(authenticatedUser?.role));
         return;
       }
@@ -136,6 +141,17 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
       setError(submitError instanceof Error ? submitError.message : "Unable to complete the requested auth action.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleMfaQuickSetup(): Promise<void> {
+    setError("");
+    setSuccess("");
+    try {
+      const setup = await setupMfa();
+      setSuccess(`MFA setup secret: ${setup.manual_entry_code}`);
+    } catch (setupError) {
+      setError(setupError instanceof Error ? setupError.message : "Unable to prepare MFA.");
     }
   }
 
@@ -268,6 +284,11 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
                   placeholder="e.g. 7 or northwind"
                   className="mt-2 border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
+                {mode === "login" ? (
+                  <p className="mt-2 text-xs leading-5 text-slate-400">
+                    Tenant context is required. Demo examples: `2` for Demo University, `4` for Acme Learning Co, `1` for Platform.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
@@ -300,6 +321,21 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
               </div>
             ) : null}
 
+            {mode === "login" ? (
+              <div>
+                <label className="text-sm font-medium text-slate-300" htmlFor="auth-mfa">
+                  MFA code
+                </label>
+                <Input
+                  id="auth-mfa"
+                  value={mfaCode}
+                  onChange={(event) => setMfaCode(event.target.value)}
+                  placeholder="Optional unless MFA is enabled"
+                  className="mt-2 border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </div>
+            ) : null}
+
             <Button type="submit" disabled={isSubmitting} className="w-full">
               {isSubmitting
                 ? "Submitting..."
@@ -318,6 +354,23 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
                             : "Issue verification token"}
               <ArrowRight className="h-4 w-4" />
             </Button>
+
+            {mode === "login" ? (
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+                <p className="text-sm font-semibold text-white">Security quick setup</p>
+                <p className="mt-1 text-xs leading-6 text-slate-400">
+                  Already signed in on another tab? Generate an authenticator secret here, then finish setup from your profile page.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void handleMfaQuickSetup()}
+                  className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-700 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-slate-800"
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                  Generate MFA secret
+                </button>
+              </div>
+            ) : null}
 
             {error ? <p className="text-sm text-rose-300">{error}</p> : null}
             {success ? <p className="text-sm text-emerald-300">{success}</p> : null}

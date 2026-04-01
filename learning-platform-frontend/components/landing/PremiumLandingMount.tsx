@@ -49,18 +49,18 @@ export default function PremiumLandingMount() {
     window.__learnovaLandingHandlers = {
       onStart: () => {
         const current = window.__learnovaLandingState;
-        router.push(current?.isAuthenticated ? getRoleRedirectPath(current.role) : "/register");
+        router.push(current?.isAuthenticated ? getRoleRedirectPath(current.role) : "/auth?mode=register");
       },
       onLogin: () => {
         const current = window.__learnovaLandingState;
-        router.push(current?.isAuthenticated ? getRoleRedirectPath(current.role) : "/login");
+        router.push(current?.isAuthenticated ? getRoleRedirectPath(current.role) : "/auth?mode=login");
       },
       onDemo: () => {
         document.getElementById("pricing")?.scrollIntoView({ behavior: "smooth", block: "start" });
       },
       onSubscribe: () => {
         const current = window.__learnovaLandingState;
-        router.push(current?.isAuthenticated ? getRoleRedirectPath(current.role) : "/register");
+        router.push(current?.isAuthenticated ? getRoleRedirectPath(current.role) : "/auth?mode=register");
       },
       skipIntro: false,
     };
