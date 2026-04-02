@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import re
+from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -57,21 +59,75 @@ class UserService:
         *,
         user_id: int,
         tenant_id: int,
+        full_name: str | None,
         display_name: str | None,
+        phone_number: str | None,
+        linkedin_url: str | None,
+        college_name: str | None,
         avatar_url: str | None,
         preferences: dict[str, object],
     ) -> User:
         try:
             user = await self.get_profile(user_id=user_id, tenant_id=tenant_id)
+            normalized_full_name = (full_name or "").strip() or None
             user.display_name = (display_name or "").strip() or None
+            user.full_name = normalized_full_name
+            user.phone_number = self._normalize_phone_number(phone_number) if phone_number else None
+            user.linkedin_url = self._normalize_linkedin_url(linkedin_url) if linkedin_url else None
+            user.college_name = (college_name or "").strip() or None
             user.avatar_url = (avatar_url or "").strip() or None
             user.preferences_json = preferences or {}
+            if normalized_full_name and not user.display_name:
+                user.display_name = normalized_full_name
             await self.session.commit()
             await self.session.refresh(user)
             return user
         except Exception:
             await self.session.rollback()
             raise
+
+    async def complete_profile(
+        self,
+        *,
+        user_id: int,
+        tenant_id: int,
+        full_name: str,
+        phone_number: str,
+        linkedin_url: str,
+        college_name: str | None,
+    ) -> User:
+        try:
+            user = await self.get_profile(user_id=user_id, tenant_id=tenant_id)
+            normalized_full_name = full_name.strip()
+            if not normalized_full_name:
+                raise ValidationError("Full name is required")
+            user.full_name = normalized_full_name
+            user.display_name = normalized_full_name
+            user.phone_number = self._normalize_phone_number(phone_number)
+            user.linkedin_url = self._normalize_linkedin_url(linkedin_url)
+            user.college_name = (college_name or "").strip() or None
+            user.is_profile_completed = True
+            await self.session.commit()
+            await self.session.refresh(user)
+            return user
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    @staticmethod
+    def _normalize_phone_number(phone_number: str) -> str:
+        compact = re.sub(r"[^\d+]", "", phone_number.strip())
+        if not re.fullmatch(r"\+?[1-9]\d{7,14}", compact):
+            raise ValidationError("Invalid phone number")
+        return compact
+
+    @staticmethod
+    def _normalize_linkedin_url(linkedin_url: str) -> str:
+        normalized = linkedin_url.strip()
+        parsed = urlparse(normalized)
+        if parsed.scheme not in {"http", "https"} or "linkedin.com" not in parsed.netloc.lower():
+            raise ValidationError("Invalid LinkedIn URL")
+        return normalized
 
     async def list_users_page(
         self,

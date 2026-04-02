@@ -16,6 +16,7 @@ class AuthContext:
     actor_tenant_id: int
     effective_tenant_id: int
     membership_role: UserRole
+    token_scope: str = "full_access"
 
     @property
     def id(self) -> int:

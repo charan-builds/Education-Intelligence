@@ -5,6 +5,7 @@ from app.core.auth_context import AuthContext, validate_tenant_membership
 from app.core.security import (
     ACCESS_TOKEN_COOKIE_NAME,
     AuthenticationError,
+    TOKEN_SCOPE_FULL_ACCESS,
     decode_access_token,
     get_token_from_headers_and_cookies,
 )
@@ -12,6 +13,7 @@ from app.infrastructure.database import get_db_session
 from app.infrastructure.repositories.user_tenant_role_repository import UserTenantRoleRepository
 from app.infrastructure.repositories.user_repository import UserRepository
 from app.infrastructure.repositories.session_repository import SessionRepository
+from app.infrastructure.repositories.token_blacklist_repository import TokenBlacklistRepository
 from app.schemas.common_schema import PaginationParams
 
 
@@ -37,6 +39,7 @@ async def get_current_user(
         actor_tenant_id = int(payload.get("tenant_id", get_request_tenant_id(request)))
         session_id = str(payload["jti"])
         token_version = int(payload.get("tv", 0))
+        token_scope = str(payload.get("scope", TOKEN_SCOPE_FULL_ACCESS))
     except (AuthenticationError, KeyError, ValueError):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -44,6 +47,9 @@ async def get_current_user(
         )
 
     session_repository = SessionRepository(db)
+    blacklist_repository = TokenBlacklistRepository(db)
+    if await blacklist_repository.is_blacklisted(token_jti=session_id):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has been revoked")
     active_session = await session_repository.get_active(session_id=session_id)
     if (
         active_session is None
@@ -81,10 +87,29 @@ async def get_current_user(
         actor_tenant_id=actor_tenant_id,
         effective_tenant_id=effective_tenant_id,
         membership_role=membership_role,
+        token_scope=token_scope,
     )
     request.state.user = auth_context
     request.state.auth_context = auth_context
     return auth_context
+
+
+async def require_authenticated_user(current_user=Depends(get_current_user)) -> AuthContext:
+    return current_user
+
+
+async def require_email_verified(current_user=Depends(get_current_user)) -> AuthContext:
+    if not bool(getattr(current_user.user, "is_email_verified", False) or getattr(current_user.user, "email_verified_at", None)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Email not verified")
+    return current_user
+
+
+async def require_profile_completed(current_user=Depends(require_email_verified)) -> AuthContext:
+    if not bool(getattr(current_user.user, "is_profile_completed", False)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Profile incomplete")
+    if getattr(current_user, "token_scope", TOKEN_SCOPE_FULL_ACCESS) != TOKEN_SCOPE_FULL_ACCESS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Full access required")
+    return current_user
 
 
 def require_roles(*roles: str):

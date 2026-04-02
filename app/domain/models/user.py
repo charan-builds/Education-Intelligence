@@ -13,6 +13,7 @@ class UserRole(str, Enum):
     teacher = "teacher"
     mentor = "mentor"
     student = "student"
+    independent_learner = "independent_learner"
 
 
 class User(Base):
@@ -24,12 +25,21 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    linkedin_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    college_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     preferences_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRole] = mapped_column(SQLEnum(UserRole), nullable=False)
+    is_email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_phone_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_profile_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mfa_secret: Mapped[str | None] = mapped_column(String(128), nullable=True)
     experience_points: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -7,6 +7,9 @@ from app.schemas.user_schema import UserResponse
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
+    tenant_id: int | None = None
+    role: UserRole = UserRole.independent_learner
+    full_name: str | None = None
     invite_token: str | None = None
 
 
@@ -20,11 +23,21 @@ class LoginRequest(BaseModel):
 
 class TokenResponse(BaseModel):
     authenticated: bool = True
+    requires_profile_completion: bool = False
     token_type: str = "bearer"
-    access_token: str
-    access_token_expires_in: int
+    scope: str = "full_access"
+    access_token: str | None = None
+    access_token_expires_in: int | None = None
     refresh_token_expires_in: int | None = None
     user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str | None = None
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str | None = None
 
 
 class InviteCreateRequest(BaseModel):
@@ -41,7 +54,7 @@ class InviteResponse(BaseModel):
 
 
 class EmailVerificationRequest(BaseModel):
-    tenant_id: int
+    tenant_id: int | None = None
     email: EmailStr
 
 
@@ -50,7 +63,7 @@ class EmailVerificationConfirmRequest(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    tenant_id: int
+    tenant_id: int | None = None
     email: EmailStr
 
 
@@ -72,6 +85,14 @@ class MFASetupResponse(BaseModel):
 
 
 class MFAVerifyRequest(BaseModel):
+    code: str
+
+
+class OTPRequest(BaseModel):
+    phone_number: str | None = None
+
+
+class OTPVerifyRequest(BaseModel):
     code: str
 
 

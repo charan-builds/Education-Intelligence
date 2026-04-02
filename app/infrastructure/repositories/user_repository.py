@@ -12,12 +12,34 @@ class UserRepository(BaseRepository):
         super().__init__(session)
         self.user_tenant_role_repository = UserTenantRoleRepository(session)
 
-    async def create(self, tenant_id: int, email: str, password_hash: str, role: UserRole, created_at):
+    async def create(
+        self,
+        tenant_id: int,
+        email: str,
+        password_hash: str,
+        role: UserRole,
+        created_at,
+        *,
+        full_name: str | None = None,
+        display_name: str | None = None,
+        phone_number: str | None = None,
+        linkedin_url: str | None = None,
+        college_name: str | None = None,
+        is_email_verified: bool = False,
+        is_profile_completed: bool = False,
+    ):
         user = User(
             tenant_id=tenant_id,
-            email=email,
+            email=email.strip().lower(),
+            full_name=full_name,
+            display_name=display_name,
+            phone_number=phone_number,
+            linkedin_url=linkedin_url,
+            college_name=college_name,
             password_hash=password_hash,
             role=role,
+            is_email_verified=is_email_verified,
+            is_profile_completed=is_profile_completed,
             created_at=created_at,
         )
         self.session.add(user)
@@ -26,7 +48,8 @@ class UserRepository(BaseRepository):
         return user
 
     async def get_by_email(self, email: str, *, tenant_id: int | None = None) -> User | None:
-        stmt = select(User).where(User.email == email)
+        normalized_email = email.strip().lower()
+        stmt = select(User).where(User.email == normalized_email)
         if tenant_id is not None:
             stmt = stmt.where(user_belongs_to_tenant(User, tenant_id))
         result = await self.session.execute(stmt)

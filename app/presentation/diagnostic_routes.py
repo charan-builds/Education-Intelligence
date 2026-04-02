@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.services.diagnostic_service import DiagnosticService
 from app.application.services.outbox_service import OutboxService
 from app.application.services.roadmap_service import RoadmapService
-from app.core.dependencies import get_current_user
+from app.core.dependencies import require_profile_completed
 from app.infrastructure.database import get_db_session
 from app.presentation.middleware.rate_limiter import limiter, rate_limit_key_by_ip, rate_limit_key_by_user
 from app.schemas.diagnostic_schema import (
@@ -30,7 +30,7 @@ async def start_diagnostic(
     request: Request,
     payload: DiagnosticStartRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     return await DiagnosticService(db).start_test(current_user.id, payload.goal_id, current_user.tenant_id)
 
@@ -42,7 +42,7 @@ async def answer_diagnostic_question(
     request: Request,
     payload: DiagnosticAnswerRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     return await DiagnosticService(db).answer_question(
         test_id=payload.test_id,
@@ -61,7 +61,7 @@ async def submit_diagnostic(
     request: Request,
     payload: DiagnosticSubmitRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     result = await DiagnosticService(db).finalize_test(
         test_id=payload.test_id,
@@ -90,7 +90,7 @@ async def submit_diagnostic(
 async def diagnostic_result(
     test_id: int = Query(...),
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     result = await DiagnosticService(db).get_result(test_id, current_user.id, current_user.tenant_id)
     return DiagnosticResultResponse(**result)
@@ -100,7 +100,7 @@ async def diagnostic_result(
 async def get_diagnostic_session(
     test_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     test, answers = await DiagnosticService(db).get_or_resume_test(
         test_id=test_id,
@@ -121,7 +121,7 @@ async def get_diagnostic_session(
 async def diagnostic_next_question_for_test(
     test_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     question = await DiagnosticService(db).get_next_question(
         test_id=test_id,
@@ -137,7 +137,7 @@ async def diagnostic_next_question_for_test(
 async def diagnostic_next_question(
     payload: DiagnosticNextQuestionRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     question = await DiagnosticService(db).get_next_question(
         test_id=payload.test_id,

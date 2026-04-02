@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.roadmap_service import RoadmapService
-from app.core.dependencies import get_current_user, get_pagination_params
+from app.core.dependencies import get_current_user, get_pagination_params, require_profile_completed
 from app.infrastructure.database import get_db_session
 from app.infrastructure.repositories.mentor_student_repository import MentorStudentRepository
 from app.realtime.hub import realtime_hub
@@ -27,7 +27,7 @@ async def generate_roadmap(
     request: Request,
     payload: RoadmapGenerateRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     roadmap_service = RoadmapService(db)
     roadmap, should_enqueue = await roadmap_service.ensure_generation_requested(
@@ -49,7 +49,7 @@ async def generate_roadmap(
 @router.get("/view", response_model=RoadmapPageResponse)
 async def view_current_user_roadmaps(
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
     return await RoadmapService(db).list_for_user_page(
@@ -65,7 +65,7 @@ async def view_current_user_roadmaps(
 async def list_roadmaps(
     user_id: int,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
     if user_id != current_user.id:
@@ -94,7 +94,7 @@ async def update_roadmap_step(
     step_id: int,
     payload: RoadmapStepUpdateRequest,
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     if current_user.role.value != "student":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students can update roadmap progress")
@@ -131,7 +131,7 @@ async def update_roadmap_step(
 @router.post("/adaptive-refresh", response_model=AdaptiveRoadmapResponse)
 async def adaptive_refresh_roadmap(
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_profile_completed),
 ):
     if current_user.role.value != "student":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students can adapt roadmap progress")

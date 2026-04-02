@@ -1,8 +1,9 @@
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
-from hashlib import sha1
+from hashlib import sha1, sha256
 import base64
 import hmac
+import secrets
 import struct
 from uuid import uuid4
 from typing import Any
@@ -28,6 +29,8 @@ TOKEN_TYPE_REFRESH = "refresh"
 TOKEN_TYPE_INVITE = "invite"
 TOKEN_TYPE_EMAIL_VERIFICATION = "email_verification"
 TOKEN_TYPE_PASSWORD_RESET = "password_reset"
+TOKEN_SCOPE_ONBOARDING = "onboarding"
+TOKEN_SCOPE_FULL_ACCESS = "full_access"
 
 
 def hash_password(password: str) -> str:
@@ -37,6 +40,14 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+
+
+def generate_opaque_token(length: int = 48) -> str:
+    return secrets.token_urlsafe(length)
+
+
+def hash_token_value(token: str) -> str:
+    return sha256(token.encode("utf-8")).hexdigest()
 
 
 def _create_token(
@@ -222,6 +233,8 @@ def validate_password_strength(password: str) -> None:
         raise PasswordValidationError("Password must contain at least one letter")
     if not any(ch.isdigit() for ch in password):
         raise PasswordValidationError("Password must contain at least one number")
+    if not any(not ch.isalnum() for ch in password):
+        raise PasswordValidationError("Password must contain at least one special character")
 
 
 def generate_totp_secret(length: int = 32) -> str:

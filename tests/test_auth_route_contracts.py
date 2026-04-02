@@ -5,6 +5,7 @@ from fastapi import Response
 from starlette.requests import Request
 
 from app.presentation import auth_routes
+from app.application.services.auth_service import LoginResult
 from app.schemas.auth_schema import LoginRequest
 
 
@@ -20,9 +21,18 @@ class _FakeAuthService:
             tenant_id=2,
             role="student",
             created_at=datetime.now(timezone.utc),
+            is_email_verified=True,
+            is_profile_completed=True,
             email_verified_at=None,
         )
-        return "access-token", "refresh-token", user, "student"
+        return LoginResult(
+            access_token="access-token",
+            refresh_token="refresh-token",
+            user=user,
+            effective_role="student",
+            requires_profile_completion=False,
+            scope="full_access",
+        )
 
 
 async def test_login_route_returns_token_response(monkeypatch):

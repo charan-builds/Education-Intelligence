@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.dashboard_service import DashboardService
-from app.core.dependencies import get_current_user, require_roles
+from app.core.dependencies import require_profile_completed, require_roles
 from app.infrastructure.database import get_db_session
 from app.schemas.dashboard_schema import (
     AdminDashboardResponse,
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 async def get_student_dashboard(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("student")),
+    _verified_user=Depends(require_profile_completed),
 ):
     return await DashboardService(db).student_dashboard(
         user_id=current_user.id,

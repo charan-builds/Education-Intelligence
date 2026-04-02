@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sys
+import time
+from collections import defaultdict, deque
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request
@@ -25,9 +27,35 @@ except Exception:  # pragma: no cover
 
 
 class _NoopLimiter:
-    def limit(self, _limit: str, key_func: Callable[[Request], str] | None = None):
+    def __init__(self) -> None:
+        self._buckets: dict[str, deque[float]] = defaultdict(deque)
+
+    def limit(self, limit_value: str, key_func: Callable[[Request], str] | None = None):
+        amount_raw, window_raw = limit_value.split("/", 1)
+        max_hits = int(amount_raw)
+        window_seconds = 60 if window_raw.startswith("min") else 1
+
         def _decorator(func):
-            return func
+            async def _wrapped(*args, **kwargs):
+                request = kwargs.get("request")
+                if request is None:
+                    for arg in args:
+                        if isinstance(arg, Request):
+                            request = arg
+                            break
+                if request is not None:
+                    resolved_key = key_func(request) if key_func else get_remote_address(request)
+                    bucket_key = f"{func.__module__}.{func.__name__}:{resolved_key}:{limit_value}"
+                    now = time.monotonic()
+                    bucket = self._buckets[bucket_key]
+                    while bucket and bucket[0] <= now - window_seconds:
+                        bucket.popleft()
+                    if len(bucket) >= max_hits:
+                        raise RateLimitExceeded(detail=f"Rate limit exceeded: {limit_value}")  # type: ignore[arg-type]
+                    bucket.append(now)
+                return await func(*args, **kwargs)
+
+            return _wrapped
 
         return _decorator
 

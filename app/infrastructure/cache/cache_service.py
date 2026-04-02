@@ -36,6 +36,7 @@ class CacheService:
                 "cache get failed",
                 extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
             )
+            self.redis = None
             return None
 
     async def set(self, key: str, value: Any, ttl: int = 300) -> bool:
@@ -51,6 +52,7 @@ class CacheService:
                 "cache set failed",
                 extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
             )
+            self.redis = None
             return False
 
     async def delete(self, key: str) -> bool:
@@ -66,6 +68,7 @@ class CacheService:
                 "cache delete failed",
                 extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
             )
+            self.redis = None
             return False
 
     async def delete_prefix(self, prefix: str) -> int:
@@ -83,6 +86,7 @@ class CacheService:
                 "cache delete prefix failed",
                 extra={"log_data": {"cache_prefix": prefix, "error_type": type(exc).__name__}},
             )
+            self.redis = None
             return 0
 
     @staticmethod
@@ -112,6 +116,7 @@ class CacheService:
                 "cache version bump failed",
                 extra={"log_data": {"cache_namespace": namespace, "error_type": type(exc).__name__}},
             )
+            self.redis = None
             return 1
 
     async def get_or_set(self, key: str, *, ttl: int, factory) -> Any:

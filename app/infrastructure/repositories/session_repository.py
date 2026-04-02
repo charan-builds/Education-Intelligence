@@ -32,6 +32,12 @@ class SessionRepository:
             "revoked_at": row.revoked_at.isoformat() if row.revoked_at is not None else None,
         }
 
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     async def next_token_version_for_user(self, *, user_id: int) -> int:
         result = await self.session.execute(
             select(func.coalesce(func.max(SessionRecord.token_version), 0)).where(SessionRecord.user_id == user_id)
@@ -61,14 +67,14 @@ class SessionRepository:
         )
         self.session.add(row)
         await self.session.flush()
-        ttl = max(1, int((expires_at - datetime.now(timezone.utc)).total_seconds()))
+        ttl = max(1, int((self._as_utc(expires_at) - datetime.now(timezone.utc)).total_seconds()))
         await self.cache_service.set(self._cache_key(session_id), self._serialize(row), ttl=ttl)
         return row
 
     async def get_active(self, *, session_id: str) -> SessionRecord | None:
         cached = await self.cache_service.get(self._cache_key(session_id))
         if isinstance(cached, dict) and not cached.get("revoked"):
-            expires_at = datetime.fromisoformat(str(cached["expires_at"]))
+            expires_at = self._as_utc(datetime.fromisoformat(str(cached["expires_at"])))
             if expires_at > datetime.now(timezone.utc):
                 return SessionRecord(
                     id=str(cached["id"]),
@@ -78,8 +84,8 @@ class SessionRepository:
                     device=cached.get("device"),
                     expires_at=expires_at,
                     revoked=bool(cached.get("revoked", False)),
-                    created_at=datetime.fromisoformat(str(cached["created_at"])),
-                    revoked_at=datetime.fromisoformat(cached["revoked_at"]) if cached.get("revoked_at") else None,
+                    created_at=self._as_utc(datetime.fromisoformat(str(cached["created_at"]))),
+                    revoked_at=self._as_utc(datetime.fromisoformat(cached["revoked_at"])) if cached.get("revoked_at") else None,
                 )
         result = await self.session.execute(
             select(SessionRecord).where(
@@ -89,6 +95,10 @@ class SessionRepository:
         )
         row = result.scalar_one_or_none()
         if row is not None:
+            row.expires_at = self._as_utc(row.expires_at)
+            row.created_at = self._as_utc(row.created_at)
+            if row.revoked_at is not None:
+                row.revoked_at = self._as_utc(row.revoked_at)
             ttl = max(1, int((row.expires_at - datetime.now(timezone.utc)).total_seconds()))
             await self.cache_service.set(self._cache_key(session_id), self._serialize(row), ttl=ttl)
         return row

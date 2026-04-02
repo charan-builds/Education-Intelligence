@@ -35,11 +35,14 @@ from app.domain.models.mentor_session_memory import MentorSessionMemory
 from app.domain.models.mentor_student import MentorStudent
 from app.domain.models.outbox_event import OutboxEvent
 from app.domain.models.api_client import APIClient
+from app.domain.models.auth_log import AuthLog
+from app.domain.models.auth_token import AuthToken
 from app.domain.models.plugin_registry import PluginRegistry
 from app.domain.models.processed_stream_event import ProcessedStreamEvent
 from app.domain.models.question import Question
 from app.domain.models.resource import Resource
 from app.domain.models.refresh_session import RefreshSession
+from app.domain.models.refresh_token import RefreshToken
 from app.domain.models.roadmap import Roadmap
 from app.domain.models.roadmap_step import RoadmapStep
 from app.domain.models.skill import Skill
@@ -59,6 +62,7 @@ from app.domain.models.user_answer import UserAnswer
 from app.domain.models.user_feature import UserFeature
 from app.domain.models.user_skill_vector import UserSkillVector
 from app.domain.models.user_tenant_role import UserTenantRole
+from app.domain.models.token_blacklist import TokenBlacklist
 
 __all__ = [
     "Base",
@@ -93,6 +97,8 @@ __all__ = [
     "MentorStudent",
     "OutboxEvent",
     "APIClient",
+    "AuthLog",
+    "AuthToken",
     "PluginRegistry",
     "ProcessedStreamEvent",
     "Goal",
@@ -108,6 +114,7 @@ __all__ = [
     "Question",
     "Resource",
     "RefreshSession",
+    "RefreshToken",
     "Skill",
     "SocialFollow",
     "SubscriptionPlan",
@@ -120,6 +127,7 @@ __all__ = [
     "UserFeature",
     "UserSkillVector",
     "UserTenantRole",
+    "TokenBlacklist",
     "Roadmap",
     "RoadmapStep",
 ]
