@@ -58,7 +58,7 @@ def test_record_task_retry_increments_counter(monkeypatch):
     assert metric.increments == [{"task_name": "jobs.generate_roadmap", "amount": 1.0}]
 
 
-def test_run_async_reuses_worker_event_loop():
+def test_run_async_executes_coroutines_safely_per_call():
     first = _run_async(_return_marker("first"))
     second = _run_async(_return_marker("second"))
 

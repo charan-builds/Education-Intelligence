@@ -26,6 +26,7 @@ from app.core.security import (
 )
 from app.domain.models.auth_token import AuthTokenPurpose
 from app.domain.models.user import User, UserRole
+from app.domain.services import auth_rules
 from app.infrastructure.repositories.auth_token_repository import AuthTokenRepository
 from app.infrastructure.repositories.auth_log_repository import AuthLogRepository
 from app.infrastructure.repositories.refresh_token_repository import RefreshTokenRepository
@@ -239,7 +240,8 @@ class AuthService:
             raise UnauthorizedError("Invalid credentials")
         user.failed_login_attempts = 0
         user.locked_until = None
-        if not bool(getattr(user, "is_email_verified", False) or getattr(user, "email_verified_at", None)):
+        login_state = auth_rules.determine_login_state(user)
+        if not login_state.email_verified:
             await self._log_auth_event(
                 tenant_id=resolved_tenant_id,
                 user_id=int(user.id),
@@ -251,7 +253,7 @@ class AuthService:
                 detail="Email not verified",
             )
             raise UnauthorizedError("Email not verified")
-        if bool(getattr(user, "mfa_enabled", False)):
+        if login_state.mfa_required:
             secret = getattr(user, "mfa_secret", None)
             if not secret:
                 raise UnauthorizedError("MFA is enabled but not configured correctly")
@@ -264,7 +266,7 @@ class AuthService:
             tenant_id=resolved_tenant_id,
         )
         effective_role = membership.role if membership is not None else user.role
-        if not bool(getattr(user, "is_profile_completed", False)):
+        if login_state.requires_profile_completion:
             token_version = await self._next_token_version(user_id=int(user.id))
             onboarding_access_token, _, _ = await self.session_service.create_session_tokens(
                 user=user,
@@ -752,7 +754,9 @@ class AuthService:
         user_agent: str | None,
     ) -> None:
         if user is not None:
-            user.failed_login_attempts = int(getattr(user, "failed_login_attempts", 0)) + 1
+            user.failed_login_attempts = auth_rules.increment_failed_login_attempts(
+                getattr(user, "failed_login_attempts", 0)
+            )
             user.locked_until = self.session_service.lockout_deadline(failed_attempts=user.failed_login_attempts)
         await self._log_auth_event(
             tenant_id=tenant_id,
@@ -774,7 +778,7 @@ class AuthService:
             if locked_until.tzinfo is None:
                 locked_until = locked_until.replace(tzinfo=timezone.utc)
                 user.locked_until = locked_until
-            if locked_until > datetime.now(timezone.utc):
+            if auth_rules.lockout_deadline_reached(locked_until=locked_until):
                 raise UnauthorizedError("Account locked. Try again later")
 
     @staticmethod

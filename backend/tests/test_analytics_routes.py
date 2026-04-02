@@ -1,14 +1,18 @@
 import asyncio
 from types import SimpleNamespace
 
+from fastapi import HTTPException
+
 from app.presentation.analytics_routes import (
     get_analytics_overview,
     get_learning_trends,
+    list_failed_analytics_jobs,
     get_platform_analytics_overview,
     get_precomputed_tenant_dashboard,
     get_precomputed_user_learning_summary,
     get_roadmap_progress_analytics,
     refresh_precomputed_analytics,
+    retry_failed_analytics_job,
     get_skill_vectors,
     get_student_performance_analytics,
     get_student_insights,
@@ -28,6 +32,12 @@ class StubAnalyticsService:
             "topic_mastery_distribution": {"beginner": 1, "needs_practice": 2, "mastered": 3},
             "diagnostic_completion_rate": 75.0,
             "roadmap_completion_rate": 42.0,
+            "meta": {
+                "status": "ready",
+                "last_updated": "2026-03-27T00:00:00Z",
+                "is_rebuilding": False,
+                "estimated_time": None,
+            },
         }
 
     async def roadmap_progress_summary(self, tenant_id: int, *, limit: int = 20, offset: int = 0):
@@ -55,12 +65,24 @@ class StubAnalyticsService:
                 "next_offset": None,
                 "next_cursor": None,
             },
+            "snapshot_meta": {
+                "status": "ready",
+                "last_updated": "2026-03-27T00:00:00Z",
+                "is_rebuilding": False,
+                "estimated_time": None,
+            },
         }
 
     async def topic_mastery_summary(self, tenant_id: int):
         return {
             "tenant_id": tenant_id,
             "topic_mastery_distribution": {"beginner": 4, "needs_practice": 5, "mastered": 6},
+            "meta": {
+                "status": "ready",
+                "last_updated": "2026-03-27T00:00:00Z",
+                "is_rebuilding": False,
+                "estimated_time": None,
+            },
         }
 
     async def platform_overview(self):
@@ -92,9 +114,17 @@ class StubAnalyticsService:
                     "average_mastery_percent": 70,
                 }
             ],
+            "meta": {
+                "status": "ready",
+                "last_updated": "2026-03-27T00:00:00Z",
+                "is_rebuilding": False,
+                "estimated_time": None,
+            },
         }
 
     async def student_performance_analytics(self, *, tenant_id: int, user_id: int):
+        if user_id == 404:
+            raise ValueError("Student analytics snapshot not ready")
         return {
             "tenant_id": tenant_id,
             "user_id": user_id,
@@ -133,9 +163,17 @@ class StubAnalyticsService:
                 "topic_mastery_heatmap": "select ...",
                 "performance_trend": "select ...",
             },
+            "meta": {
+                "status": "ready",
+                "last_updated": "2026-03-27T00:00:00Z",
+                "is_rebuilding": False,
+                "estimated_time": None,
+            },
         }
 
     async def topic_performance_analytics(self, *, tenant_id: int, topic_id: int):
+        if topic_id == 404:
+            raise ValueError("Topic analytics snapshot not ready")
         return {
             "tenant_id": tenant_id,
             "topic_id": topic_id,
@@ -167,6 +205,50 @@ class StubAnalyticsService:
                 "learner_summary": "select ...",
                 "performance_trend": "select ...",
             },
+            "meta": {
+                "status": "ready",
+                "last_updated": "2026-03-27T00:00:00Z",
+                "is_rebuilding": False,
+                "estimated_time": None,
+            },
+        }
+
+    def empty_student_performance_analytics(self, *, tenant_id: int, user_id: int):
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "learning_efficiency_score": 0.0,
+            "topic_mastery_heatmap": [],
+            "weak_topics": [],
+            "performance_trend": [],
+            "sql_queries": {},
+            "meta": {
+                "status": "pending",
+                "last_updated": None,
+                "is_rebuilding": True,
+                "estimated_time": 30,
+            },
+        }
+
+    async def empty_topic_performance_analytics(self, *, tenant_id: int, topic_id: int):
+        return {
+            "tenant_id": tenant_id,
+            "topic_id": topic_id,
+            "topic_name": f"Topic {topic_id}",
+            "learner_count": 0,
+            "average_mastery_score": 0.0,
+            "average_accuracy": 0.0,
+            "average_time_taken_seconds": 0.0,
+            "learning_efficiency_score": 0.0,
+            "weakest_learners": [],
+            "performance_trend": [],
+            "sql_queries": {},
+            "meta": {
+                "status": "pending",
+                "last_updated": None,
+                "is_rebuilding": True,
+                "estimated_time": 30,
+            },
         }
 
 
@@ -178,6 +260,7 @@ def test_get_analytics_overview(monkeypatch):
 
     assert response["tenant_id"] == 9
     assert response["topic_mastery_distribution"]["mastered"] == 3
+    assert response["meta"]["status"] == "ready"
 
 
 def test_get_roadmap_progress_analytics(monkeypatch):
@@ -195,6 +278,7 @@ def test_get_roadmap_progress_analytics(monkeypatch):
     assert response["tenant_id"] == 4
     assert response["student_count"] == 1
     assert response["learners"][0]["completion_percent"] == 50
+    assert response["snapshot_meta"]["status"] == "ready"
 
 
 def test_get_topic_mastery_analytics(monkeypatch):
@@ -205,6 +289,7 @@ def test_get_topic_mastery_analytics(monkeypatch):
 
     assert response["tenant_id"] == 7
     assert response["topic_mastery_distribution"]["mastered"] == 6
+    assert response["meta"]["status"] == "ready"
 
 
 def test_get_platform_analytics_overview(monkeypatch):
@@ -215,6 +300,7 @@ def test_get_platform_analytics_overview(monkeypatch):
     assert response["tenant_count"] == 3
     assert response["student_count"] == 12
     assert response["tenant_breakdown"][0]["tenant_name"] == "Acme"
+    assert response["meta"]["status"] == "ready"
 
 
 class StubSkillVectorService:
@@ -294,6 +380,7 @@ def test_student_performance_analytics_endpoint(monkeypatch):
     assert response["user_id"] == 11
     assert response["learning_efficiency_score"] == 78.4
     assert response["topic_mastery_heatmap"][0]["topic_name"] == "SQL"
+    assert response["meta"]["status"] == "ready"
 
 
 def test_topic_performance_analytics_endpoint(monkeypatch):
@@ -305,6 +392,107 @@ def test_topic_performance_analytics_endpoint(monkeypatch):
     assert response["topic_id"] == 4
     assert response["topic_name"] == "SQL"
     assert response["weakest_learners"][0]["user_id"] == 11
+    assert response["meta"]["status"] == "ready"
+
+
+def test_student_performance_analytics_queues_when_snapshot_missing(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsService", StubAnalyticsService)
+    queued = {}
+
+    class _Cache:
+        async def acquire_lock(self, key: str, *, ttl: int):
+            queued["lock_key"] = key
+            queued["ttl"] = ttl
+            return "token-1"
+
+        async def release_lock(self, key: str, token: str | None = None):
+            queued["released"] = (key, token)
+            return True
+
+    monkeypatch.setattr("app.presentation.analytics_routes.CacheService", lambda: _Cache())
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes.enqueue_job_with_options",
+        lambda task_name, *, args=None, kwargs=None, countdown=None: queued.update(
+            {"task_name": task_name, "kwargs": kwargs, "countdown": countdown}
+        )
+        or True,
+    )
+    current_user = SimpleNamespace(tenant_id=7)
+
+    response = asyncio.run(get_student_performance_analytics(user_id=404, db=object(), current_user=current_user))
+
+    assert response["user_id"] == 404
+    assert response["topic_mastery_heatmap"] == []
+    assert response["meta"] == {"status": "pending", "last_updated": None, "is_rebuilding": True, "estimated_time": 30}
+    assert queued["task_name"] == "jobs.refresh_student_analytics"
+    assert queued["kwargs"] == {
+        "tenant_id": 7,
+        "user_id": 404,
+        "dispatch_lock_key": "analytics:student:404",
+        "dispatch_lock_token": "token-1",
+    }
+    assert queued["lock_key"] == "analytics:student:404"
+
+
+def test_topic_performance_analytics_queues_when_snapshot_missing(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsService", StubAnalyticsService)
+    queued = {}
+
+    class _Cache:
+        async def acquire_lock(self, key: str, *, ttl: int):
+            queued["lock_key"] = key
+            return "token-2"
+
+        async def release_lock(self, key: str, token: str | None = None):
+            queued["released"] = (key, token)
+            return True
+
+    monkeypatch.setattr("app.presentation.analytics_routes.CacheService", lambda: _Cache())
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes.enqueue_job_with_options",
+        lambda task_name, *, args=None, kwargs=None, countdown=None: queued.update(
+            {"task_name": task_name, "kwargs": kwargs, "countdown": countdown}
+        )
+        or True,
+    )
+    current_user = SimpleNamespace(tenant_id=7)
+
+    response = asyncio.run(get_topic_performance_analytics(topic_id=404, db=object(), current_user=current_user))
+
+    assert response["topic_id"] == 404
+    assert response["weakest_learners"] == []
+    assert response["meta"] == {"status": "pending", "last_updated": None, "is_rebuilding": True, "estimated_time": 30}
+    assert queued["task_name"] == "jobs.refresh_topic_analytics"
+    assert queued["kwargs"] == {
+        "tenant_id": 7,
+        "topic_id": 404,
+        "dispatch_lock_key": "analytics:topic:404",
+        "dispatch_lock_token": "token-2",
+    }
+    assert queued["lock_key"] == "analytics:topic:404"
+
+
+def test_student_performance_analytics_does_not_enqueue_duplicate_when_lock_exists(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsService", StubAnalyticsService)
+    called = {"enqueued": False}
+
+    class _Cache:
+        async def acquire_lock(self, key: str, *, ttl: int):
+            return None
+
+    monkeypatch.setattr("app.presentation.analytics_routes.CacheService", lambda: _Cache())
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes.enqueue_job_with_options",
+        lambda *args, **kwargs: called.update({"enqueued": True}) or True,
+    )
+
+    response = asyncio.run(
+        get_student_performance_analytics(user_id=404, db=object(), current_user=SimpleNamespace(tenant_id=7))
+    )
+
+    assert response["user_id"] == 404
+    assert response["meta"] == {"status": "pending", "last_updated": None, "is_rebuilding": True, "estimated_time": 30}
+    assert called["enqueued"] is False
 
 
 class StubPrecomputedAnalyticsService:
@@ -341,6 +529,14 @@ class StubPrecomputedAnalyticsService:
 
 def test_precomputed_analytics_endpoints(monkeypatch):
     monkeypatch.setattr("app.presentation.analytics_routes.PrecomputedAnalyticsService", StubPrecomputedAnalyticsService)
+    queued = {}
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes.enqueue_job_with_options",
+        lambda task_name, *, args=None, kwargs=None, countdown=None: queued.update(
+            {"task_name": task_name, "args": args, "kwargs": kwargs, "countdown": countdown}
+        )
+        or True,
+    )
 
     class _Db:
         async def commit(self):
@@ -352,9 +548,105 @@ def test_precomputed_analytics_endpoints(monkeypatch):
 
     tenant_snapshot = asyncio.run(get_precomputed_tenant_dashboard(db=_Db(), current_user=teacher))
     assert tenant_snapshot["active_learners"] == 14
+    assert tenant_snapshot["meta"] == {
+        "status": "ready",
+        "last_updated": "2026-03-27T00:00:00Z",
+        "is_rebuilding": False,
+        "estimated_time": None,
+    }
 
     user_snapshot = asyncio.run(get_precomputed_user_learning_summary(db=_Db(), current_user=learner))
     assert user_snapshot["average_score"] == 72.5
+    assert user_snapshot["meta"] == {
+        "status": "ready",
+        "last_updated": "2026-03-27T00:00:00Z",
+        "is_rebuilding": False,
+        "estimated_time": None,
+    }
 
     refresh_result = asyncio.run(refresh_precomputed_analytics(db=_Db(), current_user=admin))
-    assert refresh_result["refreshed_users"] == 11
+    assert refresh_result == {"status": "queued", "tenant_id": 6}
+    assert queued["task_name"] == "jobs.refresh_precomputed_analytics"
+    assert queued["kwargs"] == {"tenant_id": 6}
+
+
+class StubDeadLetterRepository:
+    def __init__(self, _db):
+        self.db = _db
+
+    async def list_recent_by_source_type(self, *, source_type: str, tenant_id: int | None, limit: int = 100):
+        assert source_type == "analytics_job"
+        return [
+            SimpleNamespace(
+                id=91,
+                tenant_id=tenant_id,
+                source_type="analytics_job",
+                event_type="jobs.refresh_student_analytics",
+                payload_json='{"tenant_id":7,"user_id":33}',
+                error_message="projection failed",
+                attempts=4,
+                created_at=SimpleNamespace(isoformat=lambda: "2026-04-02T00:00:00+00:00"),
+            )
+        ]
+
+    async def get_by_id(self, *, dead_letter_id: int, tenant_id: int | None = None):
+        if dead_letter_id == 91:
+            return SimpleNamespace(
+                id=91,
+                tenant_id=tenant_id,
+                source_type="analytics_job",
+                event_type="jobs.refresh_student_analytics",
+                payload_json='{"tenant_id":7,"user_id":33}',
+            )
+        return None
+
+
+def test_list_failed_analytics_jobs(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.DeadLetterRepository", StubDeadLetterRepository)
+
+    result = asyncio.run(
+        list_failed_analytics_jobs(
+            limit=20,
+            db=object(),
+            current_user=SimpleNamespace(role=SimpleNamespace(value="admin"), tenant_id=7),
+        )
+    )
+
+    assert result["items"][0]["job_name"] == "jobs.refresh_student_analytics"
+    assert result["items"][0]["payload"]["user_id"] == 33
+
+
+def test_retry_failed_analytics_job(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.DeadLetterRepository", StubDeadLetterRepository)
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes._enqueue_deduplicated_analytics_job",
+        lambda **kwargs: asyncio.sleep(0, result=True),
+    )
+
+    result = asyncio.run(
+        retry_failed_analytics_job(
+            dead_letter_id=91,
+            db=object(),
+            current_user=SimpleNamespace(role=SimpleNamespace(value="admin"), tenant_id=7),
+        )
+    )
+
+    assert result["status"] == "queued"
+    assert result["job_name"] == "jobs.refresh_student_analytics"
+
+
+def test_retry_failed_analytics_job_missing(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.DeadLetterRepository", StubDeadLetterRepository)
+
+    try:
+        asyncio.run(
+            retry_failed_analytics_job(
+                dead_letter_id=999,
+                db=object(),
+                current_user=SimpleNamespace(role=SimpleNamespace(value="admin"), tenant_id=7),
+            )
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:
+        assert False, "Expected HTTPException"

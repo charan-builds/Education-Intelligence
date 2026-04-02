@@ -59,6 +59,11 @@ outbox_dispatched_total = Counter(
     "Total outbox events successfully dispatched to queue",
 )
 
+outbox_processed_total = Counter(
+    "outbox_processed_total",
+    "Total outbox events confirmed as successfully processed by a consumer",
+)
+
 outbox_failed_total = Counter(
     "outbox_failed_total",
     "Total outbox dispatch failures",
@@ -146,6 +151,18 @@ event_processing_duration_seconds = Histogram(
     ["task_name", "status"],
 )
 
+domain_event_consumer_total = Counter(
+    "domain_event_consumer_total",
+    "Domain event consumer outcomes by event and status",
+    ["event_name", "status"],
+)
+
+domain_event_retry_total = Counter(
+    "domain_event_retry_total",
+    "Domain event retries scheduled by event name",
+    ["event_name"],
+)
+
 queue_wait_duration_seconds = Histogram(
     "queue_wait_duration_seconds",
     "Time a task spent queued before execution",
@@ -156,6 +173,36 @@ task_retries_total = Counter(
     "task_retries_total",
     "Background task retries",
     ["task_name"],
+)
+
+analytics_rebuild_jobs_total = Counter(
+    "analytics_rebuild_jobs_total",
+    "Analytics rebuild job outcomes by job name and status",
+    ["job_name", "status"],
+)
+
+analytics_rebuild_retries_total = Counter(
+    "analytics_rebuild_retries_total",
+    "Analytics rebuild retries scheduled by job name",
+    ["job_name"],
+)
+
+analytics_rebuild_dead_total = Counter(
+    "analytics_rebuild_dead_total",
+    "Analytics rebuild jobs moved to dead letter by job name",
+    ["job_name"],
+)
+
+super_admin_sessions_total = Counter(
+    "super_admin_sessions_total",
+    "Super-admin database sessions opened, labeled by explicit reason",
+    ["reason"],
+)
+
+super_admin_sessions_active = Gauge(
+    "super_admin_sessions_active",
+    "Currently active super-admin database sessions",
+    ["reason"],
 )
 
 circuit_breaker_state = Gauge(

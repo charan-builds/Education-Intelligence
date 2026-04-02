@@ -10,7 +10,7 @@ from app.core.security import (
     decode_access_token,
     get_token_from_headers_and_cookies,
 )
-from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.database import open_tenant_session
 from app.infrastructure.repositories.community_repository import CommunityRepository
 from app.infrastructure.repositories.mentor_chat_repository import MentorChatRepository
 from app.realtime.hub import realtime_hub
@@ -23,13 +23,13 @@ PRIVILEGED_REALTIME_ROLES = {"teacher", "mentor", "admin", "super_admin"}
 async def _can_join_community(*, tenant_id: int, user_id: int, role: str | None, community_id: int) -> bool:
     if role in PRIVILEGED_REALTIME_ROLES:
         return True
-    async with AsyncSessionLocal() as session:
+    async with open_tenant_session(tenant_id=tenant_id, role=role or "student", actor_user_id=user_id) as session:
         membership = await CommunityRepository(session).get_member(tenant_id, community_id, user_id)
         return membership is not None
 
 
 async def _can_join_thread(*, tenant_id: int, user_id: int, role: str | None, thread_id: int) -> bool:
-    async with AsyncSessionLocal() as session:
+    async with open_tenant_session(tenant_id=tenant_id, role=role or "student", actor_user_id=user_id) as session:
         repository = CommunityRepository(session)
         thread = await repository.get_thread(tenant_id, thread_id)
         if thread is None:
@@ -151,7 +151,7 @@ async def realtime_websocket(websocket: WebSocket) -> None:
                     continue
 
                 await websocket.send_json({"type": "mentor.response.started", "request_id": request_id})
-                async with AsyncSessionLocal() as session:
+                async with open_tenant_session(tenant_id=tenant_id, role=role or "student", actor_user_id=user_id) as session:
                     repository = MentorChatRepository(session)
                     # Persist inbound message immediately; if the websocket disconnects mid-stream,
                     # the queued job can still generate the outbound response.

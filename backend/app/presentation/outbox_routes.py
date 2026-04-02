@@ -18,7 +18,7 @@ router = APIRouter(prefix="/ops/outbox", tags=["ops"])
 
 @router.get("", response_model=OutboxEventPageResponse)
 async def list_outbox_events(
-    event_status: str = Query("pending", pattern="^(pending|processing|dead|dispatched)$"),
+    event_status: str = Query("queued", pattern="^(queued|dispatched|processed|failed|dead|pending|processing)$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db_session),
@@ -27,9 +27,10 @@ async def list_outbox_events(
     if current_user.role.value not in {"admin", "super_admin"}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
+    normalized_status = {"pending": "queued", "processing": "dispatched"}.get(event_status, event_status)
     tenant_scope = None if current_user.role.value == "super_admin" else int(current_user.tenant_id)
     items = await OutboxService(db).list_events(
-        status=event_status,
+        status=normalized_status,
         tenant_id=tenant_scope,
         limit=limit,
         offset=offset,

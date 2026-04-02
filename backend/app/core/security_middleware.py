@@ -108,8 +108,10 @@ class CommunityAuthMiddleware(BaseHTTPMiddleware):
 class TenantContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         settings = get_settings()
-        actor_tenant_id = settings.default_tenant_id
-        tenant_id = settings.default_tenant_id
+        actor_tenant_id: int | None = settings.default_tenant_id
+        tenant_id: int | None = settings.default_tenant_id
+        tenant_role = "anonymous"
+        actor_user_id: int | None = None
 
         token = get_token_from_headers_and_cookies(
             request.headers,
@@ -120,15 +122,25 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             try:
                 payload = decode_access_token(token)
                 token_tenant_id = payload.get("tenant_id")
+                token_role = payload.get("role")
+                token_user_id = payload.get("sub")
                 if token_tenant_id is not None:
                     actor_tenant_id = int(token_tenant_id)
                     tenant_id = actor_tenant_id
+                if token_role is not None:
+                    tenant_role = str(token_role)
+                if token_user_id is not None:
+                    actor_user_id = int(token_user_id)
             except (AuthenticationError, TypeError, ValueError):
                 actor_tenant_id = settings.default_tenant_id
                 tenant_id = settings.default_tenant_id
+                tenant_role = "anonymous"
+                actor_user_id = None
 
         request.state.actor_tenant_id = actor_tenant_id
         request.state.tenant_id = tenant_id
+        request.state.tenant_role = tenant_role
+        request.state.actor_user_id = actor_user_id
         return await call_next(request)
 
 

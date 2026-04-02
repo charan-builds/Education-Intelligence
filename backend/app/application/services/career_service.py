@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.ai_request_service import AIRequestService
 from app.domain.engines.career_path_planner import CareerPathPlanner
 from app.domain.engines.job_readiness_engine import JobReadinessEngine
 from app.domain.engines.skill_graph_engine import SkillGraphEngine
@@ -13,7 +14,6 @@ from app.domain.models.learning_event import LearningEvent
 from app.domain.models.skill import Skill
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User
-from app.infrastructure.clients.ai_service_client import AIServiceClient
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
 
 
@@ -24,7 +24,7 @@ class CareerService:
         self.skill_graph_engine = SkillGraphEngine(session, tenant_id=1)
         self.job_readiness_engine = JobReadinessEngine()
         self.career_path_planner = CareerPathPlanner()
-        self.ai_service_client = AIServiceClient()
+        self.ai_request_service = AIRequestService(session)
 
     async def _skill_progress(self, *, user_id: int, tenant_id: int) -> dict:
         self.skill_graph_engine.tenant_id = tenant_id
@@ -157,7 +157,22 @@ class CareerService:
         )
 
     async def get_interview_prep(self, *, user_id: int, tenant_id: int, role_name: str, difficulty: str, count: int) -> dict:
-        questions = await self.ai_service_client.generate_questions(topic=role_name, difficulty=difficulty, count=count)
+        queued = await self.ai_request_service.queue_career_interview_prep(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            role_name=role_name,
+            difficulty=difficulty,
+            count=count,
+        )
+        resolved = await self.ai_request_service.get_result(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            request_id=str(queued["request_id"]),
+        )
+        questions = (resolved or {}).get("result") or AIRequestService._fallback_result(
+            request_type=AIRequestService.TYPE_CAREER_INTERVIEW_PREP,
+            payload={"role_name": role_name, "difficulty": difficulty, "count": count},
+        )
         skill_progress = await self._skill_progress(user_id=user_id, tenant_id=tenant_id)
         return {
             "role_name": role_name,

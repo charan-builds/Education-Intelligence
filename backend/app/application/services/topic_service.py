@@ -1,45 +1,76 @@
 import csv
 import io
+import inspect
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.ai_request_service import AIRequestService
 from app.application.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.feature_flags import FeatureFlagService
-from app.infrastructure.clients.ai_service_client import AIServiceClient
 from app.infrastructure.repositories.topic_repository import TopicRepository
 
 
 class TopicService:
     def __init__(self, session: AsyncSession):
+        self.session = session
         self.repository = TopicRepository(session)
-        self.ai_service_client = AIServiceClient()
+        self.ai_request_service = AIRequestService(session)
         self.feature_flag_service = FeatureFlagService(session)
 
+    @staticmethod
+    async def _call_with_optional_tenant(method, *args, tenant_id: int, **kwargs):
+        try:
+            signature = inspect.signature(method)
+            if "tenant_id" in signature.parameters:
+                kwargs["tenant_id"] = tenant_id
+        except (TypeError, ValueError):
+            pass
+        return await method(*args, **kwargs)
+
+    async def _invalidate_topics_cache_if_supported(self, tenant_id: int) -> None:
+        invalidate = getattr(self.repository, "invalidate_topics_cache", None)
+        if invalidate is None:
+            return
+        await self._call_with_optional_tenant(invalidate, tenant_id=tenant_id)
+
     async def _repo_get_topic(self, topic_id: int, tenant_id: int):
-        return await self.repository.get_topic(topic_id, tenant_id=tenant_id)
+        return await self._call_with_optional_tenant(self.repository.get_topic, topic_id, tenant_id=tenant_id)
 
     async def _repo_get_topic_by_name(self, tenant_id: int, name: str):
-        return await self.repository.get_topic_by_name(tenant_id, name)
+        method = self.repository.get_topic_by_name
+        try:
+            signature = inspect.signature(method)
+            if "tenant_id" in signature.parameters:
+                return await method(name, tenant_id=tenant_id)
+        except (TypeError, ValueError):
+            pass
+        return await method(name)
 
     async def _repo_list_questions_for_topic(self, topic_id: int, tenant_id: int):
-        return await self.repository.list_questions_for_topic(topic_id, tenant_id=tenant_id)
+        return await self._call_with_optional_tenant(
+            self.repository.list_questions_for_topic,
+            topic_id,
+            tenant_id=tenant_id,
+        )
 
     async def _repo_list_questions(self, *, limit: int, offset: int, tenant_id: int, topic_id: int | None, question_type: str | None, search: str | None):
-        return await self.repository.list_questions(
+        return await self._call_with_optional_tenant(
+            self.repository.list_questions,
             limit=limit,
             offset=offset,
-            tenant_id=tenant_id,
             topic_id=topic_id,
             question_type=question_type,
             search=search,
+            tenant_id=tenant_id,
         )
 
     async def _repo_count_questions(self, *, tenant_id: int, topic_id: int | None, question_type: str | None, search: str | None):
-        return await self.repository.count_questions(
-            tenant_id=tenant_id,
+        return await self._call_with_optional_tenant(
+            self.repository.count_questions,
             topic_id=topic_id,
             question_type=question_type,
             search=search,
+            tenant_id=tenant_id,
         )
 
     async def list_topics_page(self, limit: int, offset: int, tenant_id: int = 1) -> dict:
@@ -91,8 +122,22 @@ class TopicService:
             ],
         }
 
-    async def explain_topic(self, *, tenant_id: int, topic_name: str) -> dict:
-        data = await self.ai_service_client.explain_topic(topic_name=topic_name)
+    async def explain_topic(self, *, tenant_id: int, user_id: int, topic_name: str) -> dict:
+        queued = await self.ai_request_service.queue_topic_explanation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            topic_name=topic_name,
+        )
+        request_id = str(queued["request_id"])
+        resolved = await self.ai_request_service.get_result(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            request_id=request_id,
+        )
+        data = (resolved or {}).get("result") or AIRequestService._fallback_result(
+            request_type=AIRequestService.TYPE_TOPIC_EXPLANATION,
+            payload={"topic_name": topic_name},
+        )
         guidance = data.get("guidance") or {}
         return {
             "topic_name": data.get("topic_name") or topic_name,
@@ -107,6 +152,7 @@ class TopicService:
         self,
         *,
         tenant_id: int,
+        user_id: int,
         topic: str,
         difficulty: str,
         count: int,
@@ -114,7 +160,23 @@ class TopicService:
         enabled = await self.feature_flag_service.is_enabled("ai_question_generation_enabled", tenant_id)
         if not enabled:
             raise ValidationError("AI question generation is disabled for this tenant")
-        data = await self.ai_service_client.generate_questions(topic=topic, difficulty=difficulty, count=count)
+        queued = await self.ai_request_service.queue_topic_question_generation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            topic=topic,
+            difficulty=difficulty,
+            count=count,
+        )
+        request_id = str(queued["request_id"])
+        resolved = await self.ai_request_service.get_result(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            request_id=request_id,
+        )
+        data = (resolved or {}).get("result") or AIRequestService._fallback_result(
+            request_type=AIRequestService.TYPE_TOPIC_QUESTION_GENERATION,
+            payload={"topic": topic, "difficulty": difficulty, "count": count},
+        )
         guidance = data.get("guidance") or {}
         return {
             "topic": data.get("topic") or topic,
@@ -128,13 +190,14 @@ class TopicService:
         normalized_name = name.strip()
         if await self._repo_get_topic_by_name(tenant_id, normalized_name) is not None:
             raise ConflictError("Topic name already exists")
-        topic = await self.repository.create_topic(
-            tenant_id=tenant_id,
+        topic = await self._call_with_optional_tenant(
+            self.repository.create_topic,
             name=normalized_name,
             description=description.strip(),
+            tenant_id=tenant_id,
         )
         await self.repository.session.commit()
-        await self.repository.invalidate_topics_cache(tenant_id)
+        await self._invalidate_topics_cache_if_supported(tenant_id)
         return topic
 
     async def update_topic(self, topic_id: int, tenant_id: int = 1, *, name: str | None = None, description: str | None = None):
@@ -154,7 +217,7 @@ class TopicService:
 
         updated = await self.repository.update_topic(topic, **updates)
         await self.repository.session.commit()
-        await self.repository.invalidate_topics_cache(tenant_id)
+        await self._invalidate_topics_cache_if_supported(tenant_id)
         return updated
 
     async def delete_topic(self, topic_id: int, tenant_id: int = 1) -> None:
@@ -165,16 +228,21 @@ class TopicService:
             raise ValidationError("Cannot delete a topic that still has questions")
         await self.repository.delete_topic(topic)
         await self.repository.session.commit()
-        await self.repository.invalidate_topics_cache(tenant_id)
+        await self._invalidate_topics_cache_if_supported(tenant_id)
 
     async def list_prerequisites_page(self, limit: int, offset: int, tenant_id: int = 1, topic_id: int | None = None) -> dict:
-        items = await self.repository.list_prerequisite_links(
+        items = await self._call_with_optional_tenant(
+            self.repository.list_prerequisite_links,
             limit=limit,
             offset=offset,
             topic_id=topic_id,
             tenant_id=tenant_id,
         )
-        total = await self.repository.count_prerequisite_links(topic_id=topic_id, tenant_id=tenant_id)
+        total = await self._call_with_optional_tenant(
+            self.repository.count_prerequisite_links,
+            topic_id=topic_id,
+            tenant_id=tenant_id,
+        )
         next_offset = offset + limit if (offset + limit) < total else None
         return {
             "items": items,
@@ -196,7 +264,8 @@ class TopicService:
         if topic is None or prerequisite is None:
             raise NotFoundError("Topic not found")
 
-        prerequisite_link = await self.repository.get_prerequisite_link(
+        prerequisite_link = await self._call_with_optional_tenant(
+            self.repository.get_prerequisite_link,
             topic_id,
             prerequisite_topic_id,
             tenant_id=tenant_id,
@@ -205,7 +274,10 @@ class TopicService:
             raise ConflictError("Prerequisite link already exists")
 
         # Prevent cycles by ensuring the prerequisite does not already depend on the topic.
-        graph_edges = await self.repository.get_prerequisite_edges(tenant_id=tenant_id)
+        graph_edges = await self._call_with_optional_tenant(
+            self.repository.get_prerequisite_edges,
+            tenant_id=tenant_id,
+        )
         graph: dict[int, set[int]] = {}
         for child_id, parent_id in graph_edges:
             graph.setdefault(child_id, set()).add(parent_id)
@@ -226,7 +298,11 @@ class TopicService:
         return link
 
     async def delete_prerequisite(self, prerequisite_id: int, tenant_id: int = 1) -> None:
-        link = await self.repository.get_prerequisite_link_by_id(prerequisite_id, tenant_id=tenant_id)
+        link = await self._call_with_optional_tenant(
+            self.repository.get_prerequisite_link_by_id,
+            prerequisite_id,
+            tenant_id=tenant_id,
+        )
         if link is None:
             raise NotFoundError("Prerequisite link not found")
         await self.repository.delete_prerequisite_link(link)
@@ -301,13 +377,17 @@ class TopicService:
             raise
 
     async def update_question(self, question_id: int, tenant_id: int = 1, **updates):
-        question = await self.repository.get_question(question_id, tenant_id=tenant_id)
+        question = await self._call_with_optional_tenant(
+            self.repository.get_question,
+            question_id,
+            tenant_id=tenant_id,
+        )
         if question is None:
             raise NotFoundError("Question not found")
         try:
             updated = await self.repository.update_question(
                 question,
-                **{key: value for key, value in updates.items() if value is not None},
+                **updates,
             )
             await self.repository.session.commit()
             return updated
@@ -319,7 +399,11 @@ class TopicService:
             raise
 
     async def delete_question(self, question_id: int, tenant_id: int = 1) -> None:
-        question = await self.repository.get_question(question_id, tenant_id=tenant_id)
+        question = await self._call_with_optional_tenant(
+            self.repository.get_question,
+            question_id,
+            tenant_id=tenant_id,
+        )
         if question is None:
             raise NotFoundError("Question not found")
         await self.repository.delete_question(question)

@@ -69,6 +69,11 @@ celery_app.conf.update(
             "schedule": 300.0,
             "kwargs": {"limit_users": 250},
         },
+        "refresh-active-user-analytics-every-5m": {
+            "task": "jobs.refresh_active_user_analytics",
+            "schedule": 300.0,
+            "kwargs": {"limit_users": 50, "tenant_limit": 25},
+        },
     },
 )
 

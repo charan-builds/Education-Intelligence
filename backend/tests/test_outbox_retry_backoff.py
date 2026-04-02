@@ -17,17 +17,18 @@ def test_outbox_retry_uses_exponential_backoff():
             tenant_id=1,
             event_type="celery_task",
             payload_json="{}",
-            status="pending",
+            status="queued",
             attempts=0,
             error_message=None,
             created_at=datetime.now(timezone.utc),
             available_at=datetime.now(timezone.utc),
             dispatched_at=None,
+            processed_at=None,
         )
 
         await repository.mark_failed(event, "first failure", retry_delay_seconds=10, max_attempts=5)
         first_delay = (event.available_at - datetime.now(timezone.utc)).total_seconds()
-        assert event.status == "pending"
+        assert event.status == "failed"
         assert 8 <= first_delay <= 12
 
         await repository.mark_failed(event, "second failure", retry_delay_seconds=10, max_attempts=5)

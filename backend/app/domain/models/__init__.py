@@ -3,6 +3,7 @@ from app.domain.models.audit_log import AuditLog
 from app.domain.models.authorization_policy import AuthorizationPolicy
 from app.domain.models.badge import Badge
 from app.domain.models.analytics_snapshot import AnalyticsSnapshot
+from app.domain.models.ai_request import AIRequest
 from app.domain.models.community import Community
 from app.domain.models.community_member import CommunityMember
 from app.domain.models.content_metadata import ContentMetadata
@@ -12,6 +13,7 @@ from app.domain.models.diagnostic_test import DiagnosticTest
 from app.domain.models.discussion_thread import DiscussionThread
 from app.domain.models.experiment import Experiment
 from app.domain.models.experiment_variant import ExperimentVariant
+from app.domain.models.event_consumer_state import EventConsumerState
 from app.domain.models.feature_flag import FeatureFlag
 from app.domain.models.file_asset import FileAsset
 from app.domain.models.goal import Goal
@@ -67,6 +69,7 @@ from app.domain.models.token_blacklist import TokenBlacklist
 __all__ = [
     "Base",
     "AnalyticsSnapshot",
+    "AIRequest",
     "AuditLog",
     "AuthorizationPolicy",
     "Tenant",
@@ -79,6 +82,7 @@ __all__ = [
     "DiscussionReply",
     "Experiment",
     "ExperimentVariant",
+    "EventConsumerState",
     "Badge",
     "FeatureFlag",
     "FileAsset",

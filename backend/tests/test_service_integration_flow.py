@@ -2,6 +2,9 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from fastapi import BackgroundTasks
+
+from app.application.services.analytics_service import AnalyticsService
 from app.application.services.auth_service import AuthService
 from app.application.services.diagnostic_service import DiagnosticService
 from app.application.services.roadmap_service import RoadmapService
@@ -24,6 +27,8 @@ class _User:
     email: str
     password_hash: str
     role: UserRole
+    is_email_verified: bool = False
+    is_profile_completed: bool = False
 
 
 @dataclass
@@ -68,6 +73,8 @@ class _Session:
 
     async def execute(self, _stmt):
         class _Result:
+            rowcount = 0
+
             @staticmethod
             def scalar_one_or_none():
                 return None
@@ -115,13 +122,26 @@ class _UserRepo:
                     return stored_user
         return None
 
-    async def create(self, tenant_id, email, password_hash, role, created_at):
+    async def create(
+        self,
+        tenant_id,
+        email,
+        password_hash,
+        role,
+        created_at,
+        full_name=None,
+        display_name=None,
+        is_email_verified=False,
+        is_profile_completed=False,
+    ):
         user = _User(
             id=self.next_id,
             tenant_id=tenant_id,
             email=email,
             password_hash=password_hash,
             role=role,
+            is_email_verified=bool(is_email_verified),
+            is_profile_completed=bool(is_profile_completed),
         )
         self.next_id += 1
         self.users[(tenant_id, email)] = user
@@ -158,7 +178,10 @@ class _LearningEventService:
         return None
 
     async def track_diagnostic_completed(self, **kwargs):
-        return None
+        return type("_DiagnosticEvent", (), {"id": 1})()
+
+    async def track_roadmap_generated(self, **kwargs):
+        return type("_RoadmapEvent", (), {"id": 1})()
 
 
 class _SkillVectorService:
@@ -176,6 +199,40 @@ class _MlPlatformService:
         return None
 
 
+class _AuditLogService:
+    async def record(self, **kwargs):
+        return None
+
+
+class _SessionService:
+    async def next_token_version(self, *, user_id: int) -> int:
+        return 1
+
+    async def create_session_tokens(self, *, user, tenant_id, role, device, ip_address, token_version, scope):
+        return ("access-token", "refresh-token", {"session_id": 1})
+
+
+class _OutboxService:
+    async def add_domain_event_message(self, **kwargs):
+        return None
+
+    async def add_task_event(self, **kwargs):
+        return None
+
+
+class _NotificationService:
+    async def create_notification(self, **kwargs):
+        return None
+
+
+class _GamificationService:
+    async def award_test_completion(self, **kwargs):
+        return None
+
+    async def get_profile(self, **kwargs):
+        return None
+
+
 class _FeatureFlagService:
     async def is_enabled(self, *args, **kwargs):
         return False
@@ -183,6 +240,34 @@ class _FeatureFlagService:
 
 class _CacheService:
     async def bump_namespace_version(self, *args, **kwargs):
+        return None
+
+
+class _EmailService:
+    def build_verification_email(self, *, to_email: str, verification_url: str):
+        return type(
+            "_EmailPayload",
+            (),
+            {
+                "to_email": to_email,
+                "subject": "Verify your email",
+                "html_content": verification_url,
+                "text_content": verification_url,
+            },
+        )()
+
+    async def send(self, payload):
+        return None
+
+
+class _AnalyticsPrecomputedService:
+    def __init__(self):
+        self.dashboard_payload = None
+
+    async def latest_tenant_dashboard(self, *, tenant_id: int):
+        return self.dashboard_payload
+
+    async def tenant_dashboard_from_materialized_view(self, *, tenant_id: int):
         return None
 
 
@@ -378,23 +463,30 @@ def test_end_to_end_service_flow_with_tenant_scope():
         auth = AuthService(session)
         auth.user_repository = user_repo
         auth.tenant_repository = tenant_repo
+        auth.email_service = _EmailService()
+        auth.audit_log_service = _AuditLogService()
+        auth.session_service = _SessionService()
 
         user = await auth.register(
             email="student@platform.local",
-            password="secret123",
+            password="Secret123!",
+            role=UserRole.student,
+            background_tasks=BackgroundTasks(),
         )
-        token, refresh_token, logged, role = await auth.login(
+        user.is_email_verified = True
+        user.is_profile_completed = True
+        login_result = await auth.login(
             email="student@platform.local",
-            password="secret123",
+            password="Secret123!",
             tenant_id=1,
         )
 
-        assert user.id == logged.id
-        assert role == UserRole.student
-        assert isinstance(token, str)
-        assert token
-        assert isinstance(refresh_token, str)
-        assert refresh_token
+        assert user.id == login_result.user.id
+        assert login_result.effective_role == UserRole.student
+        assert isinstance(login_result.access_token, str)
+        assert login_result.access_token
+        assert isinstance(login_result.refresh_token, str)
+        assert login_result.refresh_token
 
         diagnostic_repo = _DiagnosticRepo()
         topic_repo = _TopicRepo()
@@ -407,6 +499,9 @@ def test_end_to_end_service_flow_with_tenant_scope():
         diagnostic.skill_vector_service = _SkillVectorService()
         diagnostic.retention_service = _RetentionService()
         diagnostic.ml_platform_service = _MlPlatformService()
+        diagnostic.outbox_service = _OutboxService()
+        diagnostic.gamification_service = _GamificationService()
+        diagnostic.cache_service = _CacheService()
 
         test = await diagnostic.start_test(user_id=user.id, goal_id=1)
         await diagnostic.submit_answers(
@@ -430,6 +525,10 @@ def test_end_to_end_service_flow_with_tenant_scope():
         roadmap.roadmap_repository = roadmap_repo
         roadmap.feature_flag_service = _FeatureFlagService()
         roadmap.cache_service = _CacheService()
+        roadmap.learning_event_service = _LearningEventService()
+        roadmap.outbox_service = _OutboxService()
+        roadmap.notification_service = _NotificationService()
+        roadmap.gamification_service = _GamificationService()
 
         created = await roadmap.generate(user_id=user.id, tenant_id=1, goal_id=1, test_id=test.id)
         assert created.user_id == user.id
@@ -445,5 +544,24 @@ def test_end_to_end_service_flow_with_tenant_scope():
         duplicate, should_enqueue = await roadmap.ensure_generation_requested(user.id, 1, goal_id=1, test_id=test.id)
         assert duplicate.id == created.id
         assert should_enqueue is False
+
+        analytics = AnalyticsService(session)
+        analytics.precomputed_service = _AnalyticsPrecomputedService()
+
+        pending_metrics = await analytics.aggregated_metrics(tenant_id=1)
+        assert pending_metrics["meta"]["status"] == "pending"
+        assert pending_metrics["meta"]["is_rebuilding"] is True
+
+        analytics.precomputed_service.dashboard_payload = {
+            "tenant_id": 1,
+            "topic_mastery_distribution": {"beginner": 1, "needs_practice": 1, "mastered": 0},
+            "diagnostic_completion_rate": 100.0,
+            "roadmap_completion_rate": 0.0,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        ready_metrics = await analytics.aggregated_metrics(tenant_id=1)
+        assert ready_metrics["meta"]["status"] == "ready"
+        assert ready_metrics["meta"]["is_rebuilding"] is False
+        assert ready_metrics["diagnostic_completion_rate"] == 100.0
 
     asyncio.run(_run())

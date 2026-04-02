@@ -41,7 +41,7 @@ class _FakeOutboxService:
 
     async def get_stats(self, *, tenant_id: int | None):
         _FakeOutboxService.last_stats_tenant = tenant_id
-        return {"pending": 11, "processing": 2, "dead": 3, "dispatched": 20}
+        return {"queued": 11, "processed": 13, "failed": 2, "dead": 3, "dispatched": 20, "pending": 11, "processing": 20}
 
     async def requeue_dead_event_by_id(self, *, event_id: int, tenant_id: int | None):
         _FakeOutboxService.last_requeue_one_args = {"event_id": event_id, "tenant_id": tenant_id}
@@ -141,10 +141,13 @@ def test_stats_super_admin(monkeypatch):
             db=_DummySession(),
             current_user=_user("super_admin", tenant_id=7),
         )
-        assert result.pending == 11
-        assert result.processing == 2
+        assert result.queued == 11
+        assert result.processed == 13
+        assert result.failed == 2
         assert result.dead == 3
         assert result.dispatched == 20
+        assert result.pending == 11
+        assert result.processing == 20
         assert _FakeOutboxService.last_stats_tenant is None
 
     asyncio.run(_run())

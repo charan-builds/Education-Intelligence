@@ -3,6 +3,13 @@ from pydantic import BaseModel
 from app.schemas.common_schema import PageMeta
 
 
+class AnalyticsSnapshotMetaResponse(BaseModel):
+    status: str
+    last_updated: str | None = None
+    is_rebuilding: bool = False
+    estimated_time: int | None = None
+
+
 class TopicMasteryDistributionResponse(BaseModel):
     beginner: int
     needs_practice: int
@@ -14,6 +21,7 @@ class AnalyticsOverviewResponse(BaseModel):
     topic_mastery_distribution: TopicMasteryDistributionResponse
     diagnostic_completion_rate: float
     roadmap_completion_rate: float
+    meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class LearnerRoadmapProgressResponse(BaseModel):
@@ -34,11 +42,13 @@ class RoadmapProgressSummaryResponse(BaseModel):
     average_mastery_percent: int
     learners: list[LearnerRoadmapProgressResponse]
     meta: PageMeta
+    snapshot_meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class TopicMasteryAnalyticsResponse(BaseModel):
     tenant_id: int
     topic_mastery_distribution: TopicMasteryDistributionResponse
+    meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class TenantAnalyticsSummaryResponse(BaseModel):
@@ -69,6 +79,7 @@ class PlatformAnalyticsOverviewResponse(BaseModel):
     average_mastery_percent: int
     topic_mastery_distribution: TopicMasteryDistributionResponse
     tenant_breakdown: list[TenantAnalyticsSummaryResponse]
+    meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class RetentionCurvePointResponse(BaseModel):
@@ -164,6 +175,7 @@ class StudentPerformanceAnalyticsResponse(BaseModel):
     weak_topics: list[StudentWeakTopicItemResponse]
     performance_trend: list[StudentPerformanceTrendPointResponse]
     sql_queries: dict[str, str]
+    meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class TopicLearnerPerformanceItemResponse(BaseModel):
@@ -194,3 +206,4 @@ class TopicPerformanceAnalyticsResponse(BaseModel):
     weakest_learners: list[TopicLearnerPerformanceItemResponse]
     performance_trend: list[TopicPerformanceTrendPointResponse]
     sql_queries: dict[str, str]
+    meta: AnalyticsSnapshotMetaResponse | None = None

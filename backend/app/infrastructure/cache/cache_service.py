@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 from typing import Any
 
 from app.core.logging import get_logger
@@ -102,6 +103,9 @@ class CacheService:
         version = await self._namespace_version(namespace)
         return self.build_key(namespace, version=version, **parts)
 
+    async def namespace_version(self, namespace: str) -> int:
+        return await self._namespace_version(namespace)
+
     async def bump_namespace_version(self, namespace: str) -> int:
         if self.redis is None:
             return 1
@@ -126,3 +130,44 @@ class CacheService:
         value = await factory()
         await self.set(key, value, ttl=ttl)
         return value
+
+    async def acquire_lock(self, key: str, *, ttl: int) -> str | None:
+        if self.redis is None:
+            return "lock-unavailable"
+        token = uuid4().hex
+        try:
+            acquired = await self.redis.set(key, token, ex=ttl, nx=True)
+            if acquired:
+                cache_operations_total.labels(operation="lock_acquire", result="ok").inc()
+                return token
+            cache_operations_total.labels(operation="lock_acquire", result="busy").inc()
+            return None
+        except Exception as exc:  # fail open
+            cache_operations_total.labels(operation="lock_acquire", result="error").inc()
+            self.logger.warning(
+                "cache lock acquire failed",
+                extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
+            )
+            self.redis = None
+            return "lock-unavailable"
+
+    async def release_lock(self, key: str, token: str | None = None) -> bool:
+        if self.redis is None:
+            return False
+        try:
+            if token and token != "lock-unavailable":
+                current = await self.redis.get(key)
+                if current != token:
+                    cache_operations_total.labels(operation="lock_release", result="skipped").inc()
+                    return False
+            await self.redis.delete(key)
+            cache_operations_total.labels(operation="lock_release", result="ok").inc()
+            return True
+        except Exception as exc:  # fail open
+            cache_operations_total.labels(operation="lock_release", result="error").inc()
+            self.logger.warning(
+                "cache lock release failed",
+                extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
+            )
+            self.redis = None
+            return False

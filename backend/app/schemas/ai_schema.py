@@ -20,6 +20,7 @@ class AIChatRequest(BaseModel):
 
 class AIChatResponse(BaseModel):
     request_id: str
+    status: str = "processing"
     reply: str
     advisor_type: str
     used_ai: bool = False
@@ -31,3 +32,14 @@ class AIChatResponse(BaseModel):
     memory_summary: dict[str, Any] = Field(default_factory=dict)
     prompt_context: dict[str, Any] = Field(default_factory=dict)
     history: list[AIChatHistoryItemResponse] = Field(default_factory=list)
+
+
+class AIRequestStatusResponse(BaseModel):
+    request_id: str
+    request_type: str
+    status: str
+    provider: str | None = None
+    attempt_count: int = 0
+    error_message: str | None = None
+    result: dict[str, Any] = Field(default_factory=dict)
+    meta: dict[str, Any] = Field(default_factory=dict)

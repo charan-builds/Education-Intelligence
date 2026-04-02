@@ -7,7 +7,7 @@ from app.core.metrics import metrics_router
 from app.core.security_middleware import register_security_middleware
 from app.core.tracing import configure_tracing
 from app.infrastructure.cache.redis_client import get_redis_client
-from app.infrastructure.database import AsyncSessionLocal
+from app.infrastructure.database import open_super_admin_session
 from app.infrastructure.jobs.celery_app import celery_app
 from app.presentation.api_router import api_router
 from app.presentation.error_handlers import register_exception_handlers
@@ -70,7 +70,7 @@ async def health() -> dict:
 
     db_ok = False
     try:
-        async with AsyncSessionLocal() as session:
+        async with open_super_admin_session(reason="health_check") as session:
             await session.execute(text("SELECT 1"))
         db_ok = True
         checks["database"] = {"status": "ok"}

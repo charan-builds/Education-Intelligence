@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.ai_context_builder import AIContextBuilder
 from app.application.services.cognitive_modeling_service import CognitiveModelingService
+from app.application.services.mentor_ai_service import MentorAIService
 from app.core.feature_flags import FeatureFlagService
 from app.core.logging import bind_log_data, get_logger
 from app.domain.engines.knowledge_graph import KnowledgeGraphEngine
@@ -16,7 +17,6 @@ from app.domain.engines.learning_profile_engine import LearningProfileEngine
 from app.domain.models.diagnostic_test import DiagnosticTest
 from app.domain.models.mentor_suggestion import MentorSuggestion
 from app.domain.models.user import User
-from app.infrastructure.clients.ai_service_client import AIServiceClient
 from app.infrastructure.repositories.diagnostic_repository import DiagnosticRepository
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
 from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
@@ -109,7 +109,12 @@ class RuleBasedMentorAdvisor:
 
 
 class MentorService:
-    def __init__(self, advisor: MentorAdvisor | None = None, session: AsyncSession | None = None):
+    def __init__(
+        self,
+        advisor: MentorAdvisor | None = None,
+        session: AsyncSession | None = None,
+        mentor_ai_service: MentorAIService | None = None,
+    ):
         self.advisor = advisor or RuleBasedMentorAdvisor()
         self._fallback_advisor = RuleBasedMentorAdvisor()
         self.session = session
@@ -120,7 +125,8 @@ class MentorService:
         self.topic_repository = TopicRepository(session) if session is not None else None
         self.learning_profile_engine = LearningProfileEngine()
         self.cognitive_modeling_service = CognitiveModelingService()
-        self.ai_service_client = AIServiceClient()
+        self.mentor_ai_service = mentor_ai_service or MentorAIService()
+        self.ai_request_service = None
         self.feature_flag_service = FeatureFlagService(session) if session is not None else None
         self.ai_context_builder = AIContextBuilder(session) if session is not None else None
 
@@ -385,69 +391,17 @@ class MentorService:
         mentor_context: dict | None,
         chat_history: list[dict],
     ) -> dict:
-        try:
-            roadmap_payload = [
-                {
-                    "topic_id": int(step.topic_id),
-                    "progress_status": str(step.progress_status),
-                    "priority": int(step.priority),
-                }
-                for step in steps
-            ]
-            result = await self.ai_service_client.mentor_response(
-                user_id=user_id,
-                tenant_id=tenant_id,
-                goal=goal,
-                message=message,
-                roadmap=roadmap_payload,
-                weak_topics=weak_topics,
-                learning_profile=learning_profile,
-                mentor_context=mentor_context,
-                chat_history=chat_history,
-            )
-            response = result.get("response")
-            if not response:
-                self.logger.warning("mentor_ai_empty_response", extra=bind_log_data(user_id=user_id, tenant_id=tenant_id))
-                return {
-                    "reply": None,
-                    "fallback_used": True,
-                    "fallback_reason": "empty_ai_response",
-                    "provider": result.get("provider"),
-                    "latency_ms": result.get("latency_ms"),
-                }
-            return {
-                "reply": str(response),
-                "fallback_used": bool(result.get("fallback_used")),
-                "fallback_reason": result.get("fallback_reason"),
-                "suggested_focus_topics": [
-                    int(topic_id)
-                    for topic_id in result.get("suggested_focus_topics", [])
-                    if str(topic_id).isdigit()
-                ],
-                "why_recommended": [str(item) for item in (result.get("guidance") or {}).get("suggestions", [])][:3],
-                "provider": result.get("provider"),
-                "latency_ms": result.get("latency_ms"),
-                "next_checkin_date": result.get("next_checkin_date"),
-                "session_summary": str(result.get("session_summary") or ""),
-                "memory_update": result.get("memory_update") if isinstance(result.get("memory_update"), dict) else {},
-            }
-        except Exception as exc:
-            self.logger.error(
-                "mentor_ai_request_failed",
-                extra=bind_log_data(
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                ),
-            )
-            return {
-                "reply": None,
-                "fallback_used": True,
-                "fallback_reason": type(exc).__name__,
-                "provider": None,
-                "latency_ms": None,
-            }
+        return await self.mentor_ai_service.generate_response(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            goal=goal,
+            message=message,
+            steps=steps,
+            weak_topics=weak_topics,
+            learning_profile=learning_profile,
+            mentor_context=mentor_context,
+            chat_history=chat_history,
+        )
 
     async def progress_analysis(self, user_id: int, tenant_id: int | None = None) -> dict:
         if self.session is None or self.diagnostic_repository is None or self.roadmap_repository is None or self.topic_repository is None:
@@ -518,14 +472,23 @@ class MentorService:
         ai_enabled = False
         if self.feature_flag_service is not None:
             ai_enabled = await self.feature_flag_service.is_enabled("ai_mentor_enabled", tenant_id)
-        if ai_enabled:
+        if ai_enabled and self.session is not None:
             try:
-                ai_progress = await self.ai_service_client.analyze_progress(
-                    user_id=user_id,
+                from app.application.services.ai_request_service import AIRequestService
+
+                ai_request_service = AIRequestService(self.session)
+                queued = await ai_request_service.queue_mentor_progress_analysis(
                     tenant_id=tenant_id,
+                    user_id=user_id,
                     completion_percent=current_completion,
                     weak_topics=weak_topics[:5],
                 )
+                resolved = await ai_request_service.get_result(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    request_id=str(queued["request_id"]),
+                )
+                ai_progress = (resolved or {}).get("result") or {}
                 ai_summary = ai_progress.get("summary")
                 ai_topics = ai_progress.get("recommended_focus_topics")
                 ai_guidance = (ai_progress.get("guidance") or {}).get("suggestions", [])

@@ -13,6 +13,8 @@ from app.application.services.ml_platform_service import MLPlatformService
 from app.application.services.outbox_service import OutboxService
 from app.application.services.retention_service import RetentionService
 from app.application.services.skill_vector_service import SkillVectorService
+from app.domain.models.diagnostic_test import DiagnosticTest
+from app.infrastructure.cache.cache_service import CacheService
 from app.infrastructure.repositories.goal_repository import GoalRepository
 from app.infrastructure.repositories.diagnostic_repository import DiagnosticRepository
 from app.infrastructure.repositories.roadmap_repository import RoadmapRepository
@@ -37,26 +39,27 @@ class DiagnosticService:
         self.retention_service = RetentionService(session)
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
-
-    @staticmethod
-    def _normalize_answer(value: str) -> str:
-        return "".join(ch.lower() for ch in value.strip() if ch.isalnum() or ch.isspace()).strip()
+        self.cache_service = CacheService()
 
     def _score_answer(self, expected_answer: str, user_answer: str, accepted_answers: list[str] | None = None) -> float:
-        normalized_expected = self._normalize_answer(expected_answer)
-        normalized_user = self._normalize_answer(user_answer)
-        if not normalized_expected or not normalized_user:
-            return 0.0
-        valid_answers = {normalized_expected}
-        for alias in accepted_answers or []:
-            normalized_alias = self._normalize_answer(alias)
-            if normalized_alias:
-                valid_answers.add(normalized_alias)
-        return 100.0 if normalized_user in valid_answers else 0.0
+        evaluated = DiagnosticTest.evaluate_answers(
+            [{"question_id": 0, "user_answer": user_answer}],
+            {
+                0: type(
+                    "_Question",
+                    (),
+                    {
+                        "correct_answer": expected_answer,
+                        "accepted_answers": list(accepted_answers or []),
+                    },
+                )()
+            },
+        )
+        return float(evaluated[0]["score"]) if evaluated else 0.0
 
     @staticmethod
     def _accuracy_from_score(score: float) -> float:
-        return round(max(0.0, min(1.0, float(score) / 100.0)), 4)
+        return DiagnosticTest.accuracy_from_score(score)
 
     async def start_test(self, user_id: int, goal_id: int, tenant_id: int = 1):
         try:
@@ -263,18 +266,18 @@ class DiagnosticService:
             if question is None:
                 raise NotFoundError(f"Question {question_id} not found")
 
-            score = self._score_answer(
-                question.correct_answer,
-                user_answer,
-                getattr(question, "accepted_answers", []),
-            )
             existing_answer = await self.diagnostic_repository.get_answer_for_test_question(
                 test_id=test_id,
                 question_id=question_id,
                 for_update=True,
             )
             attempt_count = int(getattr(existing_answer, "attempt_count", 0) or 0) + 1
-            accuracy = self._accuracy_from_score(score)
+            evaluated_answer = DiagnosticTest.evaluate_answers(
+                [{"question_id": int(question_id), "user_answer": user_answer, "attempt_count": attempt_count}],
+                {int(question.id): question},
+            )[0]
+            score = float(evaluated_answer["score"])
+            accuracy = float(evaluated_answer["accuracy"])
             await self.diagnostic_repository.upsert_answer(
                 test_id=test_id,
                 question_id=question_id,
@@ -402,13 +405,13 @@ class DiagnosticService:
                     question_id=answer["question_id"],
                     for_update=True,
                 )
-                score = self._score_answer(
-                    question.correct_answer,
-                    answer["user_answer"],
-                    getattr(question, "accepted_answers", []),
-                )
                 attempt_count = int(getattr(existing_answer, "attempt_count", 1) or 1)
-                accuracy = self._accuracy_from_score(score)
+                evaluated_answer = DiagnosticTest.evaluate_answers(
+                    [{"question_id": int(answer["question_id"]), "user_answer": answer["user_answer"], "attempt_count": attempt_count}],
+                    {int(question.id): question},
+                )[0]
+                score = float(evaluated_answer["score"])
+                accuracy = float(evaluated_answer["accuracy"])
                 await self.diagnostic_repository.upsert_answer(
                     test_id=test_id,
                     question_id=answer["question_id"],
@@ -477,6 +480,7 @@ class DiagnosticService:
                 activity_time=datetime.now(timezone.utc),
             )
             await self.session.commit()
+            await self.cache_service.bump_namespace_version(f"ai-context:user:{tenant_id}:{user_id}")
             await self.ml_platform_service.build_feature_snapshot(user_id=user_id, tenant_id=tenant_id)
             stored_answers = await self.diagnostic_repository.list_answers_for_test(test_id=test_id)
             adaptive_summary = self._build_adaptive_summary(
@@ -534,20 +538,10 @@ class DiagnosticService:
         return {int(question.id): question for question in question_rows}
 
     def _build_adaptive_summary(self, *, answers: list[object], questions_by_id: dict[int, object]) -> dict:
-        adaptive_rows: list[dict] = []
-        for answer in answers:
-            question = questions_by_id.get(int(answer.question_id))
-            if question is None:
-                continue
-            adaptive_rows.append(
-                {
-                    "topic_id": int(question.topic_id),
-                    "difficulty": int(getattr(question, "difficulty", 2) or 2),
-                    "accuracy": float(getattr(answer, "accuracy", self._accuracy_from_score(float(answer.score)))),
-                    "time_taken": float(answer.time_taken),
-                    "attempt_count": int(getattr(answer, "attempt_count", 1) or 1),
-                }
-            )
+        adaptive_rows = DiagnosticTest.build_adaptive_rows(
+            answers=answers,
+            questions_by_id=questions_by_id,
+        )
         profiles = self.adaptive_engine_service.classify_topic_levels(adaptive_rows)
         return {"topic_levels": self.adaptive_engine_service.serialize_topic_profiles(profiles)}
 
@@ -591,23 +585,7 @@ class DiagnosticService:
             )
 
         question_lookup = {question.id: question for question in questions}
-        scored_previous_answers: list[dict] = []
-        for answer in previous_answers:
-            question = question_lookup.get(int(answer["question_id"]))
-            if question is None:
-                continue
-            scored_previous_answers.append(
-                {
-                    **answer,
-                    "score": self._score_answer(
-                        question.correct_answer,
-                        str(answer["user_answer"]),
-                        getattr(question, "accepted_answers", []),
-                    ),
-                    "accuracy": float(answer.get("accuracy", self._accuracy_from_score(float(answer.get("score", 0.0))))),
-                    "attempt_count": int(answer.get("attempt_count", 1) or 1),
-                }
-            )
+        scored_previous_answers = DiagnosticTest.evaluate_answers(previous_answers, question_lookup)
         weakness_topic_ids: list[int] = []
         if tenant_id is not None and topic_scores:
             prerequisite_map: dict[int, list[int]] = {}

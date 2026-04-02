@@ -1,4 +1,5 @@
 from app.infrastructure.clients.ai_service_client import AIServiceClient
+import asyncio
 
 
 def test_ai_service_client_compacts_mentor_payload_context():
@@ -52,3 +53,32 @@ def test_ai_service_client_compacts_chat_history():
 
     assert len(compacted) == 4
     assert all(len(item["content"]) <= 320 for item in compacted)
+
+
+def test_ai_service_client_cache_scope_includes_user_context_version():
+    class _Cache:
+        async def namespace_version(self, namespace: str) -> int:
+            assert namespace == "ai-context:user:7:42"
+            return 9
+
+    async def _run():
+        client = AIServiceClient(base_url="http://example.com")
+        client.cache_service = _Cache()
+        scoped = await client._cache_scope_payload(
+            endpoint="/ai/mentor-chat",
+            payload={"message": "hi"},
+            tenant_id=7,
+            user_id=42,
+        )
+        assert scoped["tenant_id"] == 7
+        assert scoped["user_id"] == 42
+        assert scoped["context_version"] == 9
+
+    asyncio.run(_run())
+
+
+def test_ai_service_client_contextual_cache_key_changes_when_version_changes():
+    client = AIServiceClient(base_url="http://example.com")
+    key_one = client._cache_key("/ai/mentor-chat", {"payload": {"message": "hi"}, "tenant_id": 1, "user_id": 2, "context_version": 1})
+    key_two = client._cache_key("/ai/mentor-chat", {"payload": {"message": "hi"}, "tenant_id": 1, "user_id": 2, "context_version": 2})
+    assert key_one != key_two

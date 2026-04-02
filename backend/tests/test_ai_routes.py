@@ -88,3 +88,36 @@ def test_ai_chat_route(monkeypatch):
         }
 
     asyncio.run(_run())
+
+
+def test_ai_request_status_route_adds_meta(monkeypatch):
+    class _FakeAIRequestService:
+        def __init__(self, session):
+            self.session = session
+
+        async def get_result(self, *, tenant_id: int, user_id: int, request_id: str):
+            assert tenant_id == 3
+            assert user_id == 7
+            assert request_id == "req-1"
+            return {
+                "request_id": "req-1",
+                "request_type": "topic_explanation",
+                "status": "processing",
+                "provider": None,
+                "attempt_count": 1,
+                "error_message": None,
+                "result": {},
+            }
+
+    monkeypatch.setattr(ai_routes, "AIRequestService", _FakeAIRequestService)
+
+    async def _run():
+        result = await ai_routes.ai_request_status(request_id="req-1", db=object(), current_user=_user())
+        assert result.request_id == "req-1"
+        assert result.meta == {
+            "is_pending": True,
+            "is_terminal": False,
+            "has_error": False,
+        }
+
+    asyncio.run(_run())

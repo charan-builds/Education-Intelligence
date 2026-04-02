@@ -46,3 +46,28 @@ class DeadLetterRepository:
             stmt = stmt.where(DeadLetterEvent.tenant_id == tenant_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_recent_by_source_type(
+        self,
+        *,
+        source_type: str,
+        tenant_id: int | None,
+        limit: int = 100,
+    ) -> list[DeadLetterEvent]:
+        stmt = (
+            select(DeadLetterEvent)
+            .where(DeadLetterEvent.source_type == source_type)
+            .order_by(DeadLetterEvent.id.desc())
+            .limit(limit)
+        )
+        if tenant_id is not None:
+            stmt = stmt.where(DeadLetterEvent.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_by_id(self, *, dead_letter_id: int, tenant_id: int | None = None) -> DeadLetterEvent | None:
+        stmt = select(DeadLetterEvent).where(DeadLetterEvent.id == dead_letter_id)
+        if tenant_id is not None:
+            stmt = stmt.where(DeadLetterEvent.tenant_id == tenant_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()

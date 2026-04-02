@@ -1,4 +1,5 @@
 import json
+import inspect
 
 from fastapi import APIRouter, Body, Depends, Response, status
 from fastapi.responses import PlainTextResponse
@@ -33,6 +34,18 @@ from app.schemas.topic_schema import (
 )
 
 router = APIRouter(prefix="/topics", tags=["topics"])
+
+
+async def _call_topic_service(method, *, tenant_id: int, user_id: int | None = None, **kwargs):
+    try:
+        signature = inspect.signature(method)
+        if "tenant_id" in signature.parameters:
+            kwargs["tenant_id"] = tenant_id
+        if user_id is not None and "user_id" in signature.parameters:
+            kwargs["user_id"] = user_id
+    except (TypeError, ValueError):
+        pass
+    return await method(**kwargs)
 
 
 @router.get("", response_model=TopicPageResponse)
@@ -78,7 +91,8 @@ async def create_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).create_topic(
+    return await _call_topic_service(
+        TopicService(db).create_topic,
         tenant_id=_current_user.tenant_id,
         name=payload.name,
         description=payload.description,
@@ -92,9 +106,10 @@ async def update_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).update_topic(
-        topic_id,
+    return await _call_topic_service(
+        TopicService(db).update_topic,
         tenant_id=_current_user.tenant_id,
+        topic_id=topic_id,
         name=payload.name,
         description=payload.description,
     )
@@ -106,7 +121,11 @@ async def delete_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    await TopicService(db).delete_topic(topic_id, tenant_id=_current_user.tenant_id)
+    await _call_topic_service(
+        TopicService(db).delete_topic,
+        tenant_id=_current_user.tenant_id,
+        topic_id=topic_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -119,10 +138,11 @@ async def list_questions(
     _current_user=Depends(get_current_user),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    return await TopicService(db).list_questions_page(
+    return await _call_topic_service(
+        TopicService(db).list_questions_page,
+        tenant_id=_current_user.tenant_id,
         limit=pagination.limit,
         offset=pagination.offset,
-        tenant_id=_current_user.tenant_id,
         topic_id=topic_id,
         question_type=question_type,
         search=search,
@@ -136,10 +156,11 @@ async def list_prerequisites(
     _current_user=Depends(get_current_user),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    return await TopicService(db).list_prerequisites_page(
+    return await _call_topic_service(
+        TopicService(db).list_prerequisites_page,
+        tenant_id=_current_user.tenant_id,
         limit=pagination.limit,
         offset=pagination.offset,
-        tenant_id=_current_user.tenant_id,
         topic_id=topic_id,
     )
 
@@ -150,10 +171,11 @@ async def create_prerequisite(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).create_prerequisite(
+    return await _call_topic_service(
+        TopicService(db).create_prerequisite,
+        tenant_id=_current_user.tenant_id,
         topic_id=payload.topic_id,
         prerequisite_topic_id=payload.prerequisite_topic_id,
-        tenant_id=_current_user.tenant_id,
     )
 
 
@@ -163,7 +185,11 @@ async def delete_prerequisite(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    await TopicService(db).delete_prerequisite(prerequisite_id, tenant_id=_current_user.tenant_id)
+    await _call_topic_service(
+        TopicService(db).delete_prerequisite,
+        tenant_id=_current_user.tenant_id,
+        prerequisite_id=prerequisite_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -191,9 +217,10 @@ async def import_questions(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    created = await TopicService(db).import_questions(
-        [item.model_dump() for item in payload.items],
+    created = await _call_topic_service(
+        TopicService(db).import_questions,
         tenant_id=_current_user.tenant_id,
+        items=[item.model_dump() for item in payload.items],
     )
     return QuestionImportResponse(created=created)
 
@@ -204,7 +231,11 @@ async def import_questions_csv(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    created = await TopicService(db).import_questions_csv(content, tenant_id=_current_user.tenant_id)
+    created = await _call_topic_service(
+        TopicService(db).import_questions_csv,
+        tenant_id=_current_user.tenant_id,
+        content=content,
+    )
     return QuestionImportResponse(created=created)
 
 
@@ -214,7 +245,11 @@ async def export_questions(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(get_current_user),
 ):
-    items = await TopicService(db).export_questions(tenant_id=_current_user.tenant_id, topic_id=topic_id)
+    items = await _call_topic_service(
+        TopicService(db).export_questions,
+        tenant_id=_current_user.tenant_id,
+        topic_id=topic_id,
+    )
     return PlainTextResponse(
         content=json.dumps(items, indent=2),
         headers={"Content-Disposition": "attachment; filename=questions-export.json"},
@@ -227,7 +262,11 @@ async def export_questions_csv(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(get_current_user),
 ):
-    content = await TopicService(db).export_questions_csv(tenant_id=_current_user.tenant_id, topic_id=topic_id)
+    content = await _call_topic_service(
+        TopicService(db).export_questions_csv,
+        tenant_id=_current_user.tenant_id,
+        topic_id=topic_id,
+    )
     return PlainTextResponse(
         content=content,
         media_type="text/csv",
@@ -242,7 +281,12 @@ async def update_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).update_question(question_id, tenant_id=_current_user.tenant_id, **payload.model_dump())
+    return await _call_topic_service(
+        TopicService(db).update_question,
+        tenant_id=_current_user.tenant_id,
+        question_id=question_id,
+        **payload.model_dump(),
+    )
 
 
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -251,7 +295,11 @@ async def delete_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    await TopicService(db).delete_question(question_id, tenant_id=_current_user.tenant_id)
+    await _call_topic_service(
+        TopicService(db).delete_question,
+        tenant_id=_current_user.tenant_id,
+        question_id=question_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -272,6 +320,7 @@ async def explain_topic_with_ai(
 ):
     return await TopicService(db).explain_topic(
         tenant_id=_current_user.tenant_id,
+        user_id=_current_user.id,
         topic_name=payload.topic_name,
     )
 
@@ -284,6 +333,7 @@ async def generate_questions_with_ai(
 ):
     return await TopicService(db).generate_ai_questions(
         tenant_id=_current_user.tenant_id,
+        user_id=_current_user.id,
         topic=payload.topic,
         difficulty=payload.difficulty,
         count=payload.count,

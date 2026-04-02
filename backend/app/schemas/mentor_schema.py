@@ -38,6 +38,7 @@ class MentorChatStatusResponse(BaseModel):
     reply: str | None = None
     delivered: bool = False
     acked: bool = False
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class MentorSuggestionsResponse(BaseModel):

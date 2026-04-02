@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,7 +8,10 @@ from app.application.services.precomputed_analytics_service import PrecomputedAn
 from app.application.services.skill_vector_service import SkillVectorService
 from app.core.dependencies import get_current_user
 from app.core.dependencies import get_pagination_params, require_roles
+from app.infrastructure.cache.cache_service import CacheService
 from app.infrastructure.database import get_db_session
+from app.infrastructure.jobs.dispatcher import enqueue_job_with_options
+from app.infrastructure.repositories.dead_letter_repository import DeadLetterRepository
 from app.schemas.common_schema import PaginationParams
 from app.schemas.analytics_schema import (
     AnalyticsOverviewResponse,
@@ -24,6 +29,33 @@ from app.schemas.analytics_schema import (
 from app.application.services.retention_service import RetentionService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def _dead_letter_tenant_scope(current_user) -> int | None:
+    role = getattr(getattr(current_user, "role", None), "value", getattr(current_user, "role", None))
+    return None if role == "super_admin" else int(current_user.tenant_id)
+
+
+def _snapshot_meta(*, status: str, last_updated: str | None, estimated_time: int | None = None) -> dict:
+    return {
+        "status": status,
+        "last_updated": last_updated,
+        "is_rebuilding": status == "pending",
+        "estimated_time": estimated_time if status == "pending" else None,
+    }
+
+
+async def _enqueue_deduplicated_analytics_job(*, task_name: str, lock_key: str, kwargs: dict, ttl_seconds: int = 300) -> bool:
+    cache = CacheService()
+    token = await cache.acquire_lock(lock_key, ttl=ttl_seconds)
+    if token is None:
+        return False
+    job_kwargs = {**kwargs, "dispatch_lock_key": lock_key, "dispatch_lock_token": token}
+    queued = enqueue_job_with_options(task_name, kwargs=job_kwargs)
+    if not queued:
+        await cache.release_lock(lock_key, token)
+        return False
+    return True
 
 
 @router.get("/overview", response_model=AnalyticsOverviewResponse)
@@ -125,12 +157,23 @@ async def get_student_performance_analytics(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
+    service = AnalyticsService(db)
     try:
-        return await AnalyticsService(db).student_performance_analytics(
+        return await service.student_performance_analytics(
             tenant_id=current_user.tenant_id,
             user_id=user_id,
         )
     except ValueError as exc:
+        if str(exc) == "Student analytics snapshot not ready":
+            await _enqueue_deduplicated_analytics_job(
+                task_name="jobs.refresh_student_analytics",
+                lock_key=f"analytics:student:{int(user_id)}",
+                kwargs={"tenant_id": int(current_user.tenant_id), "user_id": int(user_id)},
+            )
+            return service.empty_student_performance_analytics(
+                tenant_id=int(current_user.tenant_id),
+                user_id=int(user_id),
+            )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
@@ -140,12 +183,23 @@ async def get_topic_performance_analytics(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
+    service = AnalyticsService(db)
     try:
-        return await AnalyticsService(db).topic_performance_analytics(
+        return await service.topic_performance_analytics(
             tenant_id=current_user.tenant_id,
             topic_id=topic_id,
         )
     except ValueError as exc:
+        if str(exc) == "Topic analytics snapshot not ready":
+            await _enqueue_deduplicated_analytics_job(
+                task_name="jobs.refresh_topic_analytics",
+                lock_key=f"analytics:topic:{int(topic_id)}",
+                kwargs={"tenant_id": int(current_user.tenant_id), "topic_id": int(topic_id)},
+            )
+            return await service.empty_topic_performance_analytics(
+                tenant_id=int(current_user.tenant_id),
+                topic_id=int(topic_id),
+            )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
@@ -156,10 +210,18 @@ async def get_precomputed_tenant_dashboard(
 ):
     service = PrecomputedAnalyticsService(db)
     snapshot = await service.latest_tenant_dashboard(tenant_id=current_user.tenant_id)
-    if snapshot is None:
-        snapshot = await service.refresh_tenant_dashboard(tenant_id=current_user.tenant_id)
-        await db.commit()
-    return snapshot
+    if snapshot is not None:
+        return {
+            **snapshot,
+            "meta": _snapshot_meta(status="ready", last_updated=snapshot.get("updated_at")),
+        }
+    return {
+        "tenant_id": current_user.tenant_id,
+        "active_learners": 0,
+        "weekly_event_count": 0,
+        "average_topic_mastery": 0.0,
+        "meta": _snapshot_meta(status="pending", last_updated=None, estimated_time=30),
+    }
 
 
 @router.get("/precomputed/user-learning-summary")
@@ -172,13 +234,18 @@ async def get_precomputed_user_learning_summary(
         tenant_id=current_user.tenant_id,
         user_id=current_user.id,
     )
-    if snapshot is None:
-        snapshot = await service.refresh_user_learning_summary(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-        )
-        await db.commit()
-    return snapshot
+    if snapshot is not None:
+        return {
+            **snapshot,
+            "meta": _snapshot_meta(status="ready", last_updated=snapshot.get("updated_at")),
+        }
+    return {
+        "tenant_id": current_user.tenant_id,
+        "user_id": current_user.id,
+        "weekly_event_count": 0,
+        "average_score": 0.0,
+        "meta": _snapshot_meta(status="pending", last_updated=None, estimated_time=30),
+    }
 
 
 @router.post("/precomputed/refresh")
@@ -186,6 +253,69 @@ async def refresh_precomputed_analytics(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("admin", "super_admin")),
 ):
-    payload = await PrecomputedAnalyticsService(db).refresh_bundle(tenant_id=current_user.tenant_id)
-    await db.commit()
-    return payload
+    enqueue_job_with_options(
+        "jobs.refresh_precomputed_analytics",
+        kwargs={"tenant_id": int(current_user.tenant_id)},
+    )
+    return {"status": "queued", "tenant_id": int(current_user.tenant_id)}
+
+
+@router.get("/jobs/failed")
+async def list_failed_analytics_jobs(
+    limit: int = 100,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("admin", "super_admin")),
+):
+    rows = await DeadLetterRepository(db).list_recent_by_source_type(
+        source_type="analytics_job",
+        tenant_id=_dead_letter_tenant_scope(current_user),
+        limit=limit,
+    )
+    return {
+        "items": [
+            {
+                "id": int(row.id),
+                "tenant_id": int(row.tenant_id) if row.tenant_id is not None else None,
+                "job_name": row.event_type,
+                "payload": json.loads(row.payload_json),
+                "error_message": row.error_message,
+                "attempts": int(row.attempts),
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.post("/jobs/failed/{dead_letter_id}/retry")
+async def retry_failed_analytics_job(
+    dead_letter_id: int,
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("admin", "super_admin")),
+):
+    row = await DeadLetterRepository(db).get_by_id(
+        dead_letter_id=dead_letter_id,
+        tenant_id=_dead_letter_tenant_scope(current_user),
+    )
+    if row is None or row.source_type != "analytics_job":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analytics job failure not found")
+
+    payload = json.loads(row.payload_json)
+    job_name = str(row.event_type)
+    if job_name == "jobs.refresh_student_analytics":
+        lock_key = f"analytics:student:{int(payload['user_id'])}"
+    elif job_name == "jobs.refresh_topic_analytics":
+        lock_key = f"analytics:topic:{int(payload['topic_id'])}"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported analytics job type")
+
+    queued = await _enqueue_deduplicated_analytics_job(
+        task_name=job_name,
+        lock_key=lock_key,
+        kwargs=payload,
+    )
+    return {
+        "status": "queued" if queued else "already_queued",
+        "dead_letter_id": dead_letter_id,
+        "job_name": job_name,
+    }

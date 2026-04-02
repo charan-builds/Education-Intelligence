@@ -20,6 +20,7 @@ from app.infrastructure.repositories.user_repository import UserRepository
 
 
 class AnalyticsService:
+    DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS = 30
     STUDENT_TOPIC_HEATMAP_SQL = """
 WITH topic_rollup AS (
     SELECT
@@ -111,6 +112,16 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         self.cache_service = CacheService()
         self.topic_repository = TopicRepository(session)
         self.user_repository = UserRepository(session)
+        self.precomputed_service = PrecomputedAnalyticsService(session)
+
+    @staticmethod
+    def _snapshot_meta(*, status: str, last_updated: str | None, estimated_time: int | None = None) -> dict[str, str | int | bool | None]:
+        return {
+            "status": status,
+            "last_updated": last_updated,
+            "is_rebuilding": status == "pending",
+            "estimated_time": estimated_time if status == "pending" else None,
+        }
 
     async def _require_tenant_user(self, *, tenant_id: int, user_id: int) -> None:
         user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
@@ -258,41 +269,42 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         return await self._roadmap_completion_rate(tenant_id)
 
     async def aggregated_metrics(self, tenant_id: int) -> dict:
-        cache_key = await self.cache_service.build_versioned_key("analytics:overview", tenant_id=tenant_id)
-        async def _factory() -> dict:
-            precomputed = await PrecomputedAnalyticsService(self.session).tenant_dashboard_from_materialized_view(tenant_id=tenant_id)
-            if precomputed is not None:
-                return {
-                    "tenant_id": tenant_id,
-                    "topic_mastery_distribution": dict(precomputed["topic_mastery_distribution"]),
-                    "diagnostic_completion_rate": float(precomputed["diagnostic_completion_rate"]),
-                    "roadmap_completion_rate": float(precomputed["roadmap_completion_rate"]),
-                }
-            topic_distribution = await self.topic_mastery_distribution(tenant_id)
-            diagnostic_rate = await self.diagnostic_completion_rate(tenant_id)
-            roadmap_rate = await self.roadmap_completion_rate(tenant_id)
+        precomputed = await self.precomputed_service.latest_tenant_dashboard(tenant_id=tenant_id)
+        if precomputed is None:
+            precomputed = await self.precomputed_service.tenant_dashboard_from_materialized_view(tenant_id=tenant_id)
+        if precomputed is None:
             return {
                 "tenant_id": tenant_id,
-                "topic_mastery_distribution": topic_distribution,
-                "diagnostic_completion_rate": diagnostic_rate,
-                "roadmap_completion_rate": roadmap_rate,
+                "topic_mastery_distribution": {"beginner": 0, "needs_practice": 0, "mastered": 0},
+                "diagnostic_completion_rate": 0.0,
+                "roadmap_completion_rate": 0.0,
+                "meta": self._snapshot_meta(
+                    status="pending",
+                    last_updated=None,
+                    estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS,
+                ),
             }
-        return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
+        return {
+            "tenant_id": tenant_id,
+            "topic_mastery_distribution": dict(precomputed["topic_mastery_distribution"]),
+            "diagnostic_completion_rate": float(precomputed["diagnostic_completion_rate"]),
+            "roadmap_completion_rate": float(precomputed["roadmap_completion_rate"]),
+            "meta": self._snapshot_meta(status="ready", last_updated=precomputed.get("updated_at")),
+        }
 
     async def topic_mastery_summary(self, tenant_id: int) -> dict:
-        cache_key = await self.cache_service.build_versioned_key("analytics:topic-mastery", tenant_id=tenant_id)
-        async def _factory() -> dict:
-            precomputed = await PrecomputedAnalyticsService(self.session).tenant_dashboard_from_materialized_view(tenant_id=tenant_id)
-            if precomputed is not None:
-                return {
-                    "tenant_id": tenant_id,
-                    "topic_mastery_distribution": dict(precomputed["topic_mastery_distribution"]),
-                }
-            return {
-                "tenant_id": tenant_id,
-                "topic_mastery_distribution": await self.topic_mastery_distribution(tenant_id),
-            }
-        return await self.cache_service.get_or_set(cache_key, ttl=120, factory=_factory)
+        precomputed = await self.precomputed_service.latest_tenant_dashboard(tenant_id=tenant_id)
+        if precomputed is None:
+            precomputed = await self.precomputed_service.tenant_dashboard_from_materialized_view(tenant_id=tenant_id)
+        return {
+            "tenant_id": tenant_id,
+            "topic_mastery_distribution": dict((precomputed or {}).get("topic_mastery_distribution") or {"beginner": 0, "needs_practice": 0, "mastered": 0}),
+            "meta": self._snapshot_meta(
+                status="ready" if precomputed is not None else "pending",
+                last_updated=(precomputed or {}).get("updated_at"),
+                estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS if precomputed is None else None,
+            ),
+        }
 
     async def _roadmap_progress_rows(self, tenant_id: int | None = None) -> list[dict[str, int | str]]:
         current_roadmaps = self._current_active_roadmap_ids_subquery(tenant_id)
@@ -357,57 +369,27 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         return learners
 
     async def roadmap_progress_summary(self, tenant_id: int, *, limit: int = 20, offset: int = 0) -> dict:
-        cache_key = await self.cache_service.build_versioned_key(
-            "analytics:roadmap-progress",
+        precomputed = await self.precomputed_service.roadmap_progress_from_materialized_view(
             tenant_id=tenant_id,
             limit=limit,
             offset=offset,
         )
-        async def _factory() -> dict:
-            precomputed = await PrecomputedAnalyticsService(self.session).roadmap_progress_from_materialized_view(
-                tenant_id=tenant_id,
-                limit=limit,
-                offset=offset,
-            )
-            if precomputed is not None:
-                return precomputed
-            learners = await self._roadmap_progress_rows(tenant_id)
-            total_completion = sum(int(learner["completion_percent"]) for learner in learners)
-            total_mastery = sum(int(learner["mastery_percent"]) for learner in learners)
-
-            student_count = len(learners)
-            average_completion = round(total_completion / student_count) if student_count > 0 else 0
-            average_mastery = round(total_mastery / student_count) if student_count > 0 else 0
-            page_items = learners[offset : offset + limit]
-            next_offset = offset + limit if (offset + limit) < student_count else None
-
-            return {
-                "tenant_id": tenant_id,
-                "student_count": student_count,
-                "average_completion_percent": average_completion,
-                "average_mastery_percent": average_mastery,
-                "learners": [
-                    {
-                        "user_id": int(learner["user_id"]),
-                        "email": str(learner["email"]),
-                        "total_steps": int(learner["total_steps"]),
-                        "completed_steps": int(learner["completed_steps"]),
-                        "in_progress_steps": int(learner["in_progress_steps"]),
-                        "pending_steps": int(learner["pending_steps"]),
-                        "completion_percent": int(learner["completion_percent"]),
-                        "mastery_percent": int(learner["mastery_percent"]),
-                    }
-                    for learner in page_items
-                ],
-                "meta": {
-                    "total": student_count,
-                    "limit": limit,
-                    "offset": offset,
-                    "next_offset": next_offset,
-                    "next_cursor": None,
-                },
-            }
-        return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
+        if precomputed is not None:
+            precomputed["snapshot_meta"] = self._snapshot_meta(status="ready", last_updated=precomputed.get("updated_at"))
+            return precomputed
+        return {
+            "tenant_id": tenant_id,
+            "student_count": 0,
+            "average_completion_percent": 0,
+            "average_mastery_percent": 0,
+            "learners": [],
+            "meta": {"total": 0, "limit": limit, "offset": offset, "next_offset": None, "next_cursor": None},
+            "snapshot_meta": self._snapshot_meta(
+                status="pending",
+                last_updated=None,
+                estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS,
+            ),
+        }
 
     async def _tenant_role_breakdown(self) -> list[dict[str, int | str]]:
         result = await self.session.execute(
@@ -489,185 +471,29 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         }
 
     async def platform_overview(self) -> dict:
-        dialect = str(self.session.bind.dialect.name if self.session.bind is not None else "")
-        if dialect == "postgresql":
-            tenant_rows = (
-                await self.session.execute(
-                    text(
-                        """
-                        SELECT
-                            t.id AS tenant_id,
-                            t.name AS tenant_name,
-                            t.type AS tenant_type,
-                            COALESCE(SUM(CASE WHEN utr.role = 'student' THEN 1 ELSE 0 END), 0) AS student_count,
-                            COALESCE(SUM(CASE WHEN utr.role = 'mentor' THEN 1 ELSE 0 END), 0) AS mentor_count,
-                            COALESCE(SUM(CASE WHEN utr.role = 'teacher' THEN 1 ELSE 0 END), 0) AS teacher_count,
-                            COALESCE(SUM(CASE WHEN utr.role = 'admin' THEN 1 ELSE 0 END), 0) AS admin_count,
-                            COALESCE(SUM(CASE WHEN utr.role = 'super_admin' THEN 1 ELSE 0 END), 0) AS super_admin_count,
-                            COALESCE(tam.diagnostic_completion_rate, 0) AS diagnostic_completion_rate,
-                            COALESCE(tam.roadmap_completion_rate, 0) AS roadmap_completion_rate,
-                            COALESCE(ups.average_completion_percent, 0) AS average_completion_percent,
-                            COALESCE(ups.average_mastery_percent, 0) AS average_mastery_percent,
-                            COALESCE(tam.beginner_topics, 0) AS beginner_topics,
-                            COALESCE(tam.needs_practice_topics, 0) AS needs_practice_topics,
-                            COALESCE(tam.mastered_topics, 0) AS mastered_topics
-                        FROM tenants t
-                        LEFT JOIN user_tenant_roles utr ON utr.tenant_id = t.id
-                        LEFT JOIN tenant_analytics_mv tam ON tam.tenant_id = t.id
-                        LEFT JOIN (
-                            SELECT
-                                tenant_id,
-                                ROUND(AVG(completion_percent)) AS average_completion_percent,
-                                ROUND(AVG(mastery_percent)) AS average_mastery_percent
-                            FROM user_progress_summary_mv
-                            GROUP BY tenant_id
-                        ) ups ON ups.tenant_id = t.id
-                        GROUP BY
-                            t.id,
-                            t.name,
-                            t.type,
-                            tam.diagnostic_completion_rate,
-                            tam.roadmap_completion_rate,
-                            tam.beginner_topics,
-                            tam.needs_practice_topics,
-                            tam.mastered_topics,
-                            ups.average_completion_percent,
-                            ups.average_mastery_percent
-                        ORDER BY t.name ASC
-                        """
-                    )
-                )
-            ).mappings().all()
-            if tenant_rows:
-                tenant_breakdown = [
-                    {
-                        "tenant_id": int(row["tenant_id"]),
-                        "tenant_name": str(row["tenant_name"]),
-                        "tenant_type": str(row["tenant_type"]),
-                        "student_count": int(row["student_count"] or 0),
-                        "mentor_count": int(row["mentor_count"] or 0),
-                        "teacher_count": int(row["teacher_count"] or 0),
-                        "admin_count": int(row["admin_count"] or 0),
-                        "super_admin_count": int(row["super_admin_count"] or 0),
-                        "diagnostic_completion_rate": float(row["diagnostic_completion_rate"] or 0.0),
-                        "roadmap_completion_rate": float(row["roadmap_completion_rate"] or 0.0),
-                        "average_completion_percent": int(row["average_completion_percent"] or 0),
-                        "average_mastery_percent": int(row["average_mastery_percent"] or 0),
-                    }
-                    for row in tenant_rows
-                ]
-                student_count = sum(int(item["student_count"]) for item in tenant_breakdown)
-                mentor_count = sum(int(item["mentor_count"]) for item in tenant_breakdown)
-                teacher_count = sum(int(item["teacher_count"]) for item in tenant_breakdown)
-                admin_count = sum(int(item["admin_count"]) for item in tenant_breakdown)
-                super_admin_count = sum(int(item["super_admin_count"]) for item in tenant_breakdown)
-                average_completion = round(sum(int(item["average_completion_percent"]) for item in tenant_breakdown) / len(tenant_breakdown))
-                average_mastery = round(sum(int(item["average_mastery_percent"]) for item in tenant_breakdown) / len(tenant_breakdown))
-                diagnostic_rate = round(sum(float(item["diagnostic_completion_rate"]) for item in tenant_breakdown) / len(tenant_breakdown), 2)
-                roadmap_rate = round(sum(float(item["roadmap_completion_rate"]) for item in tenant_breakdown) / len(tenant_breakdown), 2)
-                topic_distribution = {
-                    "beginner": sum(int(row["beginner_topics"] or 0) for row in tenant_rows),
-                    "needs_practice": sum(int(row["needs_practice_topics"] or 0) for row in tenant_rows),
-                    "mastered": sum(int(row["mastered_topics"] or 0) for row in tenant_rows),
-                }
-                tenant_breakdown.sort(
-                    key=lambda item: (
-                        -int(item["student_count"]),
-                        -int(item["average_mastery_percent"]),
-                        str(item["tenant_name"]).lower(),
-                    )
-                )
-                return {
-                    "tenant_count": len(tenant_breakdown),
-                    "student_count": student_count,
-                    "mentor_count": mentor_count,
-                    "teacher_count": teacher_count,
-                    "admin_count": admin_count,
-                    "super_admin_count": super_admin_count,
-                    "diagnostic_completion_rate": diagnostic_rate,
-                    "roadmap_completion_rate": roadmap_rate,
-                    "average_completion_percent": average_completion,
-                    "average_mastery_percent": average_mastery,
-                    "topic_mastery_distribution": topic_distribution,
-                    "tenant_breakdown": tenant_breakdown,
-                }
-        tenant_roles = await self._tenant_role_breakdown()
-        learner_rows = await self._roadmap_progress_rows()
-        diagnostic_rates = await self._diagnostic_completion_rates_by_tenant()
-        roadmap_rates = await self._roadmap_completion_rates_by_tenant()
-        topic_distribution = await self._topic_mastery_distribution()
-        diagnostic_rate = await self._diagnostic_completion_rate()
-        roadmap_rate = await self._roadmap_completion_rate()
-
-        tenant_progress: dict[int, dict[str, int]] = defaultdict(
-            lambda: {"student_count": 0, "completion_total": 0, "mastery_total": 0}
-        )
-        for learner in learner_rows:
-            tenant_id = int(learner["tenant_id"])
-            tenant_progress[tenant_id]["student_count"] += 1
-            tenant_progress[tenant_id]["completion_total"] += int(learner["completion_percent"])
-            tenant_progress[tenant_id]["mastery_total"] += int(learner["mastery_percent"])
-
-        student_count = sum(int(item["student_count"]) for item in tenant_roles)
-        mentor_count = sum(int(item["mentor_count"]) for item in tenant_roles)
-        teacher_count = sum(int(item["teacher_count"]) for item in tenant_roles)
-        admin_count = sum(int(item["admin_count"]) for item in tenant_roles)
-        super_admin_count = sum(int(item["super_admin_count"]) for item in tenant_roles)
-
-        average_completion = (
-            round(sum(int(learner["completion_percent"]) for learner in learner_rows) / len(learner_rows))
-            if learner_rows
-            else 0
-        )
-        average_mastery = (
-            round(sum(int(learner["mastery_percent"]) for learner in learner_rows) / len(learner_rows))
-            if learner_rows
-            else 0
-        )
-
-        tenant_breakdown: list[dict[str, int | float | str]] = []
-        for tenant in tenant_roles:
-            tenant_id = int(tenant["tenant_id"])
-            progress = tenant_progress[tenant_id]
-            tenant_student_count = int(progress["student_count"])
-            average_tenant_completion = (
-                round(progress["completion_total"] / tenant_student_count) if tenant_student_count > 0 else 0
-            )
-            average_tenant_mastery = (
-                round(progress["mastery_total"] / tenant_student_count) if tenant_student_count > 0 else 0
-            )
-            tenant_breakdown.append(
-                {
-                    **tenant,
-                    "diagnostic_completion_rate": diagnostic_rates.get(tenant_id, 0.0),
-                    "roadmap_completion_rate": roadmap_rates.get(tenant_id, 0.0),
-                    "average_completion_percent": average_tenant_completion,
-                    "average_mastery_percent": average_tenant_mastery,
-                }
-            )
-
-        tenant_breakdown.sort(
-            key=lambda item: (
-                -int(item["student_count"]),
-                -int(item["average_mastery_percent"]),
-                str(item["tenant_name"]).lower(),
-            )
-        )
-
-        return {
-            "tenant_count": len(tenant_roles),
-            "student_count": student_count,
-            "mentor_count": mentor_count,
-            "teacher_count": teacher_count,
-            "admin_count": admin_count,
-            "super_admin_count": super_admin_count,
-            "diagnostic_completion_rate": diagnostic_rate,
-            "roadmap_completion_rate": roadmap_rate,
-            "average_completion_percent": average_completion,
-            "average_mastery_percent": average_mastery,
-            "topic_mastery_distribution": topic_distribution,
-            "tenant_breakdown": tenant_breakdown,
-        }
+        payload = await self.precomputed_service.latest_platform_overview()
+        if payload is None:
+            return {
+                "tenant_count": 0,
+                "student_count": 0,
+                "mentor_count": 0,
+                "teacher_count": 0,
+                "admin_count": 0,
+                "super_admin_count": 0,
+                "diagnostic_completion_rate": 0.0,
+                "roadmap_completion_rate": 0.0,
+                "average_completion_percent": 0,
+                "average_mastery_percent": 0,
+                "topic_mastery_distribution": {"beginner": 0, "needs_practice": 0, "mastered": 0},
+                "tenant_breakdown": [],
+                "meta": self._snapshot_meta(
+                    status="pending",
+                    last_updated=None,
+                    estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS,
+                ),
+            }
+        payload["meta"] = self._snapshot_meta(status="ready", last_updated=payload.get("updated_at"))
+        return payload
 
     @staticmethod
     def _compute_learning_efficiency(*, average_accuracy: float, average_time_taken_seconds: float, average_attempts: float) -> float:
@@ -685,156 +511,55 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
 
     async def student_performance_analytics(self, *, tenant_id: int, user_id: int) -> dict:
         await self._assert_student_in_tenant(tenant_id=tenant_id, user_id=user_id)
-        cache_key = await self.cache_service.build_versioned_key(
-            "analytics:student-performance",
-            tenant_id=tenant_id,
-            user_id=user_id,
-        )
+        payload = await self.precomputed_service.latest_student_performance_analytics(tenant_id=tenant_id, user_id=user_id)
+        if payload is None:
+            raise ValueError("Student analytics snapshot not ready")
+        payload["meta"] = self._snapshot_meta(status="ready", last_updated=payload.get("updated_at"))
+        return payload
 
-        async def _factory() -> dict:
-            heatmap_result = await self.session.execute(
-                text(self.STUDENT_TOPIC_HEATMAP_SQL),
-                {"tenant_id": tenant_id, "user_id": user_id},
-            )
-            topic_mastery_heatmap = [
-                {
-                    "topic_id": int(row.topic_id),
-                    "topic_name": str(row.topic_name),
-                    "mastery_score": float(row.mastery_score or 0.0),
-                    "average_accuracy": float(row.average_accuracy or 0.0),
-                    "average_time_taken_seconds": float(row.average_time_taken_seconds or 0.0),
-                    "average_attempts": float(row.average_attempts or 0.0),
-                    "last_activity_at": row.last_activity_at.isoformat() if row.last_activity_at is not None else None,
-                }
-                for row in heatmap_result
-            ]
-
-            trend_result = await self.session.execute(
-                text(self.STUDENT_PERFORMANCE_TREND_SQL),
-                {"tenant_id": tenant_id, "user_id": user_id},
-            )
-            performance_trend = [
-                {
-                    "label": str(row.label),
-                    "average_score": float(row.average_score or 0.0),
-                    "average_accuracy": float(row.average_accuracy or 0.0),
-                    "average_time_taken_seconds": float(row.average_time_taken_seconds or 0.0),
-                    "answered_questions": int(row.answered_questions or 0),
-                }
-                for row in trend_result
-            ]
-
-            weak_topics = [
-                {
-                    "topic_id": item["topic_id"],
-                    "topic_name": item["topic_name"],
-                    "mastery_score": item["mastery_score"],
-                    "average_accuracy": item["average_accuracy"],
-                    "average_time_taken_seconds": item["average_time_taken_seconds"],
-                    "average_attempts": item["average_attempts"],
-                }
-                for item in topic_mastery_heatmap[:5]
-            ]
-
-            if topic_mastery_heatmap:
-                average_accuracy = sum(item["average_accuracy"] for item in topic_mastery_heatmap) / len(topic_mastery_heatmap)
-                average_time = sum(item["average_time_taken_seconds"] for item in topic_mastery_heatmap) / len(topic_mastery_heatmap)
-                average_attempts = sum(item["average_attempts"] for item in topic_mastery_heatmap) / len(topic_mastery_heatmap)
-            else:
-                average_accuracy = 0.0
-                average_time = 0.0
-                average_attempts = 1.0
-
-            return {
-                "tenant_id": tenant_id,
-                "user_id": user_id,
-                "learning_efficiency_score": self._compute_learning_efficiency(
-                    average_accuracy=average_accuracy,
-                    average_time_taken_seconds=average_time,
-                    average_attempts=average_attempts,
-                ),
-                "topic_mastery_heatmap": topic_mastery_heatmap,
-                "weak_topics": weak_topics,
-                "performance_trend": performance_trend,
-                "sql_queries": {
-                    "topic_mastery_heatmap": self.STUDENT_TOPIC_HEATMAP_SQL.strip(),
-                    "performance_trend": self.STUDENT_PERFORMANCE_TREND_SQL.strip(),
-                },
-            }
-
-        return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
+    @staticmethod
+    def empty_student_performance_analytics(*, tenant_id: int, user_id: int) -> dict:
+        return {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "learning_efficiency_score": 0.0,
+            "topic_mastery_heatmap": [],
+            "weak_topics": [],
+            "performance_trend": [],
+            "sql_queries": {},
+            "meta": AnalyticsService._snapshot_meta(
+                status="pending",
+                last_updated=None,
+                estimated_time=AnalyticsService.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS,
+            ),
+        }
 
     async def topic_performance_analytics(self, *, tenant_id: int, topic_id: int) -> dict:
         await self._require_tenant_topic(tenant_id=tenant_id, topic_id=topic_id)
-        topic_result = await self.session.execute(
-            select(Topic.id, Topic.name).where(Topic.id == topic_id, Topic.tenant_id == tenant_id).limit(1)
-        )
-        topic_row = topic_result.one()
+        payload = await self.precomputed_service.latest_topic_performance_analytics(tenant_id=tenant_id, topic_id=topic_id)
+        if payload is None:
+            raise ValueError("Topic analytics snapshot not ready")
+        payload["meta"] = self._snapshot_meta(status="ready", last_updated=payload.get("updated_at"))
+        return payload
 
-        cache_key = await self.cache_service.build_versioned_key(
-            "analytics:topic-performance",
-            tenant_id=tenant_id,
-            topic_id=topic_id,
-        )
-
-        async def _factory() -> dict:
-            learner_result = await self.session.execute(
-                text(self.TOPIC_LEARNER_SUMMARY_SQL),
-                {"tenant_id": tenant_id, "topic_id": topic_id},
-            )
-            weakest_learners = [
-                {
-                    "user_id": int(row.user_id),
-                    "mastery_score": float(row.mastery_score or 0.0),
-                    "average_accuracy": float(row.average_accuracy or 0.0),
-                    "average_time_taken_seconds": float(row.average_time_taken_seconds or 0.0),
-                    "average_attempts": float(row.average_attempts or 0.0),
-                }
-                for row in learner_result
-            ]
-
-            trend_result = await self.session.execute(
-                text(self.TOPIC_PERFORMANCE_TREND_SQL),
-                {"tenant_id": tenant_id, "topic_id": topic_id},
-            )
-            performance_trend = [
-                {
-                    "label": str(row.label),
-                    "learner_count": int(row.learner_count or 0),
-                    "average_score": float(row.average_score or 0.0),
-                    "average_accuracy": float(row.average_accuracy or 0.0),
-                    "average_time_taken_seconds": float(row.average_time_taken_seconds or 0.0),
-                }
-                for row in trend_result
-            ]
-
-            learner_count = len(weakest_learners)
-            average_mastery_score = round(sum(item["mastery_score"] for item in weakest_learners) / learner_count, 2) if weakest_learners else 0.0
-            average_accuracy = round(sum(item["average_accuracy"] for item in weakest_learners) / learner_count, 2) if weakest_learners else 0.0
-            average_time_taken_seconds = round(
-                sum(item["average_time_taken_seconds"] for item in weakest_learners) / learner_count, 2
-            ) if weakest_learners else 0.0
-            average_attempts = round(sum(item["average_attempts"] for item in weakest_learners) / learner_count, 2) if weakest_learners else 1.0
-
-            return {
-                "tenant_id": tenant_id,
-                "topic_id": int(topic_row.id),
-                "topic_name": str(topic_row.name),
-                "learner_count": learner_count,
-                "average_mastery_score": average_mastery_score,
-                "average_accuracy": average_accuracy,
-                "average_time_taken_seconds": average_time_taken_seconds,
-                "learning_efficiency_score": self._compute_learning_efficiency(
-                    average_accuracy=average_accuracy,
-                    average_time_taken_seconds=average_time_taken_seconds,
-                    average_attempts=average_attempts,
-                ),
-                "weakest_learners": weakest_learners[:5],
-                "performance_trend": performance_trend,
-                "sql_queries": {
-                    "learner_summary": self.TOPIC_LEARNER_SUMMARY_SQL.strip(),
-                    "performance_trend": self.TOPIC_PERFORMANCE_TREND_SQL.strip(),
-                },
-            }
-
-        return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
+    async def empty_topic_performance_analytics(self, *, tenant_id: int, topic_id: int) -> dict:
+        await self._require_tenant_topic(tenant_id=tenant_id, topic_id=topic_id)
+        topic = await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
+        return {
+            "tenant_id": tenant_id,
+            "topic_id": topic_id,
+            "topic_name": getattr(topic, "name", f"Topic {topic_id}"),
+            "learner_count": 0,
+            "average_mastery_score": 0.0,
+            "average_accuracy": 0.0,
+            "average_time_taken_seconds": 0.0,
+            "learning_efficiency_score": 0.0,
+            "weakest_learners": [],
+            "performance_trend": [],
+            "sql_queries": {},
+            "meta": self._snapshot_meta(
+                status="pending",
+                last_updated=None,
+                estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS,
+            ),
+        }

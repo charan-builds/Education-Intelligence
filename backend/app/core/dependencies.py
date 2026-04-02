@@ -72,6 +72,8 @@ async def get_current_user(
 
     request.state.actor_tenant_id = actor_tenant_id
     request.state.tenant_id = effective_tenant_id
+    request.state.tenant_role = membership_role.value if hasattr(membership_role, "value") else str(membership_role)
+    request.state.actor_user_id = int(user.id)
     auth_context = AuthContext(
         user=user,
         actor_user_id=int(user.id),

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     outbox_processing_timeout_seconds: int = 900
     outbox_retry_base_delay_seconds: int = 30
     outbox_dead_letter_retention_days: int = 14
+    event_consumer_max_attempts: int = 5
+    event_consumer_retry_base_delay_seconds: int = 30
+    analytics_rebuild_max_attempts: int = 4
+    analytics_rebuild_retry_base_delay_seconds: int = 30
     realtime_instance_id: str = uuid4().hex
     realtime_pubsub_channel_prefix: str = "realtime"
     realtime_presence_ttl_seconds: int = 60

@@ -92,12 +92,33 @@ class KafkaConsumerService:
 
     def _dispatch_to_celery(self, *, topic: str, payload: dict) -> None:
         if topic == self.settings.kafka_topic_learning_events:
-            enqueue_job("jobs.process_learning_event", args=[int(payload["payload"]["event_id"])])
+            if str(payload["event_name"]) == "learning_event.recorded":
+                enqueue_job(
+                    "jobs.process_learning_event",
+                    kwargs={
+                        "event_id": int(payload["payload"]["event_id"]),
+                        "tenant_id": int(payload["payload"]["tenant_id"]),
+                        "outbox_idempotency_key": str(payload["idempotency_key"]),
+                    },
+                )
+                return
+            enqueue_job(
+                "jobs.process_domain_event",
+                kwargs={
+                    "envelope": payload,
+                    "delivery_attempt": 1,
+                    "outbox_idempotency_key": str(payload["idempotency_key"]),
+                },
+            )
             return
         if topic == self.settings.kafka_topic_notifications:
             enqueue_job(
                 "jobs.process_notification_event",
-                kwargs={"notification_id": int(payload["payload"]["notification_id"])},
+                kwargs={
+                    "notification_id": int(payload["payload"]["notification_id"]),
+                    "tenant_id": int(payload["payload"]["tenant_id"]),
+                    "outbox_idempotency_key": str(payload["idempotency_key"]),
+                },
             )
             return
         if topic == self.settings.kafka_topic_analytics:
@@ -107,6 +128,7 @@ class KafkaConsumerService:
                     "tenant_id": int(payload["payload"]["tenant_id"]),
                     "snapshot_type": str(payload["payload"]["snapshot_type"]),
                     "subject_id": payload["payload"].get("subject_id"),
+                    "outbox_idempotency_key": str(payload["idempotency_key"]),
                 },
             )
             return

@@ -278,3 +278,83 @@ def test_mentor_suggestions_allows_unmapped_mentor_fallback(monkeypatch):
         assert response.suggestions == ["Focus learner 14 in tenant 4."]
 
     asyncio.run(_run())
+
+
+def test_mentor_chat_status_adds_meta_for_ai_request_fallback(monkeypatch):
+    class _EmptyChatRepo:
+        def __init__(self, session=None):
+            self.session = session
+
+        async def get_by_request(self, **kwargs):  # noqa: ANN003
+            return None
+
+    class _FakeAIRequestService:
+        def __init__(self, session=None):
+            self.session = session
+
+        async def get_result(self, *, tenant_id, user_id, request_id):
+            assert tenant_id == 4
+            assert user_id == 9
+            assert request_id == "req-status"
+            return {
+                "status": "processing",
+                "result": {"reply": None},
+            }
+
+    monkeypatch.setattr(mentor_routes, "MentorChatRepository", _EmptyChatRepo)
+    monkeypatch.setattr(mentor_routes, "AIRequestService", _FakeAIRequestService)
+
+    async def _run():
+        response = await mentor_routes.mentor_chat_status(
+            request_id="req-status",
+            db=_DummySession(),
+            current_user=_user(),
+        )
+        assert response.status == "processing"
+        assert response.meta == {
+            "is_pending": True,
+            "is_terminal": False,
+            "source": "ai_request",
+        }
+
+    asyncio.run(_run())
+
+
+def test_mentor_chat_ack_returns_delivery_meta(monkeypatch):
+    class _TestChatRepo:
+        def __init__(self, session=None):
+            self.session = session
+
+        async def get_by_request(self, *, tenant_id, user_id, request_id, direction):
+            _ = tenant_id, user_id, direction
+            return SimpleNamespace(request_id=request_id, status="delivered", channel="http", content="reply", delivered_at=True, acked_at=False)
+
+        async def mark_acked(self, row):
+            row.status = "acked"
+            row.acked_at = True
+            return row
+
+    class _TestMessageRepo:
+        def __init__(self, session=None):
+            self.session = session
+
+        async def mark_acked(self, *, request_id):
+            _ = request_id
+            return None
+
+    monkeypatch.setattr(mentor_routes, "MentorChatRepository", _TestChatRepo)
+    monkeypatch.setattr(mentor_routes, "MentorMessageRepository", _TestMessageRepo)
+
+    async def _run():
+        response = await mentor_routes.mentor_chat_ack(
+            payload=MentorChatAckRequest(request_id="req-ack-meta"),
+            db=_DummySession(),
+            current_user=_user(),
+        )
+        assert response.meta == {
+            "is_pending": False,
+            "is_terminal": True,
+            "source": "mentor_chat",
+        }
+
+    asyncio.run(_run())

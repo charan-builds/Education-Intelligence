@@ -81,3 +81,4 @@ async def test_consumer_processes_learning_event_record(monkeypatch):
 
     assert result["processed"] == 1
     assert dispatched[0][0] == "jobs.process_learning_event"
+    assert dispatched[0][2] == {"event_id": 99, "tenant_id": 1, "outbox_idempotency_key": "abc"}

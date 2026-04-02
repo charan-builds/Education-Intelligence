@@ -4,6 +4,7 @@ from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.models.base import Base
+from app.domain.services import roadmap_rules
 
 
 class Roadmap(Base):
@@ -22,3 +23,24 @@ class Roadmap(Base):
 
     user = relationship("User", back_populates="roadmaps")
     steps = relationship("RoadmapStep", back_populates="roadmap", cascade="all, delete-orphan")
+
+    @staticmethod
+    def generate_steps(
+        *,
+        topic_order: list[int],
+        topic_scores: dict[int, float],
+        dependency_depths: dict[int, int],
+        weakness_clusters: list[dict],
+        profile_type: str,
+        response_times: list[float] | None,
+        base_date: datetime,
+    ) -> list[dict]:
+        return roadmap_rules.generate_steps(
+            topic_order=topic_order,
+            topic_scores=topic_scores,
+            dependency_depths=dependency_depths,
+            weakness_clusters=weakness_clusters,
+            profile_type=profile_type,
+            response_times=response_times,
+            base_date=base_date,
+        )

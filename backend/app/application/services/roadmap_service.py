@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +10,7 @@ from app.domain.engines.knowledge_graph import KnowledgeGraphEngine
 from app.domain.engines.learning_profile_engine import LearningProfileEngine
 from app.domain.engines.weakness_modeling_engine import WeaknessModelingEngine
 from app.domain.engines.topic_difficulty_engine import TopicDifficultyEngine
+from app.domain.models.roadmap import Roadmap
 from app.application.services.recommendation_service import RecommendationService
 from app.infrastructure.cache.cache_service import CacheService
 from app.infrastructure.repositories.diagnostic_repository import DiagnosticRepository
@@ -32,7 +33,7 @@ class RoadmapService:
         self.roadmap_repository = RoadmapRepository(session)
         self.topic_repository = TopicRepository(session)
         self.diagnostic_repository = DiagnosticRepository(session)
-        self.recommendation_service = RecommendationService()
+        self.recommendation_service = RecommendationService(session=session)
         self.learning_profile_engine = LearningProfileEngine()
         self.weakness_engine = WeaknessModelingEngine()
         self.topic_difficulty_engine = TopicDifficultyEngine()
@@ -238,54 +239,25 @@ class RoadmapService:
                 topic_order = sorted(topic_scores.keys())
 
             dependency_depths = await knowledge_graph_engine.get_dependency_depths(topic_order, tenant_id=tenant_id)
-            base_date = datetime.now(timezone.utc)
-            days_per_step = 7
-            if profile.profile_type == "slow_deep_learner":
-                days_per_step = 10
-            elif profile.profile_type == "practice_focused":
-                days_per_step = 5
-
-            avg_time = analytics.get("response_times", [])
-            time_factor = min(1.0, (sum(avg_time) / len(avg_time)) / 60) if avg_time else 0.5
-
-            profile_time_multiplier = 1.0
-            if profile.profile_type == "slow_deep_learner":
-                profile_time_multiplier = 1.4
-            elif profile.profile_type == "practice_focused":
-                profile_time_multiplier = 0.85
-            elif profile.profile_type == "concept_focused":
-                profile_time_multiplier = 1.15
-
-            base_hours_by_difficulty = {"easy": 2.0, "medium": 4.0, "hard": 6.0, "expert": 8.0}
-            for index, topic_id in enumerate(topic_order):
-                topic_score = float(topic_scores.get(topic_id, 50.0))
-                inverse_score = max(0.0, min(1.0, 1 - (topic_score / 100)))
-                difficulty_result = self.topic_difficulty_engine.evaluate(
-                    failure_rate=inverse_score,
-                    time_factor=time_factor,
-                    score_factor=inverse_score,
-                )
-                dependency_depth = dependency_depths.get(int(topic_id), 0)
-                estimated_time_hours = round(
-                    base_hours_by_difficulty[difficulty_result.level]
-                    * profile_time_multiplier
-                    * (1 + (dependency_depth * 0.1)),
-                    2,
-                )
-                clustered = any(topic_id in cluster["topic_ids"] for cluster in weakness_analysis["weakness_clusters"])
+            generated_steps = Roadmap.generate_steps(
+                topic_order=topic_order,
+                topic_scores={int(topic_id): float(score) for topic_id, score in topic_scores.items()},
+                dependency_depths=dependency_depths,
+                weakness_clusters=list(weakness_analysis["weakness_clusters"]),
+                profile_type=str(profile.profile_type),
+                response_times=list(analytics.get("response_times", []) or []),
+                base_date=datetime.now(timezone.utc),
+            )
+            for step_data in generated_steps:
                 await self.roadmap_repository.add_step(
                     roadmap_id=roadmap.id,
-                    topic_id=topic_id,
-                    estimated_time_hours=estimated_time_hours,
-                    difficulty=difficulty_result.level,
-                    priority=index + 1,
-                    deadline=base_date + timedelta(days=days_per_step * (index + 1)),
-                    step_type="core",
-                    rationale=(
-                        "Scheduled early to stabilize a weakness cluster and unblock downstream mastery."
-                        if clustered
-                        else "Scheduled from diagnostic gaps, dependency depth, and learning profile analysis."
-                    ),
+                    topic_id=step_data["topic_id"],
+                    estimated_time_hours=step_data["estimated_time_hours"],
+                    difficulty=step_data["difficulty"],
+                    priority=step_data["priority"],
+                    deadline=step_data["deadline"],
+                    step_type=step_data["step_type"],
+                    rationale=step_data["rationale"],
                 )
 
             await self.roadmap_repository.mark_status(roadmap, status="ready", error_message=None)
@@ -312,6 +284,7 @@ class RoadmapService:
                 idempotency_key=f"domain-roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
             )
             await self.session.commit()
+            await self.cache_service.bump_namespace_version(f"ai-context:user:{tenant_id}:{user_id}")
             await self.cache_service.bump_namespace_version("analytics:overview")
             await self.cache_service.bump_namespace_version("analytics:topic-mastery")
             await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
@@ -490,6 +463,7 @@ class RoadmapService:
             await self.session.commit()
 
         await self.cache_service.bump_namespace_version(f"roadmap:user:{tenant_id}:{user_id}")
+        await self.cache_service.bump_namespace_version(f"ai-context:user:{tenant_id}:{user_id}")
         await self.cache_service.bump_namespace_version("analytics:overview")
         await self.cache_service.bump_namespace_version("analytics:topic-mastery")
         await self.cache_service.bump_namespace_version("analytics:roadmap-progress")
@@ -539,4 +513,5 @@ class RoadmapService:
             tenant_id=tenant_id,
         )
         await self.cache_service.bump_namespace_version(f"roadmap:user:{tenant_id}:{user_id}")
+        await self.cache_service.bump_namespace_version(f"ai-context:user:{tenant_id}:{user_id}")
         return result

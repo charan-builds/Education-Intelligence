@@ -15,6 +15,7 @@ class AnalyticsSnapshot(Base):
             "subject_id",
             "window_start",
             "window_end",
+            "snapshot_version",
             name="uq_analytics_snapshots_identity",
         ),
     )
@@ -26,4 +27,5 @@ class AnalyticsSnapshot(Base):
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    snapshot_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

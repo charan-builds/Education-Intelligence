@@ -12,6 +12,7 @@ class OutboxEventResponse(BaseModel):
     created_at: datetime
     available_at: datetime
     dispatched_at: datetime | None
+    processed_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -29,10 +30,13 @@ class OutboxRequeueResponse(BaseModel):
 
 
 class OutboxStatsResponse(BaseModel):
-    pending: int
-    processing: int
+    queued: int
+    processed: int
+    failed: int
     dead: int
     dispatched: int
+    pending: int | None = None
+    processing: int | None = None
 
 
 class OutboxRequeueOneResponse(BaseModel):

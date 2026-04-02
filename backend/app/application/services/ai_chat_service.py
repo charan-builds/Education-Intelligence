@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from uuid import uuid4
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.ai_request_service import AIRequestService
 from app.application.services.mentor_service import MentorService
 from app.infrastructure.repositories.mentor_message_repository import MentorMessageRepository
 
@@ -13,6 +12,7 @@ class AIChatService:
         self.session = session
         self.mentor_service = MentorService(session=session)
         self.mentor_message_repository = MentorMessageRepository(session)
+        self.ai_request_service = AIRequestService(session)
 
     async def history(self, *, tenant_id: int, user_id: int, limit: int = 20) -> list[dict]:
         messages = await self.mentor_message_repository.list_recent_messages(
@@ -40,41 +40,27 @@ class AIChatService:
         message: str,
         chat_history: list[dict[str, str]] | None = None,
     ) -> dict:
-        request_id = f"ai-{uuid4().hex}"
         normalized_history = list(chat_history or [])
         prompt_context = await self._build_prompt_context(tenant_id=tenant_id, user_id=user_id, message=message)
-
-        await self.mentor_message_repository.create_message(
+        queued = await self.ai_request_service.queue_ai_chat(
             tenant_id=tenant_id,
             user_id=user_id,
-            request_id=request_id,
-            role="learner",
             message=message,
-        )
-        result = await self.mentor_service.chat(
-            message=message,
-            user_id=user_id,
-            tenant_id=tenant_id,
             chat_history=normalized_history,
         )
-        await self.mentor_message_repository.set_response(
-            request_id=request_id,
-            response=result["reply"],
-            status="sent",
-        )
-        await self.session.commit()
 
         return {
-            "request_id": request_id,
-            "reply": result["reply"],
-            "advisor_type": result["advisor_type"],
-            "used_ai": bool(result.get("used_ai", False)),
-            "suggested_focus_topics": list(result.get("suggested_focus_topics", [])),
-            "why_recommended": list(result.get("why_recommended", [])),
-            "provider": result.get("provider"),
-            "next_checkin_date": str(result.get("next_checkin_date")) if result.get("next_checkin_date") else None,
-            "session_summary": str(result.get("session_summary") or ""),
-            "memory_summary": dict(result.get("memory_summary") or {}),
+            "request_id": str(queued["request_id"]),
+            "status": "processing",
+            "reply": "",
+            "advisor_type": "queued",
+            "used_ai": False,
+            "suggested_focus_topics": [],
+            "why_recommended": [],
+            "provider": None,
+            "next_checkin_date": None,
+            "session_summary": "AI request is being processed asynchronously.",
+            "memory_summary": {},
             "prompt_context": prompt_context,
             "history": await self.history(tenant_id=tenant_id, user_id=user_id),
         }

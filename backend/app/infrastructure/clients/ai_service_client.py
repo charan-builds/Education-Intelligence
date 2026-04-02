@@ -26,6 +26,32 @@ class AIServiceClient:
         return f"ai-service:{namespace}:{hashlib.sha256(raw.encode('utf-8')).hexdigest()}"
 
     @staticmethod
+    def _context_namespace(*, tenant_id: int, user_id: int) -> str:
+        return f"ai-context:user:{tenant_id}:{user_id}"
+
+    async def _cache_scope_payload(
+        self,
+        *,
+        endpoint: str,
+        payload: dict,
+        tenant_id: int | None = None,
+        user_id: int | None = None,
+        context_updated_at: str | None = None,
+    ) -> dict:
+        scoped = {"endpoint": endpoint, "payload": payload}
+        if tenant_id is None or user_id is None:
+            return scoped
+        scoped["tenant_id"] = int(tenant_id)
+        scoped["user_id"] = int(user_id)
+        scoped["context_version"] = await self.cache_service.namespace_version(self._context_namespace(tenant_id=tenant_id, user_id=user_id))
+        if context_updated_at:
+            scoped["context_updated_at"] = str(context_updated_at)
+        return scoped
+
+    async def invalidate_user_context(self, *, tenant_id: int, user_id: int) -> int:
+        return await self.cache_service.bump_namespace_version(self._context_namespace(tenant_id=tenant_id, user_id=user_id))
+
+    @staticmethod
     def _trim_text(value: str, *, limit: int) -> str:
         text = value.strip()
         return text[:limit]
@@ -111,8 +137,24 @@ class AIServiceClient:
             },
         }
 
-    async def _post(self, endpoint: str, *, payload: dict, cache_ttl: int = 300) -> dict:
-        cache_key = self._cache_key(endpoint, payload)
+    async def _post(
+        self,
+        endpoint: str,
+        *,
+        payload: dict,
+        cache_ttl: int = 300,
+        tenant_id: int | None = None,
+        user_id: int | None = None,
+        context_updated_at: str | None = None,
+    ) -> dict:
+        cache_scope = await self._cache_scope_payload(
+            endpoint=endpoint,
+            payload=payload,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            context_updated_at=context_updated_at,
+        )
+        cache_key = self._cache_key(endpoint, cache_scope)
         cached = await self.cache_service.get(cache_key)
         if isinstance(cached, dict):
             ai_requests_total.labels(endpoint=endpoint, provider="cache", outcome="hit").inc()
@@ -190,7 +232,7 @@ class AIServiceClient:
             "mentor_context": self._compact_mentor_context(mentor_context),
             "chat_history": self._compact_chat_history(chat_history),
         }
-        return await self._post("/ai/mentor-chat", payload=payload, cache_ttl=180)
+        return await self._post("/ai/mentor-chat", payload=payload, cache_ttl=90, tenant_id=tenant_id, user_id=user_id)
 
     async def predict_learning_path(
         self,
@@ -213,7 +255,7 @@ class AIServiceClient:
             "prerequisites": prerequisites or [],
             "learning_profile": learning_profile,
         }
-        return await self._post("/ai/generate-roadmap", payload=payload, cache_ttl=900)
+        return await self._post("/ai/generate-roadmap", payload=payload, cache_ttl=300, tenant_id=tenant_id, user_id=user_id)
 
     async def analyze_progress(
         self,
@@ -229,7 +271,7 @@ class AIServiceClient:
             "completion_percent": float(completion_percent),
             "weak_topics": weak_topics,
         }
-        return await self._post("/ai/analyze-progress", payload=payload, cache_ttl=300)
+        return await self._post("/ai/analyze-progress", payload=payload, cache_ttl=120, tenant_id=tenant_id, user_id=user_id)
 
     async def explain_topic(self, *, topic_name: str) -> dict:
         return await self._post("/ai/explain-topic", payload={"topic_name": topic_name}, cache_ttl=1800)

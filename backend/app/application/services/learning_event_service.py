@@ -81,7 +81,7 @@ class LearningEventService:
             else:
                 await outbox.add_task_event(
                     task_name="jobs.process_learning_event",
-                    args=[int(event.id)],
+                    args=[int(event.id), tenant_id],
                     tenant_id=tenant_id,
                 )
             await self.session.commit()

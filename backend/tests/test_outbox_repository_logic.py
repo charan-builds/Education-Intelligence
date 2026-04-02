@@ -21,12 +21,13 @@ def _event(attempts: int = 0) -> OutboxEvent:
         tenant_id=1,
         event_type="celery_task",
         payload_json="{}",
-        status="pending",
+        status="queued",
         attempts=attempts,
         error_message=None,
         created_at=now,
         available_at=now,
         dispatched_at=None,
+        processed_at=None,
     )
 
 
@@ -56,7 +57,7 @@ def test_mark_failed_keeps_pending_before_limit():
         await repo.mark_failed(event, "temporary failure", retry_delay_seconds=60, max_attempts=5)
 
         assert event.attempts == 2
-        assert event.status == "pending"
+        assert event.status == "failed"
         assert event.error_message == "temporary failure"
         assert event.available_at >= original_available_at
 
