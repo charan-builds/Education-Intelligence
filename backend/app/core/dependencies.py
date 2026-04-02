@@ -36,7 +36,7 @@ async def get_current_user(
     try:
         payload = decode_access_token(token)
         user_id = int(payload["sub"])
-        actor_tenant_id = int(payload.get("tenant_id", get_request_tenant_id(request)))
+        actor_tenant_id = int(payload["tenant_id"])
         session_id = str(payload["jti"])
         token_version = int(payload.get("tv", 0))
         token_scope = str(payload.get("scope", TOKEN_SCOPE_FULL_ACCESS))
@@ -69,15 +69,6 @@ async def get_current_user(
     membership_role = membership.role if membership is not None else user.role
 
     effective_tenant_id = actor_tenant_id
-    if user.role.value == "super_admin":
-        raw_tenant_id = request.headers.get("X-Tenant-ID")
-        try:
-            if raw_tenant_id is not None:
-                effective_tenant_id = int(raw_tenant_id)
-        except ValueError:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tenant header")
-    elif request.headers.get("X-Tenant-ID") is not None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant override is not allowed")
 
     request.state.actor_tenant_id = actor_tenant_id
     request.state.tenant_id = effective_tenant_id
@@ -133,7 +124,7 @@ def get_request_tenant_id(request: Request) -> int:
     tenant_id = getattr(request.state, "tenant_id", None)
     if isinstance(tenant_id, int):
         return tenant_id
-    return 1
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant context missing")
 
 
 def get_pagination_params(

@@ -15,10 +15,14 @@ class CommunityRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    @staticmethod
+    def _require_tenant_id(tenant_id: int | None) -> int:
+        if tenant_id is None or int(tenant_id) <= 0:
+            raise ValueError("tenant_id is required")
+        return int(tenant_id)
+
     async def get_topic(self, topic_id: int, tenant_id: int | None = None) -> Topic | None:
-        stmt = select(Topic).where(Topic.id == topic_id)
-        if tenant_id is not None:
-            stmt = stmt.where(Topic.tenant_id == tenant_id)
+        stmt = select(Topic).where(Topic.id == topic_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -29,14 +33,14 @@ class CommunityRepository:
         offset: int,
         topic_id: int | None = None,
     ) -> list[Community]:
-        stmt = select(Community).where(Community.tenant_id == tenant_id).order_by(Community.id.asc())
+        stmt = select(Community).where(Community.tenant_id == self._require_tenant_id(tenant_id)).order_by(Community.id.asc())
         if topic_id is not None:
             stmt = stmt.where(Community.topic_id == topic_id)
         result = await self.session.execute(stmt.limit(limit).offset(offset))
         return list(result.scalars().all())
 
     async def count_communities(self, tenant_id: int, topic_id: int | None = None) -> int:
-        stmt = select(func.count(Community.id)).where(Community.tenant_id == tenant_id)
+        stmt = select(func.count(Community.id)).where(Community.tenant_id == self._require_tenant_id(tenant_id))
         if topic_id is not None:
             stmt = stmt.where(Community.topic_id == topic_id)
         result = await self.session.execute(stmt)
@@ -44,13 +48,13 @@ class CommunityRepository:
 
     async def get_community(self, tenant_id: int, community_id: int) -> Community | None:
         result = await self.session.execute(
-            select(Community).where(Community.tenant_id == tenant_id, Community.id == community_id)
+            select(Community).where(Community.tenant_id == self._require_tenant_id(tenant_id), Community.id == community_id)
         )
         return result.scalar_one_or_none()
 
     async def get_community_by_topic(self, tenant_id: int, topic_id: int) -> Community | None:
         result = await self.session.execute(
-            select(Community).where(Community.tenant_id == tenant_id, Community.topic_id == topic_id)
+            select(Community).where(Community.tenant_id == self._require_tenant_id(tenant_id), Community.topic_id == topic_id)
         )
         return result.scalar_one_or_none()
 
@@ -82,14 +86,14 @@ class CommunityRepository:
         offset: int,
         community_id: int | None = None,
     ) -> list[CommunityMember]:
-        stmt = select(CommunityMember).where(CommunityMember.tenant_id == tenant_id).order_by(CommunityMember.id.asc())
+        stmt = select(CommunityMember).where(CommunityMember.tenant_id == self._require_tenant_id(tenant_id)).order_by(CommunityMember.id.asc())
         if community_id is not None:
             stmt = stmt.where(CommunityMember.community_id == community_id)
         result = await self.session.execute(stmt.limit(limit).offset(offset))
         return list(result.scalars().all())
 
     async def count_members(self, tenant_id: int, community_id: int | None = None) -> int:
-        stmt = select(func.count(CommunityMember.id)).where(CommunityMember.tenant_id == tenant_id)
+        stmt = select(func.count(CommunityMember.id)).where(CommunityMember.tenant_id == self._require_tenant_id(tenant_id))
         if community_id is not None:
             stmt = stmt.where(CommunityMember.community_id == community_id)
         result = await self.session.execute(stmt)
@@ -103,7 +107,7 @@ class CommunityRepository:
     ) -> CommunityMember | None:
         result = await self.session.execute(
             select(CommunityMember).where(
-                CommunityMember.tenant_id == tenant_id,
+                CommunityMember.tenant_id == self._require_tenant_id(tenant_id),
                 CommunityMember.community_id == community_id,
                 CommunityMember.user_id == user_id,
             )
@@ -135,7 +139,7 @@ class CommunityRepository:
         offset: int,
         community_id: int | None = None,
     ) -> list[DiscussionThread]:
-        stmt = select(DiscussionThread).where(DiscussionThread.tenant_id == tenant_id).order_by(
+        stmt = select(DiscussionThread).where(DiscussionThread.tenant_id == self._require_tenant_id(tenant_id)).order_by(
             DiscussionThread.created_at.desc(),
             DiscussionThread.id.desc(),
         )
@@ -145,7 +149,7 @@ class CommunityRepository:
         return list(result.scalars().all())
 
     async def count_threads(self, tenant_id: int, community_id: int | None = None) -> int:
-        stmt = select(func.count(DiscussionThread.id)).where(DiscussionThread.tenant_id == tenant_id)
+        stmt = select(func.count(DiscussionThread.id)).where(DiscussionThread.tenant_id == self._require_tenant_id(tenant_id))
         if community_id is not None:
             stmt = stmt.where(DiscussionThread.community_id == community_id)
         result = await self.session.execute(stmt)
@@ -175,7 +179,7 @@ class CommunityRepository:
     async def get_thread(self, tenant_id: int, thread_id: int) -> DiscussionThread | None:
         result = await self.session.execute(
             select(DiscussionThread).where(
-                DiscussionThread.tenant_id == tenant_id,
+                DiscussionThread.tenant_id == self._require_tenant_id(tenant_id),
                 DiscussionThread.id == thread_id,
             )
         )
@@ -195,7 +199,7 @@ class CommunityRepository:
     ) -> list[DiscussionReply]:
         stmt = (
             select(DiscussionReply)
-            .where(DiscussionReply.tenant_id == tenant_id, DiscussionReply.thread_id == thread_id)
+            .where(DiscussionReply.tenant_id == self._require_tenant_id(tenant_id), DiscussionReply.thread_id == thread_id)
             .order_by(DiscussionReply.created_at.asc(), DiscussionReply.id.asc())
         )
         result = await self.session.execute(stmt.limit(limit).offset(offset))
@@ -203,7 +207,7 @@ class CommunityRepository:
 
     async def count_replies(self, tenant_id: int, thread_id: int) -> int:
         stmt = select(func.count(DiscussionReply.id)).where(
-            DiscussionReply.tenant_id == tenant_id,
+            DiscussionReply.tenant_id == self._require_tenant_id(tenant_id),
             DiscussionReply.thread_id == thread_id,
         )
         result = await self.session.execute(stmt)
@@ -235,14 +239,14 @@ class CommunityRepository:
         offset: int,
         user_id: int | None = None,
     ) -> list[Badge]:
-        stmt = select(Badge).where(Badge.tenant_id == tenant_id).order_by(Badge.awarded_at.desc(), Badge.id.desc())
+        stmt = select(Badge).where(Badge.tenant_id == self._require_tenant_id(tenant_id)).order_by(Badge.awarded_at.desc(), Badge.id.desc())
         if user_id is not None:
             stmt = stmt.where(Badge.user_id == user_id)
         result = await self.session.execute(stmt.limit(limit).offset(offset))
         return list(result.scalars().all())
 
     async def count_badges(self, tenant_id: int, user_id: int | None = None) -> int:
-        stmt = select(func.count(Badge.id)).where(Badge.tenant_id == tenant_id)
+        stmt = select(func.count(Badge.id)).where(Badge.tenant_id == self._require_tenant_id(tenant_id))
         if user_id is not None:
             stmt = stmt.where(Badge.user_id == user_id)
         result = await self.session.execute(stmt)

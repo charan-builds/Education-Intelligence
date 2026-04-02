@@ -120,13 +120,9 @@ class TenantContextMiddleware(BaseHTTPMiddleware):
             try:
                 payload = decode_access_token(token)
                 token_tenant_id = payload.get("tenant_id")
-                token_role = payload.get("role")
                 if token_tenant_id is not None:
                     actor_tenant_id = int(token_tenant_id)
                     tenant_id = actor_tenant_id
-                raw_tenant_id = request.headers.get("X-Tenant-ID")
-                if raw_tenant_id is not None and token_role == "super_admin":
-                    tenant_id = int(raw_tenant_id)
             except (AuthenticationError, TypeError, ValueError):
                 actor_tenant_id = settings.default_tenant_id
                 tenant_id = settings.default_tenant_id

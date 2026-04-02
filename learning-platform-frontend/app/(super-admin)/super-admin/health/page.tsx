@@ -6,10 +6,12 @@ import { useQuery } from "@tanstack/react-query";
 import PageHeader from "@/components/layouts/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
+import { API_BASE_URL } from "@/services/apiClient";
 import { getHealth } from "@/services/healthService";
 import { getOutboxStats } from "@/services/opsService";
 
 export default function SuperAdminHealthPage() {
+  const backendHealthHref = `${API_BASE_URL || ""}/health`;
   const healthQuery = useQuery({
     queryKey: ["super-admin", "health"],
     queryFn: getHealth,
@@ -39,7 +41,7 @@ export default function SuperAdminHealthPage() {
       <SurfaceCard title="Monitoring links" description="Local stack endpoints exposed by Docker Compose.">
         <div className="grid gap-4 md:grid-cols-3">
           {[
-            { label: "Backend health", href: "http://localhost:8000/health" },
+            { label: "Backend health", href: backendHealthHref || "/health" },
             { label: "Prometheus", href: "http://localhost:9090" },
             { label: "Grafana", href: "http://localhost:3001" },
           ].map((item) => (

@@ -14,6 +14,12 @@ class RoadmapRepository(BaseRepository):
     def __init__(self, session: AsyncSession):
         super().__init__(session)
 
+    @staticmethod
+    def _require_tenant_id(tenant_id: int | None) -> int:
+        if tenant_id is None or int(tenant_id) <= 0:
+            raise ValueError("tenant_id is required")
+        return int(tenant_id)
+
     async def create_roadmap(
         self,
         user_id: int,
@@ -52,7 +58,7 @@ class RoadmapRepository(BaseRepository):
                 Roadmap.user_id == user_id,
                 Roadmap.goal_id == goal_id,
                 Roadmap.test_id == test_id,
-                tenant_user_scope(Roadmap.user, tenant_id),
+                tenant_user_scope(Roadmap.user, self._require_tenant_id(tenant_id)),
             )
             .limit(1)
         )
@@ -97,7 +103,7 @@ class RoadmapRepository(BaseRepository):
             select(Roadmap)
             .options(selectinload(Roadmap.steps))
             .join(Roadmap.user)
-            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, tenant_id))
+            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, self._require_tenant_id(tenant_id)))
             .order_by(Roadmap.id.desc())
             .limit(1)
         )
@@ -127,7 +133,7 @@ class RoadmapRepository(BaseRepository):
             select(Roadmap)
             .options(selectinload(Roadmap.steps))
             .join(Roadmap.user)
-            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, tenant_id))
+            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, self._require_tenant_id(tenant_id)))
             .order_by(Roadmap.id.desc())
         )
         if cursor_id is not None:
@@ -145,7 +151,7 @@ class RoadmapRepository(BaseRepository):
             .where(
                 Roadmap.id == roadmap_id,
                 Roadmap.user_id == user_id,
-                tenant_user_scope(Roadmap.user, tenant_id),
+                tenant_user_scope(Roadmap.user, self._require_tenant_id(tenant_id)),
             )
         )
         result = await self.session.execute(stmt)
@@ -155,7 +161,7 @@ class RoadmapRepository(BaseRepository):
         result = await self.session.execute(
             select(func.count(Roadmap.id))
             .join(Roadmap.user)
-            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, tenant_id))
+            .where(Roadmap.user_id == user_id, tenant_user_scope(Roadmap.user, self._require_tenant_id(tenant_id)))
         )
         return int(result.scalar_one())
 
@@ -167,7 +173,7 @@ class RoadmapRepository(BaseRepository):
             .where(
                 RoadmapStep.id == step_id,
                 Roadmap.user_id == user_id,
-                tenant_user_scope(Roadmap.user, tenant_id),
+                tenant_user_scope(Roadmap.user, self._require_tenant_id(tenant_id)),
             )
         )
         result = await self.session.execute(stmt)

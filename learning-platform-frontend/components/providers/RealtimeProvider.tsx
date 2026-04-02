@@ -14,6 +14,7 @@ import {
 import { useToast } from "@/components/providers/ToastProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantScope } from "@/hooks/useTenantScope";
+import { API_BASE_URL } from "@/services/apiClient";
 import type { PlatformNotification } from "@/types/notification";
 import type { RealtimeEvent } from "@/types/realtime";
 
@@ -96,8 +97,13 @@ export function RealtimeProvider({ children }: PropsWithChildren) {
 
   useEffect(() => {
     mountedRef.current = true;
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL;
-    if (!apiUrl || !isAuthenticated) {
+    if (!isAuthenticated) {
+      setConnectionStatus("offline");
+      return;
+    }
+
+    const apiUrl = API_BASE_URL || (typeof window !== "undefined" ? window.location.origin : "");
+    if (!apiUrl) {
       setConnectionStatus("offline");
       return;
     }

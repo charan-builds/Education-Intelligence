@@ -32,6 +32,10 @@ from app.schemas.user_schema import UserResponse
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def get_auth_service(db: AsyncSession = Depends(get_db_session)) -> AuthService:
+    return AuthService(db)
+
+
 def _serialize_user(user, *, tenant_id: int, role) -> UserResponse:
     return UserResponse.model_validate(
         {
@@ -97,9 +101,9 @@ def _clear_auth_cookies(response: Response) -> None:
 async def register(
     payload: RegisterRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    user = await AuthService(db).register(
+    user = await service.register(
         email=payload.email,
         password=payload.password,
         tenant_id=payload.tenant_id,
@@ -113,14 +117,25 @@ async def register(
 
 
 @router.post("/invite-accept", response_model=UserResponse)
-async def accept_invite(payload: RegisterRequest, db: AsyncSession = Depends(get_db_session)):
-    return await register(payload=payload, db=db)
+async def accept_invite(
+    payload: RegisterRequest,
+    background_tasks: BackgroundTasks,
+    service: AuthService = Depends(get_auth_service),
+):
+    return await register(payload=payload, background_tasks=background_tasks, service=service)
 
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("5/minute", key_func=rate_limit_key_by_ip)
-async def login(request: Request, response: Response, payload: LoginRequest, db: AsyncSession = Depends(get_db_session)):
-    result = await AuthService(db).login(
+async def login(
+    request: Request,
+    response: Response,
+    payload: LoginRequest,
+    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
+):
+    resolved_service = service if hasattr(service, "login") else AuthService(db)
+    result = await resolved_service.login(
         payload.email,
         payload.password,
         tenant_id=payload.tenant_id,
@@ -155,11 +170,13 @@ async def refresh_session(
     response: Response,
     payload: RefreshRequest | None = None,
     db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
+    resolved_service = service if hasattr(service, "refresh_session") else AuthService(db)
     refresh_token = (payload.refresh_token if payload else None) or request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
-    access_token, next_refresh_token, user, effective_role = await AuthService(db).refresh_session(
+    access_token, next_refresh_token, user, effective_role = await resolved_service.refresh_session(
         refresh_token,
         device=request.headers.get("user-agent"),
         ip_address=request.client.host if request.client else None,
@@ -185,14 +202,16 @@ async def logout(
     response: Response,
     payload: LogoutRequest | None = None,
     db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
+    resolved_service = service if hasattr(service, "logout") else AuthService(db)
     refresh_token = (payload.refresh_token if payload else None) or request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
     access_token = request.cookies.get(ACCESS_TOKEN_COOKIE_NAME)
     if access_token is None:
         auth_header = request.headers.get("authorization", "")
         if auth_header.lower().startswith("bearer "):
             access_token = auth_header.split(" ", 1)[1].strip()
-    await AuthService(db).logout(refresh_token, access_token=access_token)
+    await resolved_service.logout(refresh_token, access_token=access_token)
     _clear_auth_cookies(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
@@ -200,20 +219,20 @@ async def logout(
 
 @router.get("/sessions", response_model=list[ActiveSessionResponse])
 async def list_active_sessions(
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    return await AuthService(db).list_active_sessions(user_id=current_user.id)
+    return await service.list_active_sessions(user_id=current_user.id)
 
 
 @router.post("/logout-all", response_model=AuthActionResponse)
 async def logout_all_devices(
     request: Request,
     response: Response,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    revoked = await AuthService(db).logout_all_devices(user_id=current_user.id, tenant_id=current_user.tenant_id)
+    revoked = await service.logout_all_devices(user_id=current_user.id, tenant_id=current_user.tenant_id)
     _clear_auth_cookies(response)
     return AuthActionResponse(detail=f"Revoked {revoked} active sessions")
 
@@ -222,9 +241,9 @@ async def logout_all_devices(
 async def request_email_verification(
     payload: EmailVerificationRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    token = await AuthService(db).request_email_verification(
+    token = await service.request_email_verification(
         tenant_id=payload.tenant_id,
         email=payload.email,
         background_tasks=background_tasks,
@@ -235,35 +254,37 @@ async def request_email_verification(
 @router.post("/email-verification/confirm", response_model=AuthActionResponse)
 async def confirm_email_verification(
     payload: EmailVerificationConfirmRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    user = await AuthService(db).verify_email(token=payload.token)
+    user = await service.verify_email(token=payload.token)
     return AuthActionResponse(detail=f"Email verified for user {user.id}")
 
 
 @router.post("/email-verification", response_model=AuthActionResponse)
 async def confirm_email_verification_alias(
     payload: EmailVerificationConfirmRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    return await confirm_email_verification(payload=payload, db=db)
+    user = await service.verify_email(token=payload.token)
+    return AuthActionResponse(detail=f"Email verified for user {user.id}")
 
 
 @router.post("/verify-email", response_model=AuthActionResponse)
 async def verify_email_alias(
     payload: EmailVerificationConfirmRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    return await confirm_email_verification(payload=payload, db=db)
+    user = await service.verify_email(token=payload.token)
+    return AuthActionResponse(detail=f"Email verified for user {user.id}")
 
 
 @router.post("/password-reset/request", response_model=AuthActionResponse)
 async def request_password_reset(
     payload: PasswordResetRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    token = await AuthService(db).request_password_reset(
+    token = await service.request_password_reset(
         tenant_id=payload.tenant_id,
         email=payload.email,
         background_tasks=background_tasks,
@@ -286,10 +307,10 @@ async def forgot_password(
 async def send_phone_otp(
     payload: OTPRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    code = await AuthService(db).send_phone_otp(
+    code = await service.send_phone_otp(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         phone_number=payload.phone_number,
@@ -301,10 +322,10 @@ async def send_phone_otp(
 @router.post("/verify-otp", response_model=AuthActionResponse)
 async def verify_phone_otp(
     payload: OTPVerifyRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    await AuthService(db).verify_phone_otp(
+    await service.verify_phone_otp(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
         code=payload.code,
@@ -315,28 +336,29 @@ async def verify_phone_otp(
 @router.post("/password-reset/confirm", response_model=AuthActionResponse)
 async def confirm_password_reset(
     payload: PasswordResetConfirmRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    user = await AuthService(db).reset_password(token=payload.token, password=payload.password)
+    user = await service.reset_password(token=payload.token, password=payload.password)
     return AuthActionResponse(detail=f"Password reset for user {user.id}")
 
 
 @router.post("/reset-password", response_model=AuthActionResponse)
 async def reset_password_alias(
     payload: PasswordResetConfirmRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    return await confirm_password_reset(payload=payload, db=db)
+    user = await service.reset_password(token=payload.token, password=payload.password)
+    return AuthActionResponse(detail=f"Password reset for user {user.id}")
 
 
 @router.post("/invites", response_model=InviteResponse)
 async def create_invite(
     payload: InviteCreateRequest,
     request: Request,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    invite_token = await AuthService(db).create_invite(
+    invite_token = await service.create_invite(
         actor_role=current_user.role if isinstance(current_user.role, UserRole) else UserRole(str(current_user.role)),
         tenant_id=current_user.tenant_id,
         role=payload.role,
@@ -358,27 +380,27 @@ async def create_invite(
 
 @router.post("/mfa/setup", response_model=MFASetupResponse)
 async def setup_mfa(
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    return await AuthService(db).begin_mfa_setup(user_id=current_user.id, tenant_id=current_user.tenant_id)
+    return await service.begin_mfa_setup(user_id=current_user.id, tenant_id=current_user.tenant_id)
 
 
 @router.post("/mfa/enable", response_model=AuthActionResponse)
 async def enable_mfa(
     payload: MFAVerifyRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    await AuthService(db).enable_mfa(user_id=current_user.id, tenant_id=current_user.tenant_id, code=payload.code)
+    await service.enable_mfa(user_id=current_user.id, tenant_id=current_user.tenant_id, code=payload.code)
     return AuthActionResponse(detail="Multi-factor authentication enabled")
 
 
 @router.post("/mfa/disable", response_model=AuthActionResponse)
 async def disable_mfa(
     payload: MFAVerifyRequest,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
     current_user=Depends(get_current_user),
 ):
-    await AuthService(db).disable_mfa(user_id=current_user.id, tenant_id=current_user.tenant_id, code=payload.code)
+    await service.disable_mfa(user_id=current_user.id, tenant_id=current_user.tenant_id, code=payload.code)
     return AuthActionResponse(detail="Multi-factor authentication disabled")

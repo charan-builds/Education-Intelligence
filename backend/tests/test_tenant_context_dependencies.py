@@ -21,7 +21,7 @@ def _request(headers: list[tuple[bytes, bytes]] | None = None) -> Request:
     )
 
 
-def test_super_admin_can_override_effective_tenant(monkeypatch):
+def test_super_admin_header_override_is_ignored(monkeypatch):
     async def fake_get_by_id_in_tenant(self, user_id: int, tenant_id: int):
         assert user_id == 1
         assert tenant_id == 1
@@ -36,6 +36,10 @@ def test_super_admin_can_override_effective_tenant(monkeypatch):
         return SimpleNamespace(id="sess-1", user_id=1, tenant_id=1, token_version=3, revoked=False)
 
     monkeypatch.setattr("app.core.dependencies.SessionRepository.get_active", fake_get_active)
+    async def fake_is_blacklisted(self, token_jti: str):
+        return False
+
+    monkeypatch.setattr("app.core.dependencies.TokenBlacklistRepository.is_blacklisted", fake_is_blacklisted)
     monkeypatch.setattr(
         "app.core.dependencies.UserRepository.get_by_id_in_tenant",
         fake_get_by_id_in_tenant,
@@ -51,12 +55,12 @@ def test_super_admin_can_override_effective_tenant(monkeypatch):
     request = _request(headers=[(b"x-tenant-id", b"3")])
     user = asyncio.run(get_current_user(request=request, token="token", db=object()))
 
-    assert user.tenant_id == 3
+    assert user.tenant_id == 1
     assert request.state.actor_tenant_id == 1
-    assert request.state.tenant_id == 3
+    assert request.state.tenant_id == 1
 
 
-def test_non_super_admin_cannot_override_effective_tenant(monkeypatch):
+def test_non_super_admin_header_override_is_ignored(monkeypatch):
     async def fake_get_by_id_in_tenant(self, user_id: int, tenant_id: int):
         assert user_id == 2
         assert tenant_id == 5
@@ -71,6 +75,10 @@ def test_non_super_admin_cannot_override_effective_tenant(monkeypatch):
         return SimpleNamespace(id="sess-2", user_id=2, tenant_id=5, token_version=4, revoked=False)
 
     monkeypatch.setattr("app.core.dependencies.SessionRepository.get_active", fake_get_active)
+    async def fake_is_blacklisted(self, token_jti: str):
+        return False
+
+    monkeypatch.setattr("app.core.dependencies.TokenBlacklistRepository.is_blacklisted", fake_is_blacklisted)
     monkeypatch.setattr(
         "app.core.dependencies.UserRepository.get_by_id_in_tenant",
         fake_get_by_id_in_tenant,
@@ -84,8 +92,10 @@ def test_non_super_admin_cannot_override_effective_tenant(monkeypatch):
     )
 
     request = _request(headers=[(b"x-tenant-id", b"9")])
-    with pytest.raises(HTTPException):
-        asyncio.run(get_current_user(request=request, token="token", db=object()))
+    user = asyncio.run(get_current_user(request=request, token="token", db=object()))
+    assert user.tenant_id == 5
+    assert request.state.actor_tenant_id == 5
+    assert request.state.tenant_id == 5
 
 
 def test_require_tenant_membership_passes_with_valid_membership(monkeypatch):

@@ -15,9 +15,9 @@ class TopicRepository:
 
     @staticmethod
     def _require_tenant_id(tenant_id: int | None) -> int:
-        if tenant_id is None:
+        if tenant_id is None or int(tenant_id) <= 0:
             raise ValueError("tenant_id is required")
-        return tenant_id
+        return int(tenant_id)
 
     async def list_topics(self, tenant_id: int) -> list[Topic]:
         stmt = select(Topic).where(Topic.tenant_id == self._require_tenant_id(tenant_id)).order_by(Topic.id)
@@ -157,11 +157,11 @@ class TopicRepository:
         return questions
 
     async def get_question(self, question_id: int, tenant_id: int | None = None) -> Question | None:
-        stmt = select(Question).where(Question.id == question_id)
-        if tenant_id is not None:
-            stmt = stmt.join(Topic, Topic.id == Question.topic_id).where(
-                Topic.tenant_id == self._require_tenant_id(tenant_id)
-            )
+        stmt = (
+            select(Question)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(Question.id == question_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -236,7 +236,12 @@ class TopicRepository:
         question_type: str | None = None,
         search: str | None = None,
     ) -> list[Question]:
-        stmt = select(Question).join(Topic, Topic.id == Question.topic_id).where(Topic.tenant_id == tenant_id).order_by(Question.id.asc())
+        stmt = (
+            select(Question)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .order_by(Question.id.asc())
+        )
         if topic_id is not None:
             stmt = stmt.where(Question.topic_id == topic_id)
         if question_type is not None:
@@ -260,7 +265,11 @@ class TopicRepository:
         question_type: str | None = None,
         search: str | None = None,
     ) -> int:
-        stmt = select(func.count(Question.id)).join(Topic, Topic.id == Question.topic_id).where(Topic.tenant_id == tenant_id)
+        stmt = (
+            select(func.count(Question.id))
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+        )
         if topic_id is not None:
             stmt = stmt.where(Question.topic_id == topic_id)
         if question_type is not None:

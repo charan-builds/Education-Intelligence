@@ -14,7 +14,9 @@ from app.domain.models.user import User, UserRole
 from app.domain.models.user_tenant_role import UserTenantRole
 from app.domain.models.user_answer import UserAnswer
 from app.infrastructure.cache.cache_service import CacheService
+from app.infrastructure.repositories.topic_repository import TopicRepository
 from app.infrastructure.repositories.tenant_scoping import user_belongs_to_tenant
+from app.infrastructure.repositories.user_repository import UserRepository
 
 
 class AnalyticsService:
@@ -107,6 +109,18 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
     def __init__(self, session: AsyncSession):
         self.session = session
         self.cache_service = CacheService()
+        self.topic_repository = TopicRepository(session)
+        self.user_repository = UserRepository(session)
+
+    async def _require_tenant_user(self, *, tenant_id: int, user_id: int) -> None:
+        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
+        if user is None:
+            raise ValueError("User not found")
+
+    async def _require_tenant_topic(self, *, tenant_id: int, topic_id: int) -> None:
+        topic = await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
+        if topic is None:
+            raise ValueError("Topic not found")
 
     @staticmethod
     def _current_completed_test_ids_subquery(tenant_id: int | None = None):
@@ -751,12 +765,11 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         return await self.cache_service.get_or_set(cache_key, ttl=60, factory=_factory)
 
     async def topic_performance_analytics(self, *, tenant_id: int, topic_id: int) -> dict:
+        await self._require_tenant_topic(tenant_id=tenant_id, topic_id=topic_id)
         topic_result = await self.session.execute(
             select(Topic.id, Topic.name).where(Topic.id == topic_id, Topic.tenant_id == tenant_id).limit(1)
         )
-        topic_row = topic_result.one_or_none()
-        if topic_row is None:
-            raise ValueError("Topic not found in tenant scope")
+        topic_row = topic_result.one()
 
         cache_key = await self.cache_service.build_versioned_key(
             "analytics:topic-performance",

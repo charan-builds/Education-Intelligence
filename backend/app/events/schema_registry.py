@@ -21,6 +21,21 @@ SCHEMA_DEFINITIONS: dict[tuple[str, str], EventSchemaDefinition] = {
         schema_version="v1",
         required_payload_fields=("event_id", "event_type", "tenant_id", "user_id"),
     ),
+    ("diagnostic_completed", "v1"): EventSchemaDefinition(
+        event_name="diagnostic_completed",
+        schema_version="v1",
+        required_payload_fields=("event_id", "diagnostic_test_id", "goal_id", "tenant_id", "user_id"),
+    ),
+    ("roadmap_generated", "v1"): EventSchemaDefinition(
+        event_name="roadmap_generated",
+        schema_version="v1",
+        required_payload_fields=("event_id", "roadmap_id", "diagnostic_test_id", "goal_id", "tenant_id", "user_id"),
+    ),
+    ("user_progress_updated", "v1"): EventSchemaDefinition(
+        event_name="user_progress_updated",
+        schema_version="v1",
+        required_payload_fields=("step_id", "topic_id", "progress_status", "tenant_id", "user_id"),
+    ),
     ("notification.created", "v1"): EventSchemaDefinition(
         event_name="notification.created",
         schema_version="v1",

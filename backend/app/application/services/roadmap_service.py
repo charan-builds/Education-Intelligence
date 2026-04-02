@@ -290,7 +290,7 @@ class RoadmapService:
 
             await self.roadmap_repository.mark_status(roadmap, status="ready", error_message=None)
             roadmap.generated_at = datetime.now(timezone.utc)
-            await self.learning_event_service.track_roadmap_generated(
+            roadmap_event = await self.learning_event_service.track_roadmap_generated(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 diagnostic_test_id=test_id,
@@ -298,6 +298,18 @@ class RoadmapService:
                 roadmap_id=int(roadmap.id),
                 idempotency_key=f"roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
                 commit=False,
+            )
+            await self.outbox_service.add_domain_event_message(
+                event_name="roadmap_generated",
+                tenant_id=tenant_id,
+                user_id=user_id,
+                payload={
+                    "event_id": int(roadmap_event.id),
+                    "roadmap_id": int(roadmap.id),
+                    "diagnostic_test_id": int(test_id),
+                    "goal_id": int(goal_id),
+                },
+                idempotency_key=f"domain-roadmap-generated:{tenant_id}:{user_id}:{goal_id}:{test_id}",
             )
             await self.session.commit()
             await self.cache_service.bump_namespace_version("analytics:overview")
@@ -492,6 +504,18 @@ class RoadmapService:
             args=[tenant_id, 100],
             tenant_id=tenant_id,
             idempotency_key=f"generate-notifications:roadmap-step:{tenant_id}:{user_id}:{step_id}:{normalized_status}",
+        )
+        await self.outbox_service.add_domain_event_message(
+            event_name="user_progress_updated",
+            tenant_id=tenant_id,
+            user_id=user_id,
+            payload={
+                "step_id": int(step.id),
+                "topic_id": int(step.topic_id),
+                "progress_status": normalized_status,
+                "roadmap_id": int(step.roadmap_id),
+            },
+            idempotency_key=f"domain-user-progress-updated:{tenant_id}:{user_id}:{step_id}:{normalized_status}",
         )
         await self.session.commit()
         return {

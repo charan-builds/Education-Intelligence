@@ -76,16 +76,23 @@ else:
 
 
 def rate_limit_key_by_ip(request: Request) -> str:
-    return get_remote_address(request)
+    try:
+        return get_remote_address(request)
+    except Exception:
+        client = getattr(request, "client", None)
+        host = getattr(client, "host", None)
+        return str(host or "unknown")
 
 
 def rate_limit_key_by_user(request: Request) -> str:
-    user = getattr(request.state, "user", None)
+    state = getattr(request, "state", None)
+    user = getattr(state, "user", None)
     if user is None:
-        authorization = request.headers.get("authorization", "").strip()
+        headers = getattr(request, "headers", {}) or {}
+        authorization = str(headers.get("authorization", "")).strip() if hasattr(headers, "get") else ""
         if authorization:
             return f"auth:{authorization[:48]}"
-        return get_remote_address(request)
+        return rate_limit_key_by_ip(request)
 
     tenant_id = getattr(user, "tenant_id", "none")
     user_id = getattr(user, "id", "none")

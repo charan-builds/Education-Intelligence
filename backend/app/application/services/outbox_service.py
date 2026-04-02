@@ -92,6 +92,35 @@ class OutboxService:
             )
         )
 
+    async def add_domain_event_message(
+        self,
+        *,
+        event_name: str,
+        tenant_id: int,
+        user_id: int,
+        payload: dict,
+        schema_version: str = "v1",
+        partition_key: str | None = None,
+        idempotency_key: str,
+    ) -> int:
+        enriched_payload = {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            **payload,
+        }
+        return await self.add_kafka_event(
+            envelope=EventEnvelope(
+                topic=LEARNING_EVENTS_TOPIC,
+                event_name=event_name,
+                schema_version=schema_version,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                partition_key=partition_key or f"{tenant_id}:{user_id}",
+                idempotency_key=idempotency_key,
+                payload=enriched_payload,
+            )
+        )
+
     async def add_notification_message(
         self,
         *,

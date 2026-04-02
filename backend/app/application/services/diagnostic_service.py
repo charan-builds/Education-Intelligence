@@ -10,6 +10,7 @@ from app.domain.engines.adaptive_testing_engine import AdaptiveTestingEngine
 from app.domain.engines.weakness_modeling_engine import WeaknessModelingEngine
 from app.application.services.learning_event_service import LearningEventService
 from app.application.services.ml_platform_service import MLPlatformService
+from app.application.services.outbox_service import OutboxService
 from app.application.services.retention_service import RetentionService
 from app.application.services.skill_vector_service import SkillVectorService
 from app.infrastructure.repositories.goal_repository import GoalRepository
@@ -31,6 +32,7 @@ class DiagnosticService:
         self.weakness_engine = WeaknessModelingEngine()
         self.feature_flag_service = FeatureFlagService(session)
         self.learning_event_service = LearningEventService(session)
+        self.outbox_service = OutboxService(session)
         self.gamification_service = GamificationService(session)
         self.retention_service = RetentionService(session)
         self.skill_vector_service = SkillVectorService(session)
@@ -448,13 +450,24 @@ class DiagnosticService:
                     diagnostic_test_id=test_id,
                     confidence=0.75,
                 )
-            await self.learning_event_service.track_diagnostic_completed(
+            diagnostic_event = await self.learning_event_service.track_diagnostic_completed(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 diagnostic_test_id=test_id,
                 goal_id=test.goal_id,
                 idempotency_key=f"diagnostic-complete:{tenant_id}:{user_id}:{test_id}",
                 commit=False,
+            )
+            await self.outbox_service.add_domain_event_message(
+                event_name="diagnostic_completed",
+                tenant_id=tenant_id,
+                user_id=user_id,
+                payload={
+                    "event_id": int(diagnostic_event.id),
+                    "diagnostic_test_id": int(test_id),
+                    "goal_id": int(test.goal_id),
+                },
+                idempotency_key=f"domain-diagnostic-complete:{tenant_id}:{user_id}:{test_id}",
             )
             await self.gamification_service.award_test_completion(
                 tenant_id=tenant_id,

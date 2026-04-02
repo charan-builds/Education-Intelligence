@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
 from dataclasses import dataclass
 from fastapi import BackgroundTasks
 
@@ -8,24 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.exceptions import ConflictError, UnauthorizedError, ValidationError
 from app.application.services.audit_log_service import AuditLogService
 from app.application.services.email_service import EmailService
+from app.application.services.mfa_service import MFAService
+from app.application.services.session_service import SessionService
+from app.application.services.token_service import TokenService
 from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.core.security import (
     PasswordValidationError,
-    build_totp_uri,
-    create_access_token,
     create_invite_token,
-    create_refresh_token_with_jti,
     decode_invite_token,
-    decode_refresh_token,
     TOKEN_SCOPE_FULL_ACCESS,
     TOKEN_SCOPE_ONBOARDING,
     generate_opaque_token,
-    generate_totp_secret,
     hash_token_value,
     hash_password,
     validate_password_strength,
-    verify_totp_code,
     verify_password,
 )
 from app.domain.models.auth_token import AuthTokenPurpose
@@ -65,60 +61,20 @@ class AuthService:
         self.logger = get_logger()
         self.audit_log_service = AuditLogService(session)
         self.email_service = EmailService()
-
-    @staticmethod
-    def _refresh_session_expiry() -> datetime:
-        settings = get_settings()
-        return datetime.now(timezone.utc) + timedelta(minutes=settings.refresh_token_expire_minutes)
+        self.token_service = TokenService(self.refresh_token_repository)
+        self.session_service = SessionService(
+            session_repository=self.session_repository,
+            refresh_token_repository=self.refresh_token_repository,
+            token_blacklist_repository=self.token_blacklist_repository,
+            token_service=self.token_service,
+        )
+        self.mfa_service = MFAService(
+            user_repository=self.user_repository,
+            session_repository=self.session_repository,
+        )
 
     async def _next_token_version(self, *, user_id: int) -> int:
-        repository = self.refresh_session_repository
-        if hasattr(repository, "next_token_version_for_user"):
-            return await repository.next_token_version_for_user(user_id=user_id)
-        try:
-            return await self.session_repository.next_token_version_for_user(user_id=user_id)
-        except AttributeError:
-            return 1
-
-    async def _create_refresh_session(
-        self,
-        *,
-        user: User,
-        tenant_id: int,
-        role: UserRole,
-        device: str | None,
-        ip_address: str | None = None,
-        token_version: int | None = None,
-    ) -> str:
-        session_id = uuid4().hex
-        expires_at = self._refresh_session_expiry()
-        resolved_token_version = token_version or await self._next_token_version(user_id=int(user.id))
-        await self.refresh_session_repository.create(
-            session_id=session_id,
-            user_id=int(user.id),
-            tenant_id=tenant_id,
-            token_version=resolved_token_version,
-            device=device,
-            expires_at=expires_at,
-        )
-        token_payload = {
-            "sub": str(user.id),
-            "tenant_id": tenant_id,
-            "role": role.value,
-            "tv": resolved_token_version,
-        }
-        refresh_token = create_refresh_token_with_jti(token_payload, token_id=session_id)
-        await self.refresh_token_repository.create(
-            user_id=int(user.id),
-            tenant_id=tenant_id,
-            token_hash=hash_token_value(refresh_token),
-            token_jti=session_id,
-            device_info=device,
-            ip_address=ip_address,
-            expires_at=expires_at,
-            metadata={"role": role.value},
-        )
-        return refresh_token
+        return await self.session_service.next_token_version(user_id=user_id)
 
     async def register(
         self,
@@ -301,7 +257,7 @@ class AuthService:
                 raise UnauthorizedError("MFA is enabled but not configured correctly")
             if not mfa_code:
                 raise UnauthorizedError("MFA code required")
-            if not verify_totp_code(secret, mfa_code):
+            if not self._verify_totp_code(secret, mfa_code):
                 raise UnauthorizedError("Invalid MFA code")
         membership = await self.user_tenant_role_repository.get_membership(
             user_id=int(user.id),
@@ -310,23 +266,15 @@ class AuthService:
         effective_role = membership.role if membership is not None else user.role
         if not bool(getattr(user, "is_profile_completed", False)):
             token_version = await self._next_token_version(user_id=int(user.id))
-            onboarding_refresh_token = await self._create_refresh_session(
+            onboarding_access_token, _, _ = await self.session_service.create_session_tokens(
                 user=user,
                 tenant_id=resolved_tenant_id,
                 role=effective_role,
                 device=device,
                 ip_address=ip_address,
                 token_version=token_version,
-            )
-            onboarding_access_token = create_access_token(
-                {
-                    "sub": str(user.id),
-                    "tenant_id": resolved_tenant_id,
-                    "role": effective_role.value,
-                    "tv": token_version,
-                    "scope": TOKEN_SCOPE_ONBOARDING,
-                },
-                token_id=decode_refresh_token(onboarding_refresh_token)["jti"],
+                scope=TOKEN_SCOPE_ONBOARDING,
+                include_refresh_token=False,
             )
             await self.session.commit()
             await self._log_auth_event(
@@ -348,22 +296,15 @@ class AuthService:
                 scope=TOKEN_SCOPE_ONBOARDING,
             )
         token_version = await self._next_token_version(user_id=int(user.id))
-        token_payload = {
-            "sub": str(user.id),
-            "tenant_id": resolved_tenant_id,
-            "role": effective_role.value,
-            "tv": token_version,
-            "scope": TOKEN_SCOPE_FULL_ACCESS,
-        }
-        refresh_token = await self._create_refresh_session(
+        access_token, refresh_token, _ = await self.session_service.create_session_tokens(
             user=user,
             tenant_id=resolved_tenant_id,
             role=effective_role,
             device=device,
             ip_address=ip_address,
             token_version=token_version,
+            scope=TOKEN_SCOPE_FULL_ACCESS,
         )
-        access_token = create_access_token(token_payload, token_id=decode_refresh_token(refresh_token)["jti"])
         await self.session.commit()
         await self.audit_log_service.record(
             tenant_id=resolved_tenant_id,
@@ -404,45 +345,17 @@ class AuthService:
         )
 
     async def begin_mfa_setup(self, *, user_id: int, tenant_id: int) -> dict[str, str]:
-        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
-        if user is None:
-            raise ValidationError("User not found")
-        secret = generate_totp_secret()
-        user.mfa_secret = secret
-        user.mfa_enabled = False
+        payload = await self.mfa_service.begin_setup(user_id=user_id, tenant_id=tenant_id)
         await self.session.commit()
-        issuer = "Learnova AI"
-        return {
-            "secret": secret,
-            "manual_entry_code": secret,
-            "otp_auth_url": build_totp_uri(secret=secret, account_name=user.email, issuer=issuer),
-        }
+        return payload
 
     async def enable_mfa(self, *, user_id: int, tenant_id: int, code: str) -> User:
-        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
-        if user is None:
-            raise ValidationError("User not found")
-        secret = getattr(user, "mfa_secret", None)
-        if not secret:
-            raise ValidationError("Start MFA setup before enabling it")
-        if not verify_totp_code(secret, code):
-            raise ValidationError("Invalid MFA code")
-        user.mfa_enabled = True
+        user = await self.mfa_service.enable(user_id=user_id, tenant_id=tenant_id, code=code)
         await self.session.commit()
         return user
 
     async def disable_mfa(self, *, user_id: int, tenant_id: int, code: str) -> User:
-        user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
-        if user is None:
-            raise ValidationError("User not found")
-        secret = getattr(user, "mfa_secret", None)
-        if not user.mfa_enabled or not secret:
-            raise ValidationError("MFA is not enabled")
-        if not verify_totp_code(secret, code):
-            raise ValidationError("Invalid MFA code")
-        user.mfa_enabled = False
-        user.mfa_secret = None
-        await self.refresh_session_repository.revoke_for_user(user_id=user_id)
+        user = await self.mfa_service.disable(user_id=user_id, tenant_id=tenant_id, code=code)
         await self.session.commit()
         return user
 
@@ -453,7 +366,7 @@ class AuthService:
         device: str | None = None,
         ip_address: str | None = None,
     ) -> tuple[str, str, User, UserRole]:
-        payload = decode_refresh_token(refresh_token)
+        payload = self.token_service.decode_refresh(refresh_token)
         try:
             user_id = int(payload["sub"])
             tenant_id = int(payload["tenant_id"])
@@ -461,67 +374,38 @@ class AuthService:
         except (KeyError, TypeError, ValueError) as exc:
             raise UnauthorizedError("Invalid refresh token") from exc
 
-        refresh_session = await self.refresh_session_repository.get_active(session_id=session_id)
-        if refresh_session is None or refresh_session.expires_at <= datetime.now(timezone.utc):
-            raise UnauthorizedError("Refresh session expired or revoked")
-        persisted_refresh_token = await self.refresh_token_repository.get_active_by_hash(
-            token_hash=hash_token_value(refresh_token)
-        )
-        if persisted_refresh_token is None or persisted_refresh_token.token_jti != session_id:
-            raise UnauthorizedError("Refresh token expired or revoked")
-        if int(payload.get("tv", refresh_session.token_version)) != int(refresh_session.token_version):
-            raise UnauthorizedError("Refresh token version mismatch")
-
         user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
         if user is None:
             raise UnauthorizedError("User not found")
 
         membership = await self.user_tenant_role_repository.get_membership(user_id=int(user.id), tenant_id=tenant_id)
         effective_role = membership.role if membership is not None else user.role
-        await self.refresh_session_repository.revoke(refresh_session)
-        token_payload = {
-            "sub": str(user.id),
-            "tenant_id": tenant_id,
-            "role": effective_role.value,
-            "tv": int(refresh_session.token_version),
-            "scope": TOKEN_SCOPE_FULL_ACCESS,
-        }
-        next_refresh_token = await self._create_refresh_session(
+        access_token, next_refresh_token = await self.session_service.rotate_refresh_session(
+            refresh_token=refresh_token,
             user=user,
             tenant_id=tenant_id,
             role=effective_role,
-            device=device or refresh_session.device,
+            device=device,
             ip_address=ip_address,
-            token_version=int(refresh_session.token_version),
         )
-        await self.refresh_token_repository.revoke(persisted_refresh_token)
         await self.session.commit()
-        return create_access_token(token_payload, token_id=decode_refresh_token(next_refresh_token)["jti"]), next_refresh_token, user, effective_role
+        return access_token, next_refresh_token, user, effective_role
 
     async def logout(self, refresh_token: str | None, *, access_token: str | None = None) -> None:
         if not refresh_token:
             if access_token:
-                await self._blacklist_access_token(access_token)
+                await self.session_service.blacklist_access_token(access_token)
                 await self.session.commit()
             return
-        try:
-            payload = decode_refresh_token(refresh_token)
-            session_id = str(payload["jti"])
-        except Exception:
-            return
-        revoked = await self.refresh_session_repository.revoke_by_id(session_id=session_id)
-        persisted_refresh_token = await self.refresh_token_repository.get_active_by_hash(
-            token_hash=hash_token_value(refresh_token)
-        )
-        if persisted_refresh_token is not None:
-            await self.refresh_token_repository.revoke(persisted_refresh_token)
+        revoked, payload = await self.session_service.revoke_refresh_session(refresh_token=refresh_token)
         if access_token:
-            await self._blacklist_access_token(access_token)
+            await self.session_service.blacklist_access_token(access_token)
         if revoked:
             await self.session.commit()
             try:
                 user_id = int(payload["sub"])
                 tenant_id = int(payload["tenant_id"])
+                session_id = str(payload["jti"])
             except Exception:
                 return
             await self.audit_log_service.record(
@@ -869,8 +753,7 @@ class AuthService:
     ) -> None:
         if user is not None:
             user.failed_login_attempts = int(getattr(user, "failed_login_attempts", 0)) + 1
-            if user.failed_login_attempts >= 5:
-                user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=15)
+            user.locked_until = self.session_service.lockout_deadline(failed_attempts=user.failed_login_attempts)
         await self._log_auth_event(
             tenant_id=tenant_id,
             user_id=int(user.id) if user is not None else None,
@@ -894,18 +777,11 @@ class AuthService:
             if locked_until > datetime.now(timezone.utc):
                 raise UnauthorizedError("Account locked. Try again later")
 
-    async def _blacklist_access_token(self, access_token: str) -> None:
-        from app.core.security import decode_access_token
+    @staticmethod
+    def _verify_totp_code(secret: str, code: str) -> bool:
+        from app.core.security import verify_totp_code
 
-        payload = decode_access_token(access_token)
-        expires_at = datetime.fromtimestamp(float(payload["exp"]), tz=timezone.utc) if payload.get("exp") is not None else None
-        await self.token_blacklist_repository.add(
-            token_jti=str(payload["jti"]),
-            user_id=int(payload["sub"]),
-            tenant_id=int(payload["tenant_id"]) if payload.get("tenant_id") is not None else None,
-            token_type="access",
-            expires_at=expires_at,
-        )
+        return verify_totp_code(secret, code)
 
     @staticmethod
     def _frontend_origin() -> str:
