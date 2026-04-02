@@ -52,7 +52,11 @@ export default function DashboardShell() {
         tenant_id: resolvedTenantId,
         tenant_subdomain: resolvedSubdomain,
       });
-      router.replace(nextPath ?? getRoleRedirectPath(authenticatedUser?.role ?? role));
+      router.replace(
+        authenticatedUser.requires_profile_completion
+          ? appRoutes.student.profile
+          : (nextPath ?? getRoleRedirectPath(authenticatedUser.user.role ?? role)),
+      );
     } catch (submitError) {
       const apiMessage = axios.isAxiosError(submitError)
         ? (submitError.response?.data?.detail ?? submitError.response?.data?.error)

@@ -274,6 +274,7 @@ async def request_password_reset(
 @router.post("/forgot-password", response_model=AuthActionResponse)
 @limiter.limit("3/minute", key_func=rate_limit_key_by_ip)
 async def forgot_password(
+    request: Request,
     payload: PasswordResetRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session),

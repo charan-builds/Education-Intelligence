@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 
-import { getCurrentUser, login as loginRequest, logout as logoutRequest } from "@/services/authService";
+import { getCurrentUser, login as loginRequest, logout as logoutRequest, type AuthSessionResponse } from "@/services/authService";
 import type { User } from "@/types/user";
 import { AUTH_CHANGED_EVENT, clearStoredToken } from "@/utils/authToken";
 import { canonicalizeRole } from "@/utils/roleRedirect";
@@ -20,11 +20,22 @@ export type AuthUser = {
   user_id: number | null;
   tenant_id: number | null;
   role: string | null;
+  full_name: string | null;
+  email: string | null;
+  is_profile_completed: boolean;
+  is_email_verified: boolean;
+};
+
+type AuthStatus = {
+  scope: "onboarding" | "full_access";
+  requiresProfileCompletion: boolean;
 };
 
 type AuthContextValue = {
   isReady: boolean;
   isAuthenticated: boolean;
+  requiresProfileCompletion: boolean;
+  scope: "onboarding" | "full_access";
   user: AuthUser | null;
   role: string | null;
   login: (
@@ -32,7 +43,7 @@ type AuthContextValue = {
     password: string,
     tenantContext?: { tenant_id?: number | null; tenant_subdomain?: string | null },
     mfaCode?: string | null,
-  ) => Promise<AuthUser | null>;
+  ) => Promise<AuthSessionResponse>;
   logout: () => void;
   refresh: () => Promise<void>;
   getUser: () => AuthUser | null;
@@ -51,6 +62,10 @@ function normalizeUser(payload: User | null): AuthUser | null {
     user_id: Number.isFinite(payload.id) ? payload.id : null,
     tenant_id: Number.isFinite(payload.tenant_id) ? payload.tenant_id : null,
     role: canonicalizeRole(payload.role ? String(payload.role) : null),
+    full_name: typeof payload.full_name === "string" ? payload.full_name : null,
+    email: payload.email ?? null,
+    is_profile_completed: Boolean(payload.is_profile_completed),
+    is_email_verified: Boolean(payload.is_email_verified ?? payload.email_verified_at),
   };
 }
 
@@ -71,6 +86,10 @@ function syncStoredAuthState(user: AuthUser | null): void {
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>({
+    scope: "full_access",
+    requiresProfileCompletion: false,
+  });
   const [isReady, setIsReady] = useState(false);
   const authRequestVersionRef = useRef(0);
 
@@ -83,6 +102,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     syncStoredAuthState(nextUser);
     startTransition(() => {
       setUser(nextUser);
+      setAuthStatus({
+        scope: nextUser?.is_profile_completed === false ? "onboarding" : "full_access",
+        requiresProfileCompletion: nextUser?.is_profile_completed === false,
+      });
       setIsReady(true);
     });
   };
@@ -115,15 +138,19 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const requestVersion = ++authRequestVersionRef.current;
     const session = await loginRequest(email, password, tenantContext, mfaCode);
     if (requestVersion !== authRequestVersionRef.current) {
-      return normalizeUser(session.user);
+      return session;
     }
     const nextUser = normalizeUser(session.user);
     syncStoredAuthState(nextUser);
     startTransition(() => {
       setUser(nextUser);
+      setAuthStatus({
+        scope: session.scope,
+        requiresProfileCompletion: session.requires_profile_completion,
+      });
       setIsReady(true);
     });
-    return nextUser;
+    return session;
   };
 
   const logout = () => {
@@ -136,6 +163,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
     startTransition(() => {
       setUser(null);
+      setAuthStatus({
+        scope: "full_access",
+        requiresProfileCompletion: false,
+      });
       setIsReady(true);
     });
   };
@@ -144,6 +175,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
     () => ({
       isReady,
       isAuthenticated: Boolean(user),
+      requiresProfileCompletion: authStatus.requiresProfileCompletion,
+      scope: authStatus.scope,
       user,
       role: user?.role ?? null,
       login,
@@ -151,7 +184,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       refresh,
       getUser: () => user,
     }),
-    [isReady, user],
+    [authStatus, isReady, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

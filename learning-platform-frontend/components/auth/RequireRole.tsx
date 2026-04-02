@@ -1,11 +1,11 @@
 "use client";
 
 import React, { ReactNode, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
-import { buildAuthPath } from "@/utils/appRoutes";
+import { appRoutes, buildAuthPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath, roleHasAccess } from "@/utils/roleRedirect";
 
 type RequireRoleProps = {
@@ -15,7 +15,8 @@ type RequireRoleProps = {
 
 export default function RequireRole({ allowedRoles, children }: RequireRoleProps) {
   const router = useRouter();
-  const { isReady, isAuthenticated, role } = useAuth();
+  const pathname = usePathname();
+  const { isReady, isAuthenticated, role, requiresProfileCompletion } = useAuth();
 
   useEffect(() => {
     if (!isReady) {
@@ -25,10 +26,14 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
       router.replace(buildAuthPath("login"));
       return;
     }
+    if (requiresProfileCompletion && pathname !== appRoutes.student.profile) {
+      router.replace(appRoutes.student.profile);
+      return;
+    }
     if (role && !roleHasAccess(role, allowedRoles)) {
       router.replace(getRoleRedirectPath(role));
     }
-  }, [allowedRoles, isAuthenticated, isReady, role, router]);
+  }, [allowedRoles, isAuthenticated, isReady, pathname, requiresProfileCompletion, role, router]);
 
   if (!isReady) {
     return <AccessState mode="loading" />;
@@ -36,6 +41,10 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
 
   if (!isAuthenticated) {
     return <AccessState mode="redirecting" description="Redirecting to sign in..." />;
+  }
+
+  if (requiresProfileCompletion && pathname !== appRoutes.student.profile) {
+    return <AccessState mode="redirecting" description="Redirecting to complete your profile..." />;
   }
 
   if (role && !roleHasAccess(role, allowedRoles)) {

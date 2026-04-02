@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision: str = "20260401_0010"
@@ -32,7 +33,11 @@ def upgrade() -> None:
     op.add_column("users", sa.Column("college_name", sa.String(length=255), nullable=True))
     op.execute("UPDATE users SET is_email_verified = true WHERE email_verified_at IS NOT NULL")
 
-    auth_token_enum = sa.Enum("email_verification", "password_reset", name="authtokenpurpose")
+    auth_token_enum = (
+        postgresql.ENUM("email_verification", "password_reset", name="authtokenpurpose", create_type=False)
+        if bind.dialect.name == "postgresql"
+        else sa.Enum("email_verification", "password_reset", name="authtokenpurpose")
+    )
     op.create_table(
         "auth_tokens",
         sa.Column("id", sa.Integer(), primary_key=True),

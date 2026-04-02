@@ -21,6 +21,9 @@ describe("authService", () => {
     postMock.mockResolvedValue({
       data: {
         authenticated: true,
+        requires_profile_completion: false,
+        scope: "full_access",
+        access_token: "access-token",
         token_type: "cookie",
         access_token_expires_in: 3600,
         refresh_token_expires_in: 86400,
@@ -38,6 +41,7 @@ describe("authService", () => {
       password: "password",
       tenant_id: 7,
       tenant_subdomain: undefined,
+      mfa_code: undefined,
     });
   });
 

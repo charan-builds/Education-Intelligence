@@ -82,7 +82,7 @@ export function isAuthEntryPath(path: string | null | undefined): boolean {
 }
 
 export function buildAuthPath(
-  mode: "login" | "register" = "login",
+  mode: "login" | "register" | "forgot-password" | "reset-password" | "email-verification" = "login",
   nextPath?: string | null,
 ): string {
   const params = new URLSearchParams();

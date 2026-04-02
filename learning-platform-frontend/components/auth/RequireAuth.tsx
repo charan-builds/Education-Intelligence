@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
-import { buildAuthPath } from "@/utils/appRoutes";
+import { appRoutes, buildAuthPath } from "@/utils/appRoutes";
 
 type RequireAuthProps = {
   children: ReactNode;
@@ -17,7 +17,7 @@ const PUBLIC_ROUTES = ["/", "/auth", "/login", "/register"];
 export default function RequireAuth({ children }: RequireAuthProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isReady, isAuthenticated } = useAuth();
+  const { isReady, isAuthenticated, requiresProfileCompletion } = useAuth();
 
   useEffect(() => {
     if (!isReady) {
@@ -25,8 +25,18 @@ export default function RequireAuth({ children }: RequireAuthProps) {
     }
     if (!isAuthenticated && pathname && !PUBLIC_ROUTES.includes(pathname)) {
       router.replace(buildAuthPath("login", pathname));
+      return;
     }
-  }, [isAuthenticated, isReady, pathname, router]);
+    if (
+      isAuthenticated &&
+      requiresProfileCompletion &&
+      pathname &&
+      !PUBLIC_ROUTES.includes(pathname) &&
+      pathname !== appRoutes.student.profile
+    ) {
+      router.replace(appRoutes.student.profile);
+    }
+  }, [isAuthenticated, isReady, pathname, requiresProfileCompletion, router]);
 
   if (!isReady) {
     return <AccessState mode="loading" />;
@@ -34,6 +44,10 @@ export default function RequireAuth({ children }: RequireAuthProps) {
 
   if (!isAuthenticated && pathname && !PUBLIC_ROUTES.includes(pathname)) {
     return <AccessState mode="redirecting" description="Redirecting to sign in..." />;
+  }
+
+  if (isAuthenticated && requiresProfileCompletion && pathname && pathname !== appRoutes.student.profile) {
+    return <AccessState mode="redirecting" description="Redirecting to complete your profile..." />;
   }
 
   return <>{children}</>;

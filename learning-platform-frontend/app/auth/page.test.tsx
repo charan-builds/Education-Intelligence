@@ -9,6 +9,7 @@ const replaceMock = vi.fn();
 const mockAuthState = {
   isAuthenticated: true,
   isReady: true,
+  requiresProfileCompletion: false,
   role: "student",
   login: vi.fn(),
 };

@@ -562,6 +562,7 @@ export default function AdminDashboardClient() {
   const analytics = useMemo(() => {
     const byRole: Record<UserRole, number> = {
       student: 0,
+      independent_learner: 0,
       teacher: 0,
       mentor: 0,
       admin: 0,

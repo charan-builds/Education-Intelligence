@@ -4,9 +4,11 @@ import { clearStoredToken, notifyAuthChanged, setStoredToken } from "@/utils/aut
 
 export type AuthSessionResponse = {
   authenticated: boolean;
+  requires_profile_completion: boolean;
   token_type: string;
-  access_token: string;
-  access_token_expires_in: number;
+  scope: "onboarding" | "full_access";
+  access_token: string | null;
+  access_token_expires_in: number | null;
   refresh_token_expires_in?: number | null;
   user: User;
 };
@@ -36,7 +38,22 @@ export async function login(
     tenant_subdomain: tenantContext?.tenant_subdomain ?? undefined,
     mfa_code: mfa_code ?? undefined,
   });
-  setStoredToken(data.access_token);
+  if (data.access_token) {
+    setStoredToken(data.access_token);
+  } else {
+    clearStoredToken();
+  }
+  notifyAuthChanged();
+  return data;
+}
+
+export async function refreshAuthSession(): Promise<AuthSessionResponse> {
+  const { data } = await apiClient.post<AuthSessionResponse>("/auth/refresh");
+  if (data.access_token) {
+    setStoredToken(data.access_token);
+  } else {
+    clearStoredToken();
+  }
   notifyAuthChanged();
   return data;
 }

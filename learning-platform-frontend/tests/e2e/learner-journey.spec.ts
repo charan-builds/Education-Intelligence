@@ -95,6 +95,7 @@ async function mockLearnerJourney(page: Page) {
   let authenticated = false;
   let answered = false;
   let stepStatus: "pending" | "in_progress" | "completed" = "pending";
+  let activeRole: "student" | "mentor" = "student";
 
   const roadmap = {
     id: 41,
@@ -134,7 +135,9 @@ async function mockLearnerJourney(page: Page) {
           id: 1,
           tenant_id: 1,
           email: "learner@example.com",
-          role: "student",
+          role: activeRole,
+          is_profile_completed: true,
+          is_email_verified: true,
           created_at: "2026-03-28T00:00:00Z",
         }),
       });
@@ -168,11 +171,15 @@ async function mockLearnerJourney(page: Page) {
 
     if (pathname === "/auth/login") {
       authenticated = true;
+      activeRole = "student";
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           authenticated: true,
+          requires_profile_completion: false,
+          scope: "full_access",
+          access_token: "header.eyJyb2xlIjoic3R1ZGVudCJ9.signature",
           token_type: "cookie",
           access_token_expires_in: 3600,
           refresh_token_expires_in: 86400,
@@ -181,6 +188,8 @@ async function mockLearnerJourney(page: Page) {
             tenant_id: 1,
             email: "learner@example.com",
             role: "student",
+            is_profile_completed: true,
+            is_email_verified: true,
             created_at: "2026-03-28T00:00:00Z",
           },
         }),
@@ -306,6 +315,61 @@ async function mockLearnerJourney(page: Page) {
       return;
     }
 
+    if (pathname === "/career/overview") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          readiness: {
+            readiness_percent: 67,
+            confidence_label: "building",
+            top_role_matches: [
+              {
+                role_id: 1,
+                role_name: "Backend Engineer",
+                readiness_percent: 67,
+                matched_skills: ["APIs", "Async Systems"],
+                missing_skills: ["System Design"],
+              },
+            ],
+          },
+          resume_preview: {
+            headline: "Backend engineer in progress",
+            summary: "Building API and data skills through roadmap work.",
+            skills: ["APIs", "Databases", "Graph Algorithms"],
+            projects: ["Adaptive learning roadmap"],
+          },
+          career_path: {
+            career_roadmap: {
+              foundation_phase: {
+                duration_months: 3,
+                focus_areas: ["Algorithms", "Backend APIs"],
+              },
+            },
+          },
+        }),
+      });
+      return;
+    }
+
+    if (pathname === "/career/interview-prep") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          role_name: "Backend Engineer",
+          mock_interview_prompt: "Walk through how you would build a multi-tenant API.",
+          questions: [
+            {
+              question_text: "How do you protect tenant isolation?",
+              explanation: "Discuss auth context, row scoping, and validation.",
+            },
+          ],
+        }),
+      });
+      return;
+    }
+
     if (pathname === "/topics") {
       await route.fulfill({
         status: 200,
@@ -356,6 +420,86 @@ async function mockLearnerJourney(page: Page) {
       return;
     }
 
+    if (pathname === "/mentor/learners") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            user_id: 1,
+            tenant_id: 1,
+            email: "learner@example.com",
+            full_name: "Learner Example",
+            roadmap_completion_percent: stepStatus === "completed" ? 100 : stepStatus === "in_progress" ? 50 : 0,
+            mastery_average: 66,
+            weak_topics: ["Graph Algorithms"],
+          },
+        ]),
+      });
+      return;
+    }
+
+    if (pathname === "/mentor/suggestions") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          suggestions: ["Focus on BFS vs DFS tradeoffs, then practice queue-based traversal."],
+        }),
+      });
+      return;
+    }
+
+    if (pathname === "/mentor/notifications") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          notifications: ["Graph Algorithms needs mentor support today."],
+        }),
+      });
+      return;
+    }
+
+    if (pathname === "/mentor/progress-analysis") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          weekly_progress: [{ week: "Week 1", completion_percent: stepStatus === "completed" ? 100 : 50 }],
+          topic_improvements: { "11": 42 },
+          recommended_focus: ["Recover graph traversal fluency"],
+        }),
+      });
+      return;
+    }
+
+    if (pathname === "/mentor/agent/status") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "ready",
+          cycle_summary: "Mentor agent is ready.",
+          memory_summary: "Graph Algorithms remains the highest support priority.",
+          decisions: [{ action: "prioritize_topic", reason: "Low mastery and due review" }],
+        }),
+      });
+      return;
+    }
+
+    if (pathname === "/feature-flags") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [{ id: 1, tenant_id: 1, feature_name: "ai_mentor_enabled", enabled: true }],
+          meta: { total: 1, limit: 20, offset: 0, next_offset: null, next_cursor: null },
+        }),
+      });
+      return;
+    }
+
     if (pathname.startsWith("/mentor/chat/status/")) {
       await route.fulfill({
         status: 200,
@@ -376,10 +520,16 @@ async function mockLearnerJourney(page: Page) {
 
     await route.fallback();
   });
+
+  return {
+    setActiveRole(role: "student" | "mentor") {
+      activeRole = role;
+    },
+  };
 }
 
 test("student learner journey stays intact across auth, diagnostic, roadmap, upload, mentor, and progress", async ({ page }) => {
-  await mockLearnerJourney(page);
+  const journey = await mockLearnerJourney(page);
 
   await page.goto("/auth?mode=register");
   await page.getByLabel("Email").fill("learner@example.com");
@@ -428,6 +578,7 @@ test("student learner journey stays intact across auth, diagnostic, roadmap, upl
   await expect(page.getByText(/private resume vault/i)).toBeVisible();
   await expect(page.getByText(/Stored resume\.pdf/i)).toBeVisible();
 
+  journey.setActiveRole("mentor");
   await setAuthCookies(page, "mentor");
   await page.goto(`${APP_ORIGIN}/mentor/chat?prompt=Help%20me%20recover%20graph%20algorithms.`);
   await page
@@ -435,10 +586,12 @@ test("student learner journey stays intact across auth, diagnostic, roadmap, upl
     .fill("Help me recover graph algorithms.");
   await page.getByRole("button", { name: /Send/i }).click();
   await page.waitForTimeout(4500);
-  await expect(page.getByText(/Focus on BFS vs DFS tradeoffs/i)).toBeVisible();
+  await expect(page.getByText(/Focus on BFS vs DFS tradeoffs/i).first()).toBeVisible();
 
+  journey.setActiveRole("student");
   await setAuthCookies(page, "student");
-  await page.goto(`${APP_ORIGIN}/student/progress`);
+  await page.goto(`${APP_ORIGIN}/student/progress`, { waitUntil: "domcontentloaded" }).catch(() => undefined);
+  await expect(page).toHaveURL(/\/student\/progress/);
   await expect(page.getByText(/Understand your momentum/i)).toBeVisible();
   await expect(page.getByText("Graph Algorithms", { exact: true })).toBeVisible();
 });

@@ -6,7 +6,7 @@ import { studentNav } from "@/components/layouts/navigation";
 export default function StudentLayout({ children }: PropsWithChildren) {
   return (
     <WorkspaceShell
-      allowedRoles={["student"]}
+      allowedRoles={["student", "independent_learner"]}
       roleLabel="Student"
       navigation={studentNav}
       searchPlaceholder="Search roadmap steps, topics, or mentor guidance"

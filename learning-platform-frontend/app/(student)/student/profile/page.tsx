@@ -2,22 +2,31 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 
 import PageHeader from "@/components/layouts/PageHeader";
 import { useToast } from "@/components/providers/ToastProvider";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import SurfaceCard from "@/components/ui/SurfaceCard";
+import { useAuth } from "@/hooks/useAuth";
 import { disableMfa, enableMfa, setupMfa } from "@/services/authService";
-import { getMyProfile, updateMyProfile } from "@/services/userService";
+import { completeMyProfile, getMyProfile, updateMyProfile } from "@/services/userService";
+import { appRoutes } from "@/utils/appRoutes";
 
 export default function StudentProfilePage() {
+  const router = useRouter();
+  const { refresh } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const profileQuery = useQuery({
     queryKey: ["student", "profile"],
     queryFn: getMyProfile,
   });
+  const [fullName, setFullName] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [collegeName, setCollegeName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [preferences, setPreferences] = useState('{\n  "theme": "adaptive",\n  "study_reminders": true\n}');
@@ -28,6 +37,10 @@ export default function StudentProfilePage() {
     if (!profileQuery.data) {
       return;
     }
+    setFullName(profileQuery.data.full_name ?? "");
+    setPhoneNumber(profileQuery.data.phone_number ?? "");
+    setLinkedinUrl(profileQuery.data.linkedin_url ?? "");
+    setCollegeName(profileQuery.data.college_name ?? "");
     setDisplayName(profileQuery.data.display_name ?? "");
     setAvatarUrl(profileQuery.data.avatar_url ?? "");
     setPreferences(JSON.stringify(profileQuery.data.preferences ?? {}, null, 2));
@@ -42,6 +55,19 @@ export default function StudentProfilePage() {
     },
     onError: (error: Error) => {
       toast({ title: "Profile update failed", description: error.message, variant: "error" });
+    },
+  });
+
+  const completeProfileMutation = useMutation({
+    mutationFn: completeMyProfile,
+    onSuccess: async () => {
+      toast({ title: "Profile completed", description: "You now have full access to the student workspace.", variant: "success" });
+      await queryClient.invalidateQueries({ queryKey: ["student", "profile"] });
+      await refresh();
+      router.replace(appRoutes.student.dashboard);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Profile completion failed", description: error.message, variant: "error" });
     },
   });
 
@@ -86,10 +112,38 @@ export default function StudentProfilePage() {
       <PageHeader
         eyebrow="Profile"
         title="Manage your learning identity"
-        description="Update your profile, personalize study preferences, and secure your account with authenticator-based MFA."
+        description="Complete your required onboarding details, then personalize your profile and secure your account with authenticator-based MFA."
       />
 
       <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+        {!profileQuery.data?.is_profile_completed ? (
+          <SurfaceCard
+            title="Complete your profile"
+            description="Diagnostic, roadmap, and dashboard access unlock after this first-time onboarding step."
+          >
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                completeProfileMutation.mutate({
+                  full_name: fullName,
+                  phone_number: phoneNumber,
+                  linkedin_url: linkedinUrl,
+                  college_name: collegeName || null,
+                });
+              }}
+            >
+              <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Full name" />
+              <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+14155550123" />
+              <Input value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} placeholder="https://www.linkedin.com/in/your-profile/" />
+              <Input value={collegeName} onChange={(event) => setCollegeName(event.target.value)} placeholder="College or institution (optional)" />
+              <Button type="submit" disabled={completeProfileMutation.isPending}>
+                {completeProfileMutation.isPending ? "Completing..." : "Complete profile"}
+              </Button>
+            </form>
+          </SurfaceCard>
+        ) : null}
+
         <SurfaceCard title="Profile" description="These fields are stored in the platform API and reused across the student workspace.">
           <form
             className="space-y-4"
@@ -103,13 +157,21 @@ export default function StudentProfilePage() {
                 return;
               }
               profileMutation.mutate({
+                full_name: fullName || null,
                 display_name: displayName || null,
+                phone_number: phoneNumber || null,
+                linkedin_url: linkedinUrl || null,
+                college_name: collegeName || null,
                 avatar_url: avatarUrl || null,
                 preferences: parsedPreferences,
               });
             }}
           >
+            <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Full name" />
             <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" />
+            <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="Phone number" />
+            <Input value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} placeholder="LinkedIn URL" />
+            <Input value={collegeName} onChange={(event) => setCollegeName(event.target.value)} placeholder="College name" />
             <Input value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} placeholder="Avatar URL" />
             <textarea
               value={preferences}

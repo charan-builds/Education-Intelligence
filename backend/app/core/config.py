@@ -14,7 +14,12 @@ class Settings(BaseSettings):
     ai_service_url: str = "http://ai_service:8100"
     ai_service_timeout_seconds: float = 10.0
     recommendation_engine: str = "rule"
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = (
+        "http://localhost:3000,"
+        "http://127.0.0.1:3000,"
+        "http://localhost:3005,"
+        "http://127.0.0.1:3005"
+    )
     secret_key: str = Field(validation_alias=AliasChoices("JWT_SECRET", "SECRET_KEY"))
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60

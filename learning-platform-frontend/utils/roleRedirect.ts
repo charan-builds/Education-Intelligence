@@ -2,7 +2,7 @@ import type { AppRouterInstance } from "next/dist/shared/lib/app-router-context.
 
 import { getRoleHomePath } from "@/utils/appRoutes";
 
-export type UserRole = "student" | "teacher" | "mentor" | "admin" | "super_admin";
+export type UserRole = "student" | "teacher" | "mentor" | "admin" | "super_admin" | "independent_learner";
 
 export function canonicalizeRole(role: string | null | undefined): UserRole | null {
   if (!role) {
@@ -10,7 +10,14 @@ export function canonicalizeRole(role: string | null | undefined): UserRole | nu
   }
 
   const normalized = role.replace("-", "_");
-  if (normalized === "super_admin" || normalized === "admin" || normalized === "teacher" || normalized === "mentor" || normalized === "student") {
+  if (
+    normalized === "super_admin" ||
+    normalized === "admin" ||
+    normalized === "teacher" ||
+    normalized === "mentor" ||
+    normalized === "student" ||
+    normalized === "independent_learner"
+  ) {
     return normalized;
   }
 
@@ -25,6 +32,9 @@ export function getRoleRedirectPath(role: string | null | undefined): string {
   const normalized = canonicalizeRole(role);
   if (!normalized) {
     return "/";
+  }
+  if (normalized === "independent_learner") {
+    return getRoleHomePath("student");
   }
   return getRoleHomePath(normalized);
 }

@@ -19,11 +19,11 @@ import {
   requestPasswordReset,
   setupMfa,
 } from "@/services/authService";
-import { appRoutes, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
+import { appRoutes, buildAuthPath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 type AuthPageClientProps = {
-  initialMode?: "login" | "register";
+  initialMode?: AuthMode;
 };
 
 type AuthMode = "login" | "register" | "invite" | "forgot-password" | "reset-password" | "email-verification";
@@ -31,8 +31,8 @@ type AuthMode = "login" | "register" | "invite" | "forgot-password" | "reset-pas
 export default function AuthPageClient({ initialMode = "login" }: AuthPageClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAuthenticated, isReady, login, role } = useAuth();
-  const [mode, setMode] = useState<AuthMode>(initialMode);
+  const { isAuthenticated, isReady, login, role, requiresProfileCompletion } = useAuth();
+  const [manualMode, setManualMode] = useState<AuthMode | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tenantContext, setTenantContext] = useState("");
@@ -43,25 +43,33 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState<string | null>(null);
   const inviteToken = useMemo(() => searchParams.get("invite"), [searchParams]);
+  const modeParam = useMemo(() => searchParams.get("mode") as AuthMode | null, [searchParams]);
+  const nextParam = useMemo(() => searchParams.get("next"), [searchParams]);
+  const tenantIdParam = useMemo(() => searchParams.get("tenant_id"), [searchParams]);
+  const tenantSubdomainParam = useMemo(() => searchParams.get("tenant"), [searchParams]);
+  const verificationTokenParam = useMemo(
+    () => searchParams.get("token") ?? searchParams.get("verification"),
+    [searchParams],
+  );
+  const mode = inviteToken ? "invite" : (manualMode ?? modeParam ?? initialMode);
 
   useEffect(() => {
-    const rawMode = (searchParams.get("mode") as AuthMode | null) ?? initialMode;
-    const rawNextPath = searchParams.get("next");
-    setNextPath(sanitizeAuthRedirectTarget(rawNextPath, appRoutes.auth));
-    const tenantId = searchParams.get("tenant_id");
-    const tenantSubdomain = searchParams.get("tenant");
-    const verificationToken = searchParams.get("token") ?? searchParams.get("verification");
-    setTenantContext(tenantId ?? tenantSubdomain ?? "");
-    setMode(inviteToken ? "invite" : rawMode);
-    setToken(inviteToken ?? verificationToken ?? "");
-  }, [initialMode, inviteToken, searchParams]);
+    setNextPath(sanitizeAuthRedirectTarget(nextParam, appRoutes.auth));
+    setTenantContext(tenantIdParam ?? tenantSubdomainParam ?? "");
+    setToken(inviteToken ?? verificationTokenParam ?? "");
+    setManualMode(null);
+  }, [inviteToken, modeParam, nextParam, tenantIdParam, tenantSubdomainParam, verificationTokenParam]);
 
   useEffect(() => {
     if (!isReady || !isAuthenticated) {
       return;
     }
+    if (requiresProfileCompletion) {
+      router.replace(appRoutes.student.profile);
+      return;
+    }
     router.replace(nextPath ?? getRoleRedirectPath(role));
-  }, [isAuthenticated, isReady, nextPath, role, router]);
+  }, [isAuthenticated, isReady, nextPath, requiresProfileCompletion, role, router]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -79,18 +87,30 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
         if (!tenantId && !tenantSubdomain) {
           throw new Error("Tenant ID or workspace is required for login. Try tenant 2 for Demo University.");
         }
-        const authenticatedUser = await login(email, password, {
+        const session = await login(email, password, {
           tenant_id: tenantId,
           tenant_subdomain: tenantSubdomain,
         }, mfaCode);
-        router.replace(nextPath ?? getRoleRedirectPath(authenticatedUser?.role));
+        if (session.requires_profile_completion) {
+          setSuccess("Profile completion is required before diagnostic, roadmap, and dashboard access.");
+          router.replace(appRoutes.student.profile);
+          return;
+        }
+        router.replace(nextPath ?? getRoleRedirectPath(session.user.role));
         return;
       }
 
       if (mode === "register") {
         await register(email, password);
-        setSuccess("Account created. Sign in with your new credentials.");
-        setMode("login");
+        setSuccess("Account created. Check your email for a verification link before signing in.");
+        setManualMode("email-verification");
+        setToken("");
+        const verificationPath = buildAuthPath("email-verification");
+        if (typeof window !== "undefined") {
+          window.location.assign(verificationPath);
+        } else {
+          router.replace(verificationPath);
+        }
         return;
       }
 
@@ -100,7 +120,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
         }
         await acceptInvite(email, password, token);
         setSuccess("Invite accepted. Sign in to continue.");
-        setMode("login");
+        setManualMode("login");
         return;
       }
 
@@ -119,7 +139,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
         }
         await confirmPasswordReset(token, password);
         setSuccess("Password updated. Sign in with the new password.");
-        setMode("login");
+        setManualMode("login");
         return;
       }
 
@@ -134,7 +154,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
         }
         setSuccess(token ? "Email verified. You can sign in now." : "Verification token issued for this account.");
         if (token) {
-          setMode("login");
+          setManualMode("login");
         }
       }
     } catch (submitError) {
@@ -242,7 +262,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
                   key={item.id}
                   type="button"
                   onClick={() => {
-                    setMode(item.id);
+                    setManualMode(item.id);
                     setError("");
                     setSuccess("");
                   }}
