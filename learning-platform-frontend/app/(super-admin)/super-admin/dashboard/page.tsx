@@ -21,6 +21,24 @@ export default function SuperAdminDashboardPage() {
         description="This global dashboard combines real learner analytics, tenant distribution, and operational backlog signals for platform leadership."
       />
 
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="story-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Platform view</p>
+          <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-50">A cleaner global snapshot</p>
+          <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Tenant mix, learner volume, and performance are now easier to scan without every widget using the same tone.</p>
+        </div>
+        <div className="story-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Institution footprint</p>
+          <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-50">{dashboard.kpis.institutionTenants} institutions</p>
+          <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Institution tenants and personal workspaces are visually separated more clearly in the leadership view.</p>
+        </div>
+        <div className="story-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Operational watch</p>
+          <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-50">{dashboard.kpis.deadOutbox} dead events</p>
+          <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Health and analytics now sit side by side so platform issues are visible next to growth signals.</p>
+        </div>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
         <MetricCard title="Tenants" value={dashboard.kpis.totalTenants} tone="info" />
         <MetricCard title="Learners" value={dashboard.kpis.totalLearners} tone="success" />
@@ -49,7 +67,11 @@ export default function SuperAdminDashboardPage() {
           description="Platform-wide distribution of learners and staff roles."
           data={dashboard.charts.roleMixBar}
         />
-        <SurfaceCard title="Cross-tenant performance" description="Largest tenant cohorts ranked by learner volume and mastery.">
+        <SurfaceCard
+          title="Cross-tenant performance"
+          description="Largest tenant cohorts ranked by learner volume and mastery."
+          className="bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.12),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.1),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+        >
           <DataList
             items={dashboard.tenantBreakdown.slice(0, 8)}
             emptyTitle="No tenant analytics yet"
@@ -71,7 +93,11 @@ export default function SuperAdminDashboardPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-        <SurfaceCard title="Tenant growth" description="Cumulative tenant creation based on the current tenant list.">
+        <SurfaceCard
+          title="Tenant growth"
+          description="Cumulative tenant creation based on the current tenant list."
+          className="bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+        >
           <DataList
             items={dashboard.charts.growthLine}
             emptyTitle="No tenant growth events"
@@ -86,7 +112,11 @@ export default function SuperAdminDashboardPage() {
           />
         </SurfaceCard>
 
-        <SurfaceCard title="Outbox watchlist" description="Dead-letter events and platform controls still stay visible next to analytics.">
+        <SurfaceCard
+          title="Outbox watchlist"
+          description="Dead-letter events and platform controls still stay visible next to analytics."
+          className="bg-[radial-gradient(circle_at_top_right,_rgba(245,158,11,0.14),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(245,158,11,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+        >
           <div className="mb-4 grid gap-3 sm:grid-cols-3">
             <MetricCard title="Dead outbox" value={dashboard.kpis.deadOutbox} tone="warning" />
             <MetricCard title="Pending outbox" value={dashboard.kpis.pendingOutbox} tone="success" />

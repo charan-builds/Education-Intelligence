@@ -12,6 +12,7 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import SmartLoadingState from "@/components/ui/SmartLoadingState";
 import { useToast } from "@/components/providers/ToastProvider";
+import { useAuth } from "@/hooks/useAuth";
 import { getAIChatHistory, sendAIChatMessage } from "@/services/aiService";
 
 type ConversationItem = {
@@ -23,6 +24,7 @@ type ConversationItem = {
 export default function StudentMentorPage() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
+  const { role } = useAuth();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState("");
   const prompt = useMemo(() => searchParams.get("prompt")?.trim() ?? "", [searchParams]);
@@ -91,9 +93,13 @@ export default function StudentMentorPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="AI Mentor"
+        eyebrow={role === "independent_learner" ? "Independent learner mentor" : "Student mentor"}
         title="Chat with your roadmap-aware study mentor"
-        description="Ask for topic explanations, next-step guidance, and study plans grounded in your diagnostic and roadmap."
+        description={
+          role === "independent_learner"
+            ? "Ask for topic explanations, next-step guidance, and study plans grounded in your personal diagnostic and roadmap."
+            : "Ask for topic explanations, next-step guidance, and study plans grounded in your diagnostic and roadmap."
+        }
       />
 
       <SurfaceCard

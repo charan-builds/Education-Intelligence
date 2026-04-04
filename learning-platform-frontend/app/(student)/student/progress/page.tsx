@@ -14,8 +14,10 @@ import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import EmptyState from "@/components/ui/EmptyState";
 import { normalizeRoadmapGenerationStatus, useStudentDashboard } from "@/hooks/useDashboard";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function StudentProgressPage() {
+  const { role } = useAuth();
   const dashboard = useStudentDashboard();
   const topWeakTopic = dashboard.weakTopics[0];
   const level = Math.max(1, Math.floor(dashboard.kpis.xp / 250) + 1);
@@ -49,12 +51,14 @@ export default function StudentProgressPage() {
     return (
       <div className="space-y-6">
         <PageHeader
-          eyebrow="Progress"
+          eyebrow={role === "independent_learner" ? "Independent learner progress" : "Student progress"}
           title={roadmapState === "failed" ? "Progress is blocked" : "Progress unlocks after roadmap creation"}
           description={
             roadmapState === "failed"
               ? "The learner journey paused because roadmap generation failed."
-              : "We are building the roadmap now so progress can reflect a real plan instead of an empty shell."
+              : role === "independent_learner"
+                ? "We are building your personal learning roadmap now so progress can reflect a real plan instead of an empty shell."
+                : "We are building the roadmap now so progress can reflect a real plan instead of an empty shell."
           }
         />
         <EmptyState
@@ -72,9 +76,13 @@ export default function StudentProgressPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Progress"
+        eyebrow={role === "independent_learner" ? "Independent learner progress" : "Student progress"}
         title="Understand your momentum"
-        description="Track how learning effort turns into mastery, where your biggest lift is happening, and what the next turning point looks like."
+        description={
+          role === "independent_learner"
+            ? "Track how your self-directed learning effort turns into mastery, where the biggest lift is happening, and what the next turning point looks like."
+            : "Track how learning effort turns into mastery, where your biggest lift is happening, and what the next turning point looks like."
+        }
       />
 
       <SurfaceCard

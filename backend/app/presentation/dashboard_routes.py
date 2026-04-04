@@ -18,7 +18,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 @router.get("/student", response_model=StudentDashboardResponse)
 async def get_student_dashboard(
     db: AsyncSession = Depends(get_db_session),
-    current_user=Depends(require_roles("student")),
+    current_user=Depends(require_roles("student", "independent_learner")),
     _verified_user=Depends(require_profile_completed),
 ):
     return await DashboardService(db).student_dashboard(

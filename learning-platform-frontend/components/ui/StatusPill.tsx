@@ -7,10 +7,10 @@ type StatusPillProps = {
 
 export default function StatusPill({ label, tone = "default" }: StatusPillProps) {
   const toneMap = {
-    default: "border-violet-200 bg-violet-50/90 text-violet-700 dark:border-violet-700/60 dark:bg-violet-900/40 dark:text-violet-200",
-    success: "border-violet-300 bg-violet-100/90 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/15 dark:text-violet-200",
-    warning: "border-fuchsia-200 bg-fuchsia-50/90 text-fuchsia-700 dark:border-fuchsia-500/30 dark:bg-fuchsia-500/15 dark:text-fuchsia-200",
-    danger: "border-rose-200 bg-rose-50/90 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200",
+    default: "border-slate-200 bg-slate-50/95 text-slate-700 dark:border-slate-700/60 dark:bg-slate-900/60 dark:text-slate-200",
+    success: "border-emerald-200 bg-emerald-50/95 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/15 dark:text-emerald-200",
+    warning: "border-amber-200 bg-amber-50/95 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200",
+    danger: "border-rose-200 bg-rose-50/95 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/15 dark:text-rose-200",
   } as const;
 
   return (

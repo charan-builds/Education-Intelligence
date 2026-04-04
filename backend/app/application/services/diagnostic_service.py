@@ -41,7 +41,7 @@ class DiagnosticService:
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
         self.cache_service = CacheService()
-        self.recommendation_service = RecommendationService(session)
+        self.recommendation_service = RecommendationService(session=session)
 
     def _score_answer(self, expected_answer: str, user_answer: str, accepted_answers: list[str] | None = None) -> float:
         evaluated = DiagnosticTest.evaluate_answers(

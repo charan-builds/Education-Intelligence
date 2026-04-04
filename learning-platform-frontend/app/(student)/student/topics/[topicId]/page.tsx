@@ -28,7 +28,7 @@ function difficultyLabel(level: number): string {
 export default function StudentTopicPage() {
   const params = useParams<{ topicId: string }>();
   const topicId = Number(params.topicId);
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -96,9 +96,14 @@ export default function StudentTopicPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Topic learning"
+        eyebrow={role === "independent_learner" ? "Independent learner topic" : "Topic learning"}
         title={topic?.name ?? `Topic ${topicId}`}
-        description={topic?.description ?? "Loading detailed topic content from the backend."}
+        description={
+          topic?.description ??
+          (role === "independent_learner"
+            ? "Loading detailed topic content and knowledge-graph reasoning for your personal workspace."
+            : "Loading detailed topic content from the backend.")
+        }
       />
 
       <div className="grid gap-4 md:grid-cols-3">

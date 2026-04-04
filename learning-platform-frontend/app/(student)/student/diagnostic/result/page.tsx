@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { CheckCircle2, Gauge, Sparkles, Target, TriangleAlert } from "lucide-react";
 
 import RequireRole from "@/components/auth/RequireRole";
 import RoleDashboardLayout from "@/components/layout/RoleDashboardLayout";
@@ -198,8 +199,51 @@ export default function StudentDiagnosticResultPage() {
                   </div>
                 </SurfaceCard>
 
+                <section className="grid gap-4 lg:grid-cols-3">
+                  <div className="story-card">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-200">
+                        <Gauge className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Current read</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-slate-50">{formatProfile(learningProfile)}</p>
+                        <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">A quick interpretation of your current score distribution across the evaluated topics.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="story-card">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200">
+                        <TriangleAlert className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Immediate attention</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-slate-50">{weakTopics.length} weak topics</p>
+                        <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">These topics should drive your next practice, mentor prompts, and roadmap follow-up.</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="story-card">
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">
+                        <CheckCircle2 className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Confidence zone</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-950 dark:text-slate-50">{strongestTopics.length} strong areas</p>
+                        <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Use your strongest topics to build confidence while you recover the weaker parts of the path.</p>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
                 <div className="grid gap-6 xl:grid-cols-[1.35fr_1fr]">
-                  <SurfaceCard title="Topic Score Breakdown" description="Lowest-scoring topics appear first to make intervention priorities easier to spot.">
+                  <SurfaceCard
+                    title="Topic Score Breakdown"
+                    description="Lowest-scoring topics appear first to make intervention priorities easier to spot."
+                    className="bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.12),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_left,_rgba(14,165,233,0.1),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+                  >
                     {topicScores.length === 0 ? (
                       <p className="text-slate-600">No topic score data is available for this diagnostic yet.</p>
                     ) : (
@@ -207,8 +251,9 @@ export default function StudentDiagnosticResultPage() {
                         {topicScores.map((topic) => {
                           const tone = topic.score >= 70 ? "success" : topic.score >= 50 ? "warning" : "default";
                           const label = topic.score >= 70 ? "mastered" : topic.score >= 50 ? "needs practice" : "beginner";
+                          const scoreWidth = Math.max(8, Math.min(100, topic.score));
                           return (
-                            <li key={topic.topicId} className="rounded-2xl border border-slate-200 px-4 py-4">
+                            <li key={topic.topicId} className="rounded-[24px] border border-slate-200 bg-white/90 px-4 py-4 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.22)] dark:border-slate-700 dark:bg-slate-950/72">
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div>
                                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Topic</p>
@@ -219,6 +264,12 @@ export default function StudentDiagnosticResultPage() {
                                   <span className="text-sm font-semibold text-slate-900">{topic.score.toFixed(1)}%</span>
                                 </div>
                               </div>
+                              <div className="mt-4 h-3 rounded-full bg-slate-200 dark:bg-slate-800">
+                                <div
+                                  className="h-3 rounded-full bg-gradient-to-r from-sky-500 via-cyan-500 to-emerald-500"
+                                  style={{ width: `${scoreWidth}%` }}
+                                />
+                              </div>
                             </li>
                           );
                         })}
@@ -227,13 +278,17 @@ export default function StudentDiagnosticResultPage() {
                   </SurfaceCard>
 
                   <div className="space-y-6">
-                    <SurfaceCard title="Priority Follow-Up" description="These are the immediate topics that should influence roadmap generation and review.">
+                    <SurfaceCard
+                      title="Priority Follow-Up"
+                      description="These are the immediate topics that should influence roadmap generation and review."
+                      className="bg-[radial-gradient(circle_at_top_right,_rgba(244,63,94,0.12),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(244,63,94,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+                    >
                       {weakTopics.length === 0 ? (
                         <p className="text-sm text-emerald-700">No weak topics detected in this diagnostic session.</p>
                       ) : (
                         <ul className="space-y-3">
                           {weakTopics.map((topic) => (
-                            <li key={topic.topicId} className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
+                            <li key={topic.topicId} className="rounded-[24px] border border-rose-200 bg-rose-50/95 px-4 py-4 shadow-[0_16px_40px_-30px_rgba(244,63,94,0.18)] dark:border-rose-500/20 dark:bg-rose-500/10">
                               <p className="text-sm font-semibold text-rose-800">Topic #{topic.topicId}</p>
                               <p className="mt-1 text-sm text-rose-700">{topic.score.toFixed(1)}% mastery</p>
                             </li>
@@ -242,13 +297,17 @@ export default function StudentDiagnosticResultPage() {
                       )}
                     </SurfaceCard>
 
-                    <SurfaceCard title="Foundation Gaps" description="These prerequisite topics are holding back progress in downstream weak areas.">
+                    <SurfaceCard
+                      title="Foundation Gaps"
+                      description="These prerequisite topics are holding back progress in downstream weak areas."
+                      className="bg-[radial-gradient(circle_at_top_right,_rgba(250,204,21,0.14),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(250,204,21,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+                    >
                       {foundationGapTopicIds.length === 0 ? (
                         <p className="text-sm text-emerald-700">No prerequisite gaps were detected from the knowledge graph.</p>
                       ) : (
                         <ul className="space-y-3">
                           {foundationGapTopicIds.map((topicId) => (
-                            <li key={topicId} className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+                            <li key={topicId} className="rounded-[24px] border border-amber-200 bg-amber-50/95 px-4 py-4 shadow-[0_16px_40px_-30px_rgba(245,158,11,0.16)] dark:border-amber-500/20 dark:bg-amber-500/10">
                               <p className="text-sm font-semibold text-amber-900">Topic #{topicId}</p>
                               <p className="mt-1 text-sm text-amber-700">Strengthen this prerequisite before accelerating into dependent roadmap topics.</p>
                             </li>
@@ -257,13 +316,17 @@ export default function StudentDiagnosticResultPage() {
                       )}
                     </SurfaceCard>
 
-                    <SurfaceCard title="Strongest Areas" description="Helpful for balancing roadmap intensity and mentor guidance.">
+                    <SurfaceCard
+                      title="Strongest Areas"
+                      description="Helpful for balancing roadmap intensity and mentor guidance."
+                      className="bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+                    >
                       {strongestTopics.length === 0 ? (
                         <p className="text-sm text-slate-600">No strong topic signals yet.</p>
                       ) : (
                         <ul className="space-y-3">
                           {strongestTopics.map((topic) => (
-                            <li key={topic.topicId} className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                            <li key={topic.topicId} className="rounded-[24px] border border-emerald-200 bg-emerald-50/95 px-4 py-4 shadow-[0_16px_40px_-30px_rgba(16,185,129,0.16)] dark:border-emerald-500/20 dark:bg-emerald-500/10">
                               <p className="text-sm font-semibold text-emerald-800">Topic #{topic.topicId}</p>
                               <p className="mt-1 text-sm text-emerald-700">{topic.score.toFixed(1)}% mastery</p>
                             </li>

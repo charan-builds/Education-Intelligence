@@ -197,6 +197,14 @@ export function getLearnerRoutes(role: string | null | undefined) {
   return normalizeRoleInput(role) === "independent_learner" ? appRoutes.independentLearner : appRoutes.student;
 }
 
+export function getLearnerTopicPath(role: string | null | undefined, topicId: number | string): string {
+  const normalizedTopicId = String(topicId);
+  if (normalizeRoleInput(role) === "independent_learner") {
+    return `/independent-learner/topics/${normalizedTopicId}`;
+  }
+  return `/student/topics/${normalizedTopicId}`;
+}
+
 export function getRolePrefix(pathname: string): UserRole | null {
   if (pathname.startsWith("/student")) {
     return "student";

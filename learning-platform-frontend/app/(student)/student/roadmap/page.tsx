@@ -16,7 +16,7 @@ import { useToast } from "@/components/providers/ToastProvider";
 import { useAuth } from "@/hooks/useAuth";
 import { normalizeRoadmapGenerationStatus, normalizeRoadmapStatus, useStudentDashboard } from "@/hooks/useDashboard";
 import { updateRoadmapStep } from "@/services/roadmapService";
-import { getLearnerRoutes } from "@/utils/appRoutes";
+import { getLearnerRoutes, getLearnerTopicPath } from "@/utils/appRoutes";
 
 const ProgressLineChart = dynamic(() => import("@/components/charts/ProgressLineChart"));
 const ImmersiveQuestBoard = dynamic(() => import("@/components/student/ImmersiveQuestBoard"));
@@ -26,6 +26,7 @@ const RoadmapFlow = dynamic(() => import("@/components/student/RoadmapFlow"));
 export default function StudentRoadmapPage() {
   const { role } = useAuth();
   const learnerRoutes = getLearnerRoutes(role);
+  const learnerLabel = role === "independent_learner" ? "Independent learner roadmap" : "Student roadmap";
   const dashboard = useStudentDashboard();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -81,9 +82,13 @@ export default function StudentRoadmapPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Roadmap"
+        eyebrow={learnerLabel}
         title="Navigate your personalized learning sequence"
-        description="This workspace turns the roadmap into a visual journey with AI-powered next actions, graph storytelling, and step-by-step progression."
+        description={
+          role === "independent_learner"
+            ? "Your personal workspace turns the roadmap into a visual journey with AI guidance, knowledge-graph context, and step-by-step progression."
+            : "This workspace turns the roadmap into a visual journey with AI-powered next actions, graph storytelling, and step-by-step progression."
+        }
         actions={
           <Link
             href={learnerRoutes.mentor}
@@ -115,7 +120,7 @@ export default function StudentRoadmapPage() {
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, ease: "easeOut" }}
-            className="premium-hero soft-ring relative overflow-hidden rounded-[34px] border border-white/70 p-6"
+            className="premium-hero soft-ring relative overflow-hidden rounded-[34px] border border-white/80 p-6 shadow-[0_28px_75px_-36px_rgba(15,23,42,0.22)]"
           >
             <div className="premium-orb left-0 top-0 h-24 w-24 bg-teal-300/25" />
             <div className="premium-orb right-0 top-10 h-28 w-28 bg-orange-300/25" style={{ animationDelay: "1.1s" }} />
@@ -166,6 +171,7 @@ export default function StudentRoadmapPage() {
           <SurfaceCard
             title="Mission planner"
             description="Update individual roadmap missions, claim progress, and jump into topic learning pages."
+            className="bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.12),_transparent_36%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(14,165,233,0.1),_transparent_36%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
           >
             <div className="space-y-3">
               {dashboard.steps.map((step) => {
@@ -173,7 +179,7 @@ export default function StudentRoadmapPage() {
                 return (
                   <div
                     key={step.id}
-                    className="rounded-[28px] border border-slate-200 bg-white/75 p-5 dark:border-slate-700 dark:bg-slate-900/75"
+                    className="rounded-[28px] border border-slate-200 bg-white/92 p-5 shadow-[0_18px_45px_-34px_rgba(15,23,42,0.24)] transition hover:-translate-y-0.5 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950/76 dark:hover:border-slate-500"
                   >
                     <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                       <div>
@@ -199,8 +205,8 @@ export default function StudentRoadmapPage() {
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Link
-                          href={`/student/topics/${step.topic_id}`}
-                          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                          href={getLearnerTopicPath(role, step.topic_id)}
+                          className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                         >
                           Open topic
                         </Link>
@@ -210,7 +216,7 @@ export default function StudentRoadmapPage() {
                               dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`
                             } clearly, tell me why it matters in the roadmap, and give me one quick example.`,
                           )}`}
-                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
                         >
                           Explain
                           <Sparkles className="h-4 w-4" />

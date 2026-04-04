@@ -23,6 +23,24 @@ export default function TeacherDashboardPage() {
         description="This dashboard surfaces cohort risk, weak-topic clusters, top performers, and intervention priorities from the new intelligence layer."
       />
 
+      <section className="grid gap-4 lg:grid-cols-3">
+        <div className="story-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Cohort pulse</p>
+          <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-50">Teaching signals in one view</p>
+          <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Track risk, retention, and mastery without hunting through multiple screens.</p>
+        </div>
+        <div className="story-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Intervention lane</p>
+          <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-50">{dashboard.kpis.criticalCount} high-priority learners</p>
+          <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Critical risk and weak-retention signals stay visible so you can act earlier.</p>
+        </div>
+        <div className="story-card">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Retention watch</p>
+          <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-slate-50">{dashboard.kpis.dueReviewCount} reviews due</p>
+          <p className="mt-2 text-sm leading-7 text-slate-700 dark:text-slate-300">Spaced reinforcement pressure is highlighted before confidence drops across the cohort.</p>
+        </div>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard title="Students" value={dashboard.kpis.studentCount} tone="info" icon={<Users className="h-5 w-5" />} />
         <MetricCard title="Critical risk" value={dashboard.kpis.criticalCount} tone="warning" icon={<ShieldAlert className="h-5 w-5" />} />
@@ -49,7 +67,11 @@ export default function TeacherDashboardPage() {
           description="Average memory-retention signal over the last week."
           data={dashboard.charts.retentionLine}
         />
-        <SurfaceCard title="Weak retention topics" description="Topics most likely to need spaced reinforcement.">
+        <SurfaceCard
+          title="Weak retention topics"
+          description="Topics most likely to need spaced reinforcement."
+          className="bg-[radial-gradient(circle_at_top_right,_rgba(250,204,21,0.14),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(250,204,21,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+        >
           <DataList
             items={dashboard.retentionTopics}
             emptyTitle="Retention is stable"
@@ -71,7 +93,11 @@ export default function TeacherDashboardPage() {
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <RecommendationPanel items={dashboard.recommendations} />
-        <SurfaceCard title="Weak topic clusters" description="Lowest-scoring topics across the cohort.">
+        <SurfaceCard
+          title="Weak topic clusters"
+          description="Lowest-scoring topics across the cohort."
+          className="bg-[radial-gradient(circle_at_top_right,_rgba(244,63,94,0.12),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(244,63,94,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+        >
           <DataList
             items={dashboard.charts.progressLine.slice(0, 6)}
             emptyTitle="No weak-topic clusters"
@@ -90,7 +116,11 @@ export default function TeacherDashboardPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-        <SurfaceCard title="Top students" description="Students with the strongest progress and score profile.">
+        <SurfaceCard
+          title="Top students"
+          description="Students with the strongest progress and score profile."
+          className="bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] dark:bg-[radial-gradient(circle_at_top_right,_rgba(16,185,129,0.12),_transparent_34%),linear-gradient(180deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))]"
+        >
           <DataList
             items={dashboard.topStudents}
             emptyTitle="No standout learners yet"

@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_context import AuthContext, validate_tenant_membership
+from app.core.auth_context import AuthContext
 from app.core.security import (
     ACCESS_TOKEN_COOKIE_NAME,
     AuthenticationError,
@@ -116,9 +116,7 @@ def require_roles(*roles: str):
 
 async def require_tenant_membership(
     current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db_session),
 ) -> AuthContext:
-    await validate_tenant_membership(user_id=current_user.id, tenant_id=current_user.tenant_id, db_session=db)
     return current_user
 
 

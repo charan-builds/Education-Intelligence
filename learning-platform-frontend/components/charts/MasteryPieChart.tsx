@@ -27,8 +27,8 @@ export default function MasteryPieChart({
   return (
     <SurfaceCard title={title} description={description}>
       <div className="grid gap-6 lg:grid-cols-[1fr_180px] lg:items-center">
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-72 min-w-0">
+          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={288}>
             <PieChart>
               <Pie
                 data={data}

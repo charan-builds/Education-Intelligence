@@ -32,8 +32,8 @@ export default function ProgressLineChart({
 }: ProgressLineChartProps) {
   return (
     <SurfaceCard title={title} description={description}>
-      <div className="h-72">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="h-72 min-w-0">
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={288}>
           <LineChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(162,155,254,0.24)" />
             <XAxis dataKey="label" tickLine={false} axisLine={false} />

@@ -7,7 +7,7 @@ import pytest
 from app.application.exceptions import UnauthorizedError, ValidationError
 import app.application.services.auth_service as auth_service_module
 from app.application.services.auth_service import AuthService
-from app.core.security import hash_password
+from app.core.security import hash_password, verify_password
 from app.domain.models.tenant import TenantType
 from app.domain.models.user import UserRole
 
@@ -219,7 +219,7 @@ class _UserRepo:
 
 def _build_service() -> AuthService:
     auth_service_module.hash_password = hash_password
-    auth_service_module.verify_password = auth_service_module.verify_password.__globals__["pwd_context"].verify if False else auth_service_module.verify_password
+    auth_service_module.verify_password = verify_password
     service = AuthService(_Session())
     service.tenant_repository = _TenantRepo()
     service.user_repository = _UserRepo()

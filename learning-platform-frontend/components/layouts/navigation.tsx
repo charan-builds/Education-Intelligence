@@ -38,6 +38,7 @@ export const studentNav: AppNavItem[] = [
   { label: "Goals", href: appRoutes.student.goals, icon: GraduationCap },
   { label: "Diagnostic", href: appRoutes.student.diagnostic, icon: Radar, match: [appRoutes.student.diagnostic, appRoutes.student.diagnosticResult] },
   { label: "Roadmap", href: appRoutes.student.roadmap, icon: Network },
+  { label: "Mentor", href: appRoutes.student.mentor, icon: Sparkles },
   { label: "Progress", href: appRoutes.student.progress, icon: ChartArea },
   { label: "Profile", href: appRoutes.student.profile, icon: ShieldCheck },
   { label: "Network", href: appRoutes.student.network, icon: Users },

@@ -180,7 +180,7 @@ export default function DashboardShell() {
           </div>
         </header>
 
-        <section className="mt-8 grid gap-4 md:grid-cols-3">
+        <section className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[
             {
               title: "Student Panel",
@@ -188,14 +188,29 @@ export default function DashboardShell() {
               href: appRoutes.student.dashboard,
             },
             {
+              title: "Independent Learner",
+              description: "A personal workspace for self-serve onboarding, roadmap execution, progress, and AI mentor support.",
+              href: appRoutes.independentLearner.dashboard,
+            },
+            {
               title: "Teacher Panel",
               description: "Student progress rollups, mastery snapshots, and instructional monitoring.",
               href: appRoutes.teacher.dashboard,
             },
             {
-              title: "Admin + Super Admin",
-              description: "Users, tenants, topics, questions, goals, and graph curation in connected control panels.",
+              title: "Mentor Panel",
+              description: "Learner support workflows, coaching context, recommendations, and intervention-ready guidance.",
+              href: appRoutes.mentor.dashboard,
+            },
+            {
+              title: "Admin Panel",
+              description: "Users, goals, topics, question libraries, and tenant-level learning operations.",
               href: appRoutes.admin.dashboard,
+            },
+            {
+              title: "Super Admin",
+              description: "Cross-tenant health, outbox operations, and platform-wide tenant management.",
+              href: appRoutes.superAdmin.dashboard,
             },
           ].map((item) => (
             <article key={item.title} className="rounded-[24px] border border-white/70 bg-white/85 p-6 shadow-lg">
@@ -209,6 +224,43 @@ export default function DashboardShell() {
               </Link>
             </article>
           ))}
+        </section>
+
+        <section className="mt-8 grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <article className="rounded-[28px] border border-white/70 bg-white/88 p-6 shadow-lg">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-700">Frontend status</p>
+            <h2 className="mt-3 text-2xl font-semibold text-slate-950">Blueprint-aligned panel entry is now explicit</h2>
+            <p className="mt-3 text-sm leading-7 text-slate-600">
+              Each role now has a clear top-level destination and the learner experience is separated between institution students and
+              independent learners instead of hiding both behind one generic dashboard.
+            </p>
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">Institution flow</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Use tenant context such as `2` or an institution workspace slug when signing in as student, teacher, mentor, or admin.
+                </p>
+              </div>
+              <div className="rounded-2xl bg-sky-50 p-4">
+                <p className="text-sm font-semibold text-slate-900">Independent learner flow</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Independent learners can leave tenant context blank after registration and land in their personal workspace automatically.
+                </p>
+              </div>
+            </div>
+          </article>
+
+          <article className="rounded-[28px] border border-white/70 bg-white/88 p-6 shadow-lg">
+            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-slate-500">Panel roots</p>
+            <div className="mt-4 grid gap-2 text-sm text-slate-700">
+              <p><code>/student</code> {"->"} learner dashboard</p>
+              <p><code>/independent-learner</code> {"->"} personal workspace dashboard</p>
+              <p><code>/teacher</code> {"->"} cohort insights</p>
+              <p><code>/mentor</code> {"->"} coaching workspace</p>
+              <p><code>/admin</code> {"->"} tenant operations</p>
+              <p><code>/super-admin</code> {"->"} platform controls</p>
+            </div>
+          </article>
         </section>
       </div>
     </main>

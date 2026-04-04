@@ -28,6 +28,7 @@ import { getQuestions, getTopics } from "@/services/topicService";
 import { getUsers } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantScope } from "@/hooks/useTenantScope";
+import { getLearnerTopicPath, getLearnerRoutes } from "@/utils/appRoutes";
 import { formatTenantTypeLabel } from "@/utils/tenantLabels";
 
 export function normalizeRoadmapStatus(status: string): "completed" | "in_progress" | "pending" {
@@ -183,7 +184,7 @@ export function useStudentDashboard() {
         why: item.why,
         confidenceLabel: item.is_ai_generated ? "AI generated" : "Platform rule",
         tone: item.is_ai_generated ? "success" : "default",
-        href: item.topic_id ? `/student/topics/${item.topic_id}` : "/student/roadmap",
+        href: item.topic_id ? getLearnerTopicPath(user?.role, item.topic_id) : getLearnerRoutes(user?.role).roadmap,
         ctaLabel: item.topic_id ? "Open topic" : "Open roadmap",
       })),
       recentActivity: (payload?.recent_activity ?? []).map((item) => ({
@@ -201,7 +202,7 @@ export function useStudentDashboard() {
       })),
       heatmap: payload?.weak_topic_heatmap ?? [],
     };
-  }, [dashboardQuery, roadmapQuery, topicsQuery]);
+  }, [dashboardQuery, roadmapQuery, topicsQuery, user?.role]);
 }
 
 export function useTeacherDashboard() {
