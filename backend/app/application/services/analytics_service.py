@@ -1,8 +1,10 @@
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.services.analytics_snapshot_service import AnalyticsSnapshotService
 from app.application.services.precomputed_analytics_service import PrecomputedAnalyticsService
 from app.domain.models.diagnostic_test import DiagnosticTest
 from app.domain.models.question import Question
@@ -21,6 +23,8 @@ from app.infrastructure.repositories.user_repository import UserRepository
 
 class AnalyticsService:
     DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS = 30
+    STALE_SNAPSHOT_THRESHOLD = timedelta(minutes=5)
+    SNAPSHOT_BATCH_SIZE = 1000
     STUDENT_TOPIC_HEATMAP_SQL = """
 WITH topic_rollup AS (
     SELECT
@@ -113,6 +117,7 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         self.topic_repository = TopicRepository(session)
         self.user_repository = UserRepository(session)
         self.precomputed_service = PrecomputedAnalyticsService(session)
+        self.snapshot_service = AnalyticsSnapshotService(session)
 
     @staticmethod
     def _snapshot_meta(*, status: str, last_updated: str | None, estimated_time: int | None = None) -> dict[str, str | int | bool | None]:
@@ -122,6 +127,19 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
             "is_rebuilding": status == "pending",
             "estimated_time": estimated_time if status == "pending" else None,
         }
+
+    @classmethod
+    def _snapshot_status(cls, last_updated: str | None) -> str:
+        if not last_updated:
+            return "pending"
+        try:
+            parsed = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+        except ValueError:
+            return "ready"
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
+        return "stale" if age > cls.STALE_SNAPSHOT_THRESHOLD else "ready"
 
     async def _require_tenant_user(self, *, tenant_id: int, user_id: int) -> None:
         user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
@@ -271,8 +289,6 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
     async def aggregated_metrics(self, tenant_id: int) -> dict:
         precomputed = await self.precomputed_service.latest_tenant_dashboard(tenant_id=tenant_id)
         if precomputed is None:
-            precomputed = await self.precomputed_service.tenant_dashboard_from_materialized_view(tenant_id=tenant_id)
-        if precomputed is None:
             return {
                 "tenant_id": tenant_id,
                 "topic_mastery_distribution": {"beginner": 0, "needs_practice": 0, "mastered": 0},
@@ -289,18 +305,16 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
             "topic_mastery_distribution": dict(precomputed["topic_mastery_distribution"]),
             "diagnostic_completion_rate": float(precomputed["diagnostic_completion_rate"]),
             "roadmap_completion_rate": float(precomputed["roadmap_completion_rate"]),
-            "meta": self._snapshot_meta(status="ready", last_updated=precomputed.get("updated_at")),
+            "meta": self._snapshot_meta(status=self._snapshot_status(precomputed.get("updated_at")), last_updated=precomputed.get("updated_at")),
         }
 
     async def topic_mastery_summary(self, tenant_id: int) -> dict:
         precomputed = await self.precomputed_service.latest_tenant_dashboard(tenant_id=tenant_id)
-        if precomputed is None:
-            precomputed = await self.precomputed_service.tenant_dashboard_from_materialized_view(tenant_id=tenant_id)
         return {
             "tenant_id": tenant_id,
             "topic_mastery_distribution": dict((precomputed or {}).get("topic_mastery_distribution") or {"beginner": 0, "needs_practice": 0, "mastered": 0}),
             "meta": self._snapshot_meta(
-                status="ready" if precomputed is not None else "pending",
+                status=self._snapshot_status((precomputed or {}).get("updated_at")) if precomputed is not None else "pending",
                 last_updated=(precomputed or {}).get("updated_at"),
                 estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS if precomputed is None else None,
             ),
@@ -336,47 +350,78 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         if tenant_id is not None:
             stmt = stmt.where(UserTenantRole.tenant_id == tenant_id)
 
-        result = await self.session.execute(stmt)
-
         learners: list[dict[str, int | str]] = []
+        offset = 0
+        while True:
+            result = await self.session.execute(stmt.limit(self.SNAPSHOT_BATCH_SIZE).offset(offset))
+            rows = result.all()
+            if not rows:
+                break
 
-        for row in result.all():
-            total_steps = int(row.total_steps or 0)
-            completed_steps = int(row.completed_steps or 0)
-            in_progress_steps = int(row.in_progress_steps or 0)
-            pending_steps = int(row.pending_steps or 0)
-            completion_percent = round((completed_steps / total_steps) * 100) if total_steps > 0 else 0
-            mastery_percent = (
-                round(((completed_steps * 100) + (in_progress_steps * 60) + (pending_steps * 20)) / total_steps)
-                if total_steps > 0
-                else 0
-            )
+            for row in rows:
+                total_steps = int(row.total_steps or 0)
+                completed_steps = int(row.completed_steps or 0)
+                in_progress_steps = int(row.in_progress_steps or 0)
+                pending_steps = int(row.pending_steps or 0)
+                completion_percent = round((completed_steps / total_steps) * 100) if total_steps > 0 else 0
+                mastery_percent = (
+                    round(((completed_steps * 100) + (in_progress_steps * 60) + (pending_steps * 20)) / total_steps)
+                    if total_steps > 0
+                    else 0
+                )
 
-            learners.append(
-                {
-                    "tenant_id": int(row.tenant_id),
-                    "tenant_name": row.tenant_name,
-                    "user_id": int(row.user_id),
-                    "email": row.email,
-                    "total_steps": total_steps,
-                    "completed_steps": completed_steps,
-                    "in_progress_steps": in_progress_steps,
-                    "pending_steps": pending_steps,
-                    "completion_percent": completion_percent,
-                    "mastery_percent": mastery_percent,
-                }
-            )
+                learners.append(
+                    {
+                        "tenant_id": int(row.tenant_id),
+                        "tenant_name": row.tenant_name,
+                        "user_id": int(row.user_id),
+                        "email": row.email,
+                        "total_steps": total_steps,
+                        "completed_steps": completed_steps,
+                        "in_progress_steps": in_progress_steps,
+                        "pending_steps": pending_steps,
+                        "completion_percent": completion_percent,
+                        "mastery_percent": mastery_percent,
+                    }
+                )
+
+            if len(rows) < self.SNAPSHOT_BATCH_SIZE:
+                break
+            offset += self.SNAPSHOT_BATCH_SIZE
         return learners
 
     async def roadmap_progress_summary(self, tenant_id: int, *, limit: int = 20, offset: int = 0) -> dict:
-        precomputed = await self.precomputed_service.roadmap_progress_from_materialized_view(
-            tenant_id=tenant_id,
-            limit=limit,
-            offset=offset,
+        snapshot = await self.snapshot_service.get_latest_snapshot(
+            tenant_id,
+            "roadmap_progress_summary",
         )
-        if precomputed is not None:
-            precomputed["snapshot_meta"] = self._snapshot_meta(status="ready", last_updated=precomputed.get("updated_at"))
-            return precomputed
+        payload = snapshot["data"] if snapshot is not None else None
+        learners = list((payload or {}).get("learners") or [])
+        total = len(learners)
+        paginated_learners = learners[offset : offset + limit]
+        if payload is not None:
+            return {
+                "tenant_id": tenant_id,
+                "student_count": int(payload.get("student_count") or total),
+                "average_completion_percent": int(payload.get("average_completion_percent") or 0),
+                "average_mastery_percent": int(payload.get("average_mastery_percent") or 0),
+                "learners": paginated_learners,
+                "meta": {
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset,
+                    "next_offset": offset + limit if (offset + limit) < total else None,
+                    "next_cursor": None,
+                },
+                "snapshot_meta": self._snapshot_meta(
+                    status=self._snapshot_status(payload.get("updated_at") or (
+                        snapshot["created_at"].isoformat() if snapshot.get("created_at") is not None else None
+                    )),
+                    last_updated=payload.get("updated_at") or (
+                        snapshot["created_at"].isoformat() if snapshot.get("created_at") is not None else None
+                    ),
+                ),
+            }
         return {
             "tenant_id": tenant_id,
             "student_count": 0,
@@ -492,7 +537,7 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
                     estimated_time=self.DEFAULT_REBUILD_ESTIMATED_TIME_SECONDS,
                 ),
             }
-        payload["meta"] = self._snapshot_meta(status="ready", last_updated=payload.get("updated_at"))
+        payload["meta"] = self._snapshot_meta(status=self._snapshot_status(payload.get("updated_at")), last_updated=payload.get("updated_at"))
         return payload
 
     @staticmethod
@@ -514,7 +559,7 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         payload = await self.precomputed_service.latest_student_performance_analytics(tenant_id=tenant_id, user_id=user_id)
         if payload is None:
             raise ValueError("Student analytics snapshot not ready")
-        payload["meta"] = self._snapshot_meta(status="ready", last_updated=payload.get("updated_at"))
+        payload["meta"] = self._snapshot_meta(status=self._snapshot_status(payload.get("updated_at")), last_updated=payload.get("updated_at"))
         return payload
 
     @staticmethod
@@ -539,7 +584,7 @@ ORDER BY date_trunc('day', dt.completed_at) ASC
         payload = await self.precomputed_service.latest_topic_performance_analytics(tenant_id=tenant_id, topic_id=topic_id)
         if payload is None:
             raise ValueError("Topic analytics snapshot not ready")
-        payload["meta"] = self._snapshot_meta(status="ready", last_updated=payload.get("updated_at"))
+        payload["meta"] = self._snapshot_meta(status=self._snapshot_status(payload.get("updated_at")), last_updated=payload.get("updated_at"))
         return payload
 
     async def empty_topic_performance_analytics(self, *, tenant_id: int, topic_id: int) -> dict:

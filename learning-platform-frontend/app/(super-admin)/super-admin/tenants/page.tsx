@@ -12,8 +12,9 @@ import Select from "@/components/ui/Select";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import { createTenant, getTenants } from "@/services/tenantService";
 import type { TenantType } from "@/types/tenant";
+import { describeTenantAudience, formatTenantTypeLabel } from "@/utils/tenantLabels";
 
-const TENANT_TYPES: TenantType[] = ["platform", "college", "company", "school"];
+const TENANT_TYPES: TenantType[] = ["platform", "college", "company", "school", "personal"];
 
 export default function SuperAdminTenantsPage() {
   const { toast } = useToast();
@@ -42,11 +43,11 @@ export default function SuperAdminTenantsPage() {
       <PageHeader
         eyebrow="Super admin"
         title="Tenant management"
-        description="Create tenants and switch into cross-tenant inspection mode."
+        description="Create institution tenants or personal learner workspaces and switch into cross-tenant inspection mode."
       />
 
       <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-        <SurfaceCard title="Create tenant" description="Provision a new platform workspace.">
+        <SurfaceCard title="Create tenant" description="Provision a new institution tenant or a self-serve learner workspace.">
           <form
             className="space-y-4"
             onSubmit={(event) => {
@@ -58,15 +59,16 @@ export default function SuperAdminTenantsPage() {
             <Select value={type} onChange={(event) => setType(event.target.value as TenantType)}>
               {TENANT_TYPES.map((item) => (
                 <option key={item} value={item}>
-                  {item}
+                  {formatTenantTypeLabel(item)}
                 </option>
               ))}
             </Select>
+            <p className="text-sm text-slate-600 dark:text-slate-400">{describeTenantAudience(type)}</p>
             <Button type="submit">Create tenant</Button>
           </form>
         </SurfaceCard>
 
-        <SurfaceCard title="Tenant list" description="Use inspection mode to view another tenant without changing your login.">
+        <SurfaceCard title="Tenant list" description="Use inspection mode to view institution tenants and personal learner workspaces without changing your login.">
           <div className="space-y-3">
             {(tenantsQuery.data?.items ?? []).map((tenant) => (
               <div
@@ -77,7 +79,10 @@ export default function SuperAdminTenantsPage() {
                   <div>
                     <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{tenant.name}</p>
                     <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                      {tenant.type} • created {new Date(tenant.created_at).toLocaleDateString()}
+                      {formatTenantTypeLabel(tenant.type)} • {describeTenantAudience(tenant.type)}
+                    </p>
+                    <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">
+                      subdomain {tenant.subdomain ?? "not-set"} • created {new Date(tenant.created_at).toLocaleDateString()}
                     </p>
                   </div>
                   <Button

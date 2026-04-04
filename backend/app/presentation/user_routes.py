@@ -17,6 +17,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 
 @router.post("", response_model=UserResponse)
+@router.post("/create", response_model=UserResponse, include_in_schema=False)
 async def create_user(
     payload: UserCreateRequest,
     db: AsyncSession = Depends(get_db_session),
@@ -32,6 +33,7 @@ async def create_user(
 
 
 @router.get("", response_model=UserPageResponse)
+@router.get("/list", response_model=UserPageResponse, include_in_schema=False)
 async def list_users(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("admin", "super_admin")),
@@ -56,6 +58,7 @@ async def get_me(current_user=Depends(get_current_user)):
         "display_name": current_user.user.display_name,
         "phone_number": current_user.user.phone_number,
         "linkedin_url": current_user.user.linkedin_url,
+        "organization_name": current_user.user.college_name,
         "college_name": current_user.user.college_name,
         "avatar_url": current_user.user.avatar_url,
         "preferences": current_user.user.preferences_json or {},
@@ -81,6 +84,7 @@ async def update_me(
         display_name=payload.display_name,
         phone_number=payload.phone_number,
         linkedin_url=str(payload.linkedin_url) if payload.linkedin_url is not None else None,
+        organization_name=payload.organization_name,
         college_name=payload.college_name,
         avatar_url=payload.avatar_url,
         preferences=payload.preferences,
@@ -94,6 +98,7 @@ async def update_me(
         "display_name": user.display_name,
         "phone_number": user.phone_number,
         "linkedin_url": user.linkedin_url,
+        "organization_name": user.college_name,
         "college_name": user.college_name,
         "avatar_url": user.avatar_url,
         "preferences": user.preferences_json or {},
@@ -118,6 +123,7 @@ async def complete_profile(
         full_name=payload.full_name,
         phone_number=payload.phone_number,
         linkedin_url=str(payload.linkedin_url),
+        organization_name=payload.organization_name,
         college_name=payload.college_name,
     )
     return {
@@ -129,6 +135,7 @@ async def complete_profile(
         "display_name": user.display_name,
         "phone_number": user.phone_number,
         "linkedin_url": user.linkedin_url,
+        "organization_name": user.college_name,
         "college_name": user.college_name,
         "avatar_url": user.avatar_url,
         "preferences": user.preferences_json or {},

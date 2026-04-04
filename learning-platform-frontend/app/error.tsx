@@ -4,6 +4,7 @@ import { useEffect } from "react";
 
 import Button from "@/components/ui/Button";
 import ErrorState from "@/components/ui/ErrorState";
+import { appRoutes } from "@/utils/appRoutes";
 
 export default function GlobalError({
   error,
@@ -24,8 +25,11 @@ export default function GlobalError({
       />
       <div className="mt-4 flex gap-3">
         <Button onClick={reset}>Retry</Button>
-        <Button variant="secondary" onClick={() => window.location.assign("/")}>
-          Go home
+        <Button variant="secondary" onClick={() => window.location.assign(appRoutes.workspaceHome)}>
+          Go to sign in
+        </Button>
+        <Button variant="ghost" onClick={() => window.location.assign(appRoutes.marketingHome)}>
+          Open landing page
         </Button>
       </div>
     </main>

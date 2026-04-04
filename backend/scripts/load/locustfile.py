@@ -7,12 +7,12 @@ from locust import HttpUser, between, task
 
 TENANT_ID = int(os.getenv("LOAD_TEST_TENANT_ID", "2"))
 STUDENT_CREDENTIALS: Sequence[tuple[str, str]] = (
-    ("maya.chen@demo.example.com", "Student123!"),
-    ("jordan.rivera@demo.example.com", "Student123!"),
-    ("aisha.patel@demo.example.com", "Student123!"),
+    ("maya.chen@demo.learnova.ai", "Student123!"),
+    ("jordan.rivera@demo.learnova.ai", "Student123!"),
+    ("aisha.patel@demo.learnova.ai", "Student123!"),
 )
-MENTOR_CREDENTIALS = (os.getenv("LOAD_TEST_MENTOR_EMAIL", "mentor@example.com"), os.getenv("LOAD_TEST_MENTOR_PASSWORD", "Mentor123!"))
-TEACHER_CREDENTIALS = (os.getenv("LOAD_TEST_TEACHER_EMAIL", "teacher@example.com"), os.getenv("LOAD_TEST_TEACHER_PASSWORD", "Teacher123!"))
+MENTOR_CREDENTIALS = (os.getenv("LOAD_TEST_MENTOR_EMAIL", "mentor@demo.learnova.ai"), os.getenv("LOAD_TEST_MENTOR_PASSWORD", "Mentor123!"))
+TEACHER_CREDENTIALS = (os.getenv("LOAD_TEST_TEACHER_EMAIL", "teacher@demo.learnova.ai"), os.getenv("LOAD_TEST_TEACHER_PASSWORD", "Teacher123!"))
 
 
 class AuthenticatedUser(HttpUser):

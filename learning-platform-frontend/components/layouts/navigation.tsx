@@ -46,6 +46,21 @@ export const studentNav: AppNavItem[] = [
   { label: "Notifications", href: appRoutes.student.notifications, icon: Bell },
 ];
 
+export const independentLearnerNav: AppNavItem[] = [
+  { label: "Dashboard", href: appRoutes.independentLearner.dashboard, icon: LayoutDashboard },
+  { label: "Goals", href: appRoutes.independentLearner.goals, icon: GraduationCap },
+  {
+    label: "Diagnostic",
+    href: appRoutes.independentLearner.diagnostic,
+    icon: Radar,
+    match: [appRoutes.independentLearner.diagnostic, appRoutes.independentLearner.diagnosticResult],
+  },
+  { label: "Roadmap", href: appRoutes.independentLearner.roadmap, icon: Network },
+  { label: "Progress", href: appRoutes.independentLearner.progress, icon: ChartArea },
+  { label: "Profile", href: appRoutes.independentLearner.profile, icon: ShieldCheck },
+  { label: "Mentor", href: appRoutes.independentLearner.mentor, icon: Sparkles },
+];
+
 export const teacherNav: AppNavItem[] = [
   { label: "Dashboard", href: appRoutes.teacher.dashboard, icon: LayoutDashboard },
   { label: "Students", href: appRoutes.teacher.students, icon: Users },
@@ -74,8 +89,8 @@ export const mentorNav: AppNavItem[] = [
   { label: "Dashboard", href: appRoutes.mentor.dashboard, icon: LayoutDashboard },
   { label: "Network", href: appRoutes.mentor.network, icon: Users },
   { label: "Chat", href: appRoutes.mentor.chat, icon: MessagesSquare },
-  { label: "Guidance", href: appRoutes.student.notifications, icon: Sparkles, match: [appRoutes.student.notifications] },
-  { label: "Support", href: appRoutes.teacher.insights, icon: LifeBuoy, match: [appRoutes.teacher.insights] },
+  { label: "Recommendations", href: appRoutes.mentor.dashboard, icon: Sparkles, match: [appRoutes.mentor.dashboard] },
+  { label: "Support Hub", href: appRoutes.mentor.network, icon: LifeBuoy, match: [appRoutes.mentor.network] },
 ];
 
 export function matchNavItem(pathname: string, item: AppNavItem): boolean {

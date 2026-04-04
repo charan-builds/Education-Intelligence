@@ -55,14 +55,38 @@ class EmailService:
         text_content = f"{heading}\n\n{intro}\n\n{cta_label}: {cta_url}\n\n{footer}"
         return html_content, text_content
 
-    def build_verification_email(self, *, to_email: str, verification_url: str) -> EmailPayload:
+    def build_verification_email(
+        self,
+        *,
+        to_email: str,
+        verification_url: str,
+        tenant_id: int,
+        account_email: str,
+        sign_in_url: str,
+    ) -> EmailPayload:
         html_content, text_content = self._base_template(
             heading="Verify your email",
-            intro="Confirm your account to unlock diagnostics, roadmap generation, mentor guidance, and progress tracking.",
+            intro=(
+                "Confirm your account to unlock diagnostics, roadmap generation, mentor guidance, and progress "
+                f"tracking. Your tenant ID is {tenant_id} and your sign-in email is {account_email}."
+            ),
             cta_label="Verify email",
             cta_url=verification_url,
-            footer="If you did not request this, you can safely ignore this message.",
+            footer="After verification, sign in with your chosen password. If you did not request this, you can safely ignore this message.",
         )
+        html_content = html_content.replace(
+            "</a>",
+            (
+                "</a>"
+                f'<div style="margin-top:24px;padding:18px;border-radius:18px;background:#f8fafc;border:1px solid #e2e8f0;">'
+                f'<p style="margin:0 0 8px;font-size:14px;color:#475569;"><strong>Tenant ID:</strong> {tenant_id}</p>'
+                f'<p style="margin:0 0 8px;font-size:14px;color:#475569;"><strong>Email:</strong> {account_email}</p>'
+                f'<p style="margin:0;font-size:14px;color:#475569;"><strong>Sign-in page:</strong> <a href="{sign_in_url}">{sign_in_url}</a></p>'
+                "</div>"
+            ),
+            1,
+        )
+        text_content += f"\n\nTenant ID: {tenant_id}\nEmail: {account_email}\nSign-in page: {sign_in_url}"
         return EmailPayload(
             to_email=to_email,
             subject="Verify your Learning Intelligence account",

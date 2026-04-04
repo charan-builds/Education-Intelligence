@@ -10,6 +10,7 @@ export type User = {
   display_name?: string | null;
   phone_number?: string | null;
   linkedin_url?: string | null;
+  organization_name?: string | null;
   college_name?: string | null;
   avatar_url?: string | null;
   preferences?: Record<string, unknown>;
@@ -45,6 +46,7 @@ export type UpdateUserProfilePayload = {
   display_name?: string | null;
   phone_number?: string | null;
   linkedin_url?: string | null;
+  organization_name?: string | null;
   college_name?: string | null;
   avatar_url?: string | null;
   preferences?: Record<string, unknown>;
@@ -54,5 +56,6 @@ export type CompleteUserProfilePayload = {
   full_name: string;
   phone_number: string;
   linkedin_url: string;
+  organization_name?: string | null;
   college_name?: string | null;
 };

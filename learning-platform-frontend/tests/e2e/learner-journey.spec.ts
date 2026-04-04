@@ -535,13 +535,8 @@ test("student learner journey stays intact across auth, diagnostic, roadmap, upl
   await page.getByLabel("Email").fill("learner@example.com");
   await page.getByLabel("Password").fill("Secret123!");
   await page.getByRole("button", { name: "Create account" }).click();
-  await expect(page.getByText("Account created. Sign in with your new credentials.")).toBeVisible();
-
-  await page.goto("/auth?mode=email-verification");
-  await page.getByLabel("Tenant ID or Workspace").fill("1");
-  await page.getByLabel("Email").fill("learner@example.com");
-  await page.getByRole("button", { name: "Issue verification token" }).click();
-  await expect(page.getByText(/Verification token issued|instructions sent/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/auth\?mode=email-verification/);
+  await expect(page.getByRole("heading", { name: /verify your email/i })).toBeVisible();
 
   await page.goto("/auth?mode=login");
   await page.getByLabel("Email").fill("learner@example.com");

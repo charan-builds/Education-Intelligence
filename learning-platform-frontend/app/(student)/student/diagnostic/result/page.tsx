@@ -15,7 +15,8 @@ import Button from "@/components/ui/Button";
 import { generateRoadmap } from "@/services/roadmapService";
 import { getDiagnosticResult } from "@/services/diagnosticService";
 import { normalizeRoadmapGenerationStatus } from "@/hooks/useDashboard";
-import { appRoutes } from "@/utils/appRoutes";
+import { useAuth } from "@/hooks/useAuth";
+import { getLearnerRoutes } from "@/utils/appRoutes";
 
 function classifyLearningProfile(scores: number[]): string {
   if (scores.length === 0) {
@@ -46,6 +47,8 @@ function formatProfile(value: string): string {
 }
 
 export default function StudentDiagnosticResultPage() {
+  const { role } = useAuth();
+  const learnerRoutes = getLearnerRoutes(role);
   const [testId, setTestId] = useState<number>(NaN);
 
   useEffect(() => {
@@ -72,6 +75,8 @@ export default function StudentDiagnosticResultPage() {
   }, [resultQuery.data?.topic_scores]);
 
   const weakTopics = useMemo(() => topicScores.filter((topic) => topic.score < 70), [topicScores]);
+  const foundationGapTopicIds = resultQuery.data?.foundation_gap_topic_ids ?? [];
+  const recommendationLevels = resultQuery.data?.recommendation_levels ?? {};
   const strongestTopics = useMemo(() => [...topicScores].sort((a, b) => b.score - a.score).slice(0, 3), [topicScores]);
   const learningProfile = useMemo(
     () => classifyLearningProfile(topicScores.map((topic) => topic.score)),
@@ -88,28 +93,28 @@ export default function StudentDiagnosticResultPage() {
   const roadmapStatus = normalizeRoadmapGenerationStatus(roadmap?.status);
 
   return (
-    <RequireRole allowedRoles={["student", "teacher", "admin", "super_admin"]}>
+    <RequireRole allowedRoles={["student", "independent_learner", "teacher", "admin", "super_admin"]}>
       <RoleDashboardLayout
         roleLabel="Diagnostic"
         title="Diagnostic Result"
         description="Topic scores, weak areas, and a lightweight learning-profile interpretation generated from the backend diagnostic result."
         breadcrumbs={[
-          { label: "Dashboard", href: appRoutes.student.dashboard },
-          { label: "Diagnostic", href: appRoutes.student.diagnostic },
+          { label: "Dashboard", href: learnerRoutes.dashboard },
+          { label: "Diagnostic", href: learnerRoutes.diagnostic },
           { label: "Result" },
         ]}
         navItems={[
-          { label: "Goals", href: appRoutes.student.goals },
-          { label: "Diagnostic", href: appRoutes.student.diagnostic },
-          { label: "Roadmap", href: appRoutes.student.roadmap },
-          { label: "Progress", href: appRoutes.student.progress },
+          { label: "Goals", href: learnerRoutes.goals },
+          { label: "Diagnostic", href: learnerRoutes.diagnostic },
+          { label: "Roadmap", href: learnerRoutes.roadmap },
+          { label: "Progress", href: learnerRoutes.progress },
         ]}
         actions={
           <div className="flex flex-wrap gap-3">
-            <Link href={appRoutes.student.goals} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <Link href={learnerRoutes.goals} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
               New Diagnostic
             </Link>
-            <Link href={appRoutes.student.roadmap} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400">
+            <Link href={learnerRoutes.roadmap} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400">
               Continue Journey
             </Link>
           </div>
@@ -119,11 +124,11 @@ export default function StudentDiagnosticResultPage() {
           <SurfaceCard title="Missing Test Reference" description="This page needs a valid diagnostic session ID to load results.">
             <p className="text-sm text-slate-600">Open this page using a valid `test_id` query parameter from the diagnostic flow.</p>
             <div className="mt-4 flex flex-wrap gap-3">
-              <Link href={appRoutes.student.goals} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400">
+              <Link href={learnerRoutes.goals} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400">
                 Start New Diagnostic
               </Link>
-              <Link href={appRoutes.student.dashboard} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                Student Dashboard
+              <Link href={learnerRoutes.dashboard} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                Learning Dashboard
               </Link>
             </div>
           </SurfaceCard>
@@ -136,10 +141,10 @@ export default function StudentDiagnosticResultPage() {
               <SurfaceCard title="Result Unavailable" description="The backend did not return a diagnostic result for this session.">
                 <p className="text-sm text-red-600">Failed to fetch diagnostic result.</p>
                 <div className="mt-4 flex flex-wrap gap-3">
-                  <Link href={appRoutes.student.goals} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400">
+                  <Link href={learnerRoutes.goals} className="rounded-xl bg-sky-500 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-400">
                     Start New Diagnostic
                   </Link>
-                  <Link href={appRoutes.student.diagnostic} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  <Link href={learnerRoutes.diagnostic} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                     Return to Diagnostic
                   </Link>
                 </div>
@@ -186,7 +191,7 @@ export default function StudentDiagnosticResultPage() {
                           Generate roadmap
                         </Button>
                       ) : null}
-                      <Link href={appRoutes.student.roadmap} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      <Link href={learnerRoutes.roadmap} className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                         Open roadmap
                       </Link>
                     </div>
@@ -210,7 +215,7 @@ export default function StudentDiagnosticResultPage() {
                                   <p className="mt-1 text-sm font-semibold text-slate-900">Topic #{topic.topicId}</p>
                                 </div>
                                 <div className="flex items-center gap-3">
-                                  <StatusPill label={label} tone={tone} />
+                                  <StatusPill label={recommendationLevels[topic.topicId] ?? label} tone={tone} />
                                   <span className="text-sm font-semibold text-slate-900">{topic.score.toFixed(1)}%</span>
                                 </div>
                               </div>
@@ -231,6 +236,21 @@ export default function StudentDiagnosticResultPage() {
                             <li key={topic.topicId} className="rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3">
                               <p className="text-sm font-semibold text-rose-800">Topic #{topic.topicId}</p>
                               <p className="mt-1 text-sm text-rose-700">{topic.score.toFixed(1)}% mastery</p>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </SurfaceCard>
+
+                    <SurfaceCard title="Foundation Gaps" description="These prerequisite topics are holding back progress in downstream weak areas.">
+                      {foundationGapTopicIds.length === 0 ? (
+                        <p className="text-sm text-emerald-700">No prerequisite gaps were detected from the knowledge graph.</p>
+                      ) : (
+                        <ul className="space-y-3">
+                          {foundationGapTopicIds.map((topicId) => (
+                            <li key={topicId} className="rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+                              <p className="text-sm font-semibold text-amber-900">Topic #{topicId}</p>
+                              <p className="mt-1 text-sm text-amber-700">Strengthen this prerequisite before accelerating into dependent roadmap topics.</p>
                             </li>
                           ))}
                         </ul>

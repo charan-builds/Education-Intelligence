@@ -7,13 +7,14 @@ import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
 
 const devAccounts = [
-  { tenant: "Demo University", tenantId: "1", email: "student@example.com", password: "Student123!" },
-  { tenant: "Demo University", tenantId: "1", email: "teacher@example.com", password: "Teacher123!" },
-  { tenant: "Demo University", tenantId: "1", email: "mentor@example.com", password: "Mentor123!" },
-  { tenant: "Demo University", tenantId: "1", email: "admin@example.com", password: "admin123" },
-  { tenant: "Platform", tenantId: "platform", email: "superadmin@platform.example.com", password: "SuperAdmin123!" },
-  { tenant: "Northwind School", tenantId: "northwind", email: "student@northwind.local", password: "Student123!" },
-  { tenant: "Acme Learning Co", tenantId: "acme", email: "student@acme.local", password: "Student123!" },
+  { tenant: "Demo University", tenantId: "2", email: "maya.chen@demo.learnova.ai", password: "Student123!" },
+  { tenant: "Demo University", tenantId: "2", email: "teacher@demo.learnova.ai", password: "Teacher123!" },
+  { tenant: "Demo University", tenantId: "2", email: "mentor@demo.learnova.ai", password: "Mentor123!" },
+  { tenant: "Demo University", tenantId: "2", email: "admin@demo.learnova.ai", password: "admin123" },
+  { tenant: "Platform", tenantId: "1", email: "superadmin@platform.learnova.ai", password: "SuperAdmin123!" },
+  { tenant: "Northwind Academy", tenantId: "6", email: "ethan.cole@northwind.learnova.ai", password: "Student123!" },
+  { tenant: "Acme Learning Co", tenantId: "4", email: "noah.brooks@acme.learnova.ai", password: "Student123!" },
+  { tenant: "Ava Martinez Workspace", tenantId: "7", email: "ava.martinez@workspace.learnova.ai", password: "Student123!" },
 ];
 
 export default function DevAccessPanel() {

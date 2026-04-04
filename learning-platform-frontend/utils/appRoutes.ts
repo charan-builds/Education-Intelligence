@@ -1,6 +1,8 @@
 import type { UserRole } from "@/utils/roleRedirect";
 
 export const appRoutes = {
+  marketingHome: "/",
+  workspaceHome: "/auth",
   auth: "/auth",
   student: {
     dashboard: "/student/dashboard",
@@ -15,6 +17,16 @@ export const appRoutes = {
     digitalTwin: "/student/digital-twin",
     career: "/student/career",
     notifications: "/student/notifications",
+  },
+  independentLearner: {
+    dashboard: "/independent-learner/dashboard",
+    goals: "/independent-learner/goals",
+    diagnostic: "/independent-learner/diagnostic",
+    diagnosticResult: "/independent-learner/diagnostic/result",
+    roadmap: "/independent-learner/roadmap",
+    profile: "/independent-learner/profile",
+    mentor: "/independent-learner/mentor",
+    progress: "/independent-learner/progress",
   },
   teacher: {
     dashboard: "/teacher/dashboard",
@@ -47,7 +59,14 @@ export const appRoutes = {
 const LEGACY_ROUTE_MAP: Record<string, string> = {
   "/auth": appRoutes.auth,
   "/dashboard": appRoutes.auth,
+  "/student": appRoutes.student.dashboard,
+  "/independent-learner": appRoutes.independentLearner.dashboard,
+  "/teacher": appRoutes.teacher.dashboard,
+  "/mentor": appRoutes.mentor.dashboard,
+  "/admin": appRoutes.admin.dashboard,
+  "/super-admin": appRoutes.superAdmin.dashboard,
   "/dashboard/student": appRoutes.student.dashboard,
+  "/dashboard/independent-learner": appRoutes.independentLearner.dashboard,
   "/dashboard/teacher": appRoutes.teacher.dashboard,
   "/dashboard/admin": appRoutes.admin.dashboard,
   "/dashboard/super-admin": appRoutes.superAdmin.dashboard,
@@ -60,12 +79,11 @@ const LEGACY_ROUTE_MAP: Record<string, string> = {
   "/roadmap/view": appRoutes.student.roadmap,
   "/progress": appRoutes.student.progress,
   "/profile": appRoutes.student.profile,
-  "/mentor": appRoutes.mentor.dashboard,
 };
 
 export function normalizeAppPath(path: string | null | undefined): string {
   if (!path || !path.startsWith("/")) {
-    return appRoutes.auth;
+    return appRoutes.workspaceHome;
   }
 
   const [pathname, query = ""] = path.split("?");
@@ -84,6 +102,7 @@ export function isAuthEntryPath(path: string | null | undefined): boolean {
 export function buildAuthPath(
   mode: "login" | "register" | "forgot-password" | "reset-password" | "email-verification" = "login",
   nextPath?: string | null,
+  extraParams?: Record<string, string | number | null | undefined>,
 ): string {
   const params = new URLSearchParams();
   params.set("mode", mode);
@@ -91,6 +110,15 @@ export function buildAuthPath(
   const sanitizedNext = sanitizeAuthRedirectTarget(nextPath, appRoutes.auth);
   if (sanitizedNext) {
     params.set("next", sanitizedNext);
+  }
+
+  if (extraParams) {
+    Object.entries(extraParams).forEach(([key, value]) => {
+      if (value === null || value === undefined || value === "") {
+        return;
+      }
+      params.set(key, String(value));
+    });
   }
 
   return `${appRoutes.auth}?${params.toString()}`;
@@ -117,10 +145,30 @@ export function sanitizeAuthRedirectTarget(
   return normalizedPath;
 }
 
-export function getRoleHomePath(role: UserRole | null | undefined): string {
-  switch (role) {
+function normalizeRoleInput(role: string | null | undefined): UserRole | null {
+  if (!role) {
+    return null;
+  }
+  const normalized = role.replace("-", "_");
+  if (
+    normalized === "student" ||
+    normalized === "independent_learner" ||
+    normalized === "teacher" ||
+    normalized === "mentor" ||
+    normalized === "admin" ||
+    normalized === "super_admin"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+export function getRoleHomePath(role: string | null | undefined): string {
+  switch (normalizeRoleInput(role)) {
     case "student":
       return appRoutes.student.dashboard;
+    case "independent_learner":
+      return appRoutes.independentLearner.dashboard;
     case "teacher":
       return appRoutes.teacher.dashboard;
     case "mentor":
@@ -130,13 +178,31 @@ export function getRoleHomePath(role: UserRole | null | undefined): string {
     case "super_admin":
       return appRoutes.superAdmin.dashboard;
     default:
-      return "/";
+      return appRoutes.workspaceHome;
   }
+}
+
+export function getRoleProfilePath(role: string | null | undefined): string {
+  switch (normalizeRoleInput(role)) {
+    case "independent_learner":
+      return appRoutes.independentLearner.profile;
+    case "student":
+      return appRoutes.student.profile;
+    default:
+      return appRoutes.student.profile;
+  }
+}
+
+export function getLearnerRoutes(role: string | null | undefined) {
+  return normalizeRoleInput(role) === "independent_learner" ? appRoutes.independentLearner : appRoutes.student;
 }
 
 export function getRolePrefix(pathname: string): UserRole | null {
   if (pathname.startsWith("/student")) {
     return "student";
+  }
+  if (pathname.startsWith("/independent-learner")) {
+    return "independent_learner";
   }
   if (pathname.startsWith("/teacher")) {
     return "teacher";

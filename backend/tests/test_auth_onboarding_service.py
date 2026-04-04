@@ -125,7 +125,15 @@ class _DummyAuditLogService:
 
 
 class _DummyEmailService:
-    def build_verification_email(self, *, to_email: str, verification_url: str):
+    def build_verification_email(
+        self,
+        *,
+        to_email: str,
+        verification_url: str,
+        tenant_id: int,
+        account_email: str,
+        sign_in_url: str,
+    ):
         return type("Payload", (), {"to_email": to_email, "subject": "verify", "html_content": verification_url, "text_content": verification_url})()
 
     def build_password_reset_email(self, *, to_email: str, reset_url: str):
@@ -174,6 +182,7 @@ class _Store:
         self.sessions: dict[str, _SessionRecord] = {}
         self.refresh_tokens: list[_RefreshToken] = []
         self.token_blacklist: list[_TokenBlacklist] = []
+        self.next_tenant_id = 3
         self.next_user_id = 1
         self.next_auth_token_id = 1
         self.next_refresh_token_id = 1
@@ -191,6 +200,17 @@ class _TenantRepository:
             if tenant.subdomain == subdomain:
                 return tenant
         return None
+
+    async def create(self, name: str, tenant_type: TenantType, created_at, *, subdomain: str | None = None):
+        tenant = _Tenant(
+            id=self.store.next_tenant_id,
+            name=name,
+            subdomain=subdomain,
+            type=tenant_type,
+        )
+        self.store.next_tenant_id += 1
+        self.store.tenants[tenant.id] = tenant
+        return tenant
 
 
 class _UserRepository:
@@ -241,6 +261,10 @@ class _UserRepository:
             if stored_email == normalized:
                 return user
         return None
+
+    async def list_by_email(self, email: str):
+        normalized = email.strip().lower()
+        return [user for (_tenant_id, stored_email), user in self.store.users_by_email.items() if stored_email == normalized]
 
     async def get_by_id_in_tenant(self, user_id: int, tenant_id: int):
         user = self.store.users_by_id.get(user_id)
@@ -495,15 +519,38 @@ async def test_register_persists_user_and_verification_token():
         full_name="Solo Learner",
     )
 
-    saved_user = await service.user_repository.get_by_email("learner@example.com", tenant_id=1)
+    saved_user = await service.user_repository.get_by_email("learner@example.com", tenant_id=user.tenant_id)
     assert saved_user is not None
     assert saved_user.id == user.id
+    assert user.tenant_id != 1
+    assert store.tenants[user.tenant_id].type == TenantType.personal
     assert saved_user.full_name == "Solo Learner"
     assert saved_user.is_email_verified is False
     assert saved_user.is_profile_completed is False
     assert _fast_verify_password("StrongPass1!", saved_user.password_hash)
     assert len(store.auth_tokens) == 1
     assert store.auth_tokens[0].user_id == user.id
+
+
+@pytest.mark.asyncio
+async def test_independent_learner_login_can_resolve_personal_tenant_without_explicit_context():
+    store = _Store()
+    service = _build_auth_service(store)
+
+    user = await service.register(
+        email="solo@example.com",
+        password="StrongPass1!",
+        role=UserRole.independent_learner,
+        full_name="Solo Learner",
+    )
+    token = await service.request_email_verification(tenant_id=user.tenant_id, email="solo@example.com")
+    await service.verify_email(token=token)
+    user.is_profile_completed = True
+
+    result = await service.login("solo@example.com", "StrongPass1!")
+
+    assert result.user.id == user.id
+    assert result.effective_role == UserRole.independent_learner
 
 
 @pytest.mark.asyncio

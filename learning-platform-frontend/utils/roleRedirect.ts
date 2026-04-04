@@ -31,10 +31,7 @@ export function normalizeAccessRole(role: string | null | undefined): UserRole |
 export function getRoleRedirectPath(role: string | null | undefined): string {
   const normalized = canonicalizeRole(role);
   if (!normalized) {
-    return "/";
-  }
-  if (normalized === "independent_learner") {
-    return getRoleHomePath("student");
+    return "/auth";
   }
   return getRoleHomePath(normalized);
 }

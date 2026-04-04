@@ -1,15 +1,47 @@
 from datetime import datetime
+import json
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.domain.models.analytics_snapshot import AnalyticsSnapshot
 
 
 class AnalyticsSnapshotRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def _prune_old_versions(
+        self,
+        *,
+        tenant_id: int | None,
+        snapshot_type: str,
+        subject_id: int | None,
+        latest_version: int,
+    ) -> None:
+        keep_versions = max(int(get_settings().analytics_snapshot_versions_to_keep), 1)
+        cutoff_version = latest_version - keep_versions
+        if cutoff_version <= 0:
+            return
+        await self.session.execute(
+            text(
+                """
+                DELETE FROM analytics_snapshots
+                WHERE tenant_id IS NOT DISTINCT FROM :tenant_id
+                  AND snapshot_type = :snapshot_type
+                  AND subject_id IS NOT DISTINCT FROM :subject_id
+                  AND version < :cutoff_version
+                """
+            ),
+            {
+                "tenant_id": tenant_id,
+                "snapshot_type": snapshot_type,
+                "subject_id": subject_id,
+                "cutoff_version": cutoff_version,
+            },
+        )
 
     async def _acquire_version_lock(
         self,
@@ -56,18 +88,39 @@ class AnalyticsSnapshotRepository:
             )
         )
         next_version = int(current_version or 0) + 1
+        await self.session.execute(
+            update(AnalyticsSnapshot)
+            .where(
+                AnalyticsSnapshot.tenant_id == tenant_id,
+                AnalyticsSnapshot.snapshot_type == snapshot_type,
+                AnalyticsSnapshot.subject_id == subject_id,
+                AnalyticsSnapshot.is_latest.is_(True),
+            )
+            .values(is_latest=False)
+        )
+        payload_data = json.loads(payload_json)
         row = AnalyticsSnapshot(
             tenant_id=tenant_id,
             snapshot_type=snapshot_type,
             subject_id=subject_id,
             payload_json=payload_json,
+            data=payload_data,
             window_start=window_start,
             window_end=window_end,
             snapshot_version=next_version,
+            version=next_version,
+            created_at=updated_at,
             updated_at=updated_at,
+            is_latest=True,
         )
         self.session.add(row)
         await self.session.flush()
+        await self._prune_old_versions(
+            tenant_id=tenant_id,
+            snapshot_type=snapshot_type,
+            subject_id=subject_id,
+            latest_version=next_version,
+        )
         return row
 
     async def create_snapshot_version(
@@ -121,6 +174,7 @@ class AnalyticsSnapshotRepository:
                 AnalyticsSnapshot.tenant_id == tenant_id,
                 AnalyticsSnapshot.snapshot_type == snapshot_type,
                 AnalyticsSnapshot.subject_id == subject_id,
+                AnalyticsSnapshot.is_latest.is_(True),
             )
             .order_by(AnalyticsSnapshot.snapshot_version.desc(), AnalyticsSnapshot.updated_at.desc())
             .limit(1)

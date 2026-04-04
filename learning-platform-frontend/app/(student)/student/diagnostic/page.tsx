@@ -16,12 +16,15 @@ import SurfaceCard from "@/components/ui/SurfaceCard";
 import { useToast } from "@/components/providers/ToastProvider";
 import { answerDiagnosticQuestion, getDiagnosticSession, getNextDiagnosticQuestion, startDiagnostic, submitAnswers } from "@/services/diagnosticService";
 import { getGoals } from "@/services/goalService";
+import { useAuth } from "@/hooks/useAuth";
 import type { DiagnosticAnswerPayload, DiagnosticQuestion } from "@/types/diagnostic";
-import { appRoutes } from "@/utils/appRoutes";
+import { getLearnerRoutes } from "@/utils/appRoutes";
 
 export default function StudentDiagnosticPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { role } = useAuth();
+  const learnerRoutes = getLearnerRoutes(role);
   const { toast } = useToast();
   const testId = Number(searchParams.get("test_id") ?? "");
   const goalIdFromQuery = Number(searchParams.get("goal_id") ?? "");
@@ -46,7 +49,7 @@ export default function StudentDiagnosticPage() {
         description: `Opening adaptive diagnostic for goal ${goalId}.`,
         variant: "success",
       });
-      router.push(`${appRoutes.student.diagnostic}?goal_id=${goalId}&test_id=${session.id}`);
+      router.push(`${learnerRoutes.diagnostic}?goal_id=${goalId}&test_id=${session.id}`);
     },
     onError: () => {
       toast({
@@ -61,7 +64,7 @@ export default function StudentDiagnosticPage() {
     mutationFn: (payload: { testId: number }) => getNextDiagnosticQuestion(payload.testId),
     onSuccess: (question) => {
       if (question === null) {
-        router.replace(`${appRoutes.student.diagnosticResult}?test_id=${testId}`);
+        router.replace(`${learnerRoutes.diagnosticResult}?test_id=${testId}`);
         return;
       }
       setCurrentQuestion(question);
@@ -81,7 +84,7 @@ export default function StudentDiagnosticPage() {
         description: "Your answers were submitted successfully.",
         variant: "success",
       });
-      router.replace(`${appRoutes.student.diagnosticResult}?test_id=${session.id}`);
+      router.replace(`${learnerRoutes.diagnosticResult}?test_id=${session.id}`);
     },
     onError: () => {
       setFlowError("Unable to submit the diagnostic answers.");
@@ -103,7 +106,7 @@ export default function StudentDiagnosticPage() {
       .then((session) => {
         const answeredCount = session.answered_count ?? 0;
         if (session.completed_at) {
-          router.replace(`${appRoutes.student.diagnosticResult}?test_id=${session.id}`);
+          router.replace(`${learnerRoutes.diagnosticResult}?test_id=${session.id}`);
           return null;
         }
         if (answeredCount > 0) {
@@ -116,7 +119,7 @@ export default function StudentDiagnosticPage() {
         return loadNextQuestion({ testId });
       })
       .catch(() => setFlowError("Unable to resume the diagnostic session."));
-  }, [isTestMode, loadNextQuestion, router, testId]);
+  }, [isTestMode, learnerRoutes.diagnosticResult, loadNextQuestion, router, testId]);
 
   const goals = goalsQuery.data?.items ?? [];
 
@@ -206,7 +209,7 @@ export default function StudentDiagnosticPage() {
               <Button onClick={() => void handleAnswerSubmit()} disabled={!answerValue.trim() || nextQuestionMutation.isPending || submitMutation.isPending}>
                 {submitMutation.isPending ? "Submitting..." : nextQuestionMutation.isPending ? "Loading..." : "Continue"}
               </Button>
-              <Link href={appRoutes.student.goals} className="inline-flex items-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+              <Link href={learnerRoutes.goals} className="inline-flex items-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
                 Exit diagnostic
               </Link>
             </div>
@@ -293,11 +296,11 @@ export default function StudentDiagnosticPage() {
             </div>
           )}
           <div className="mt-5 flex flex-wrap gap-3">
-            <Link href={appRoutes.student.dashboard} className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 dark:text-brand-200">
+            <Link href={learnerRoutes.dashboard} className="inline-flex items-center gap-2 text-sm font-semibold text-brand-700 dark:text-brand-200">
               <Compass className="h-4 w-4" />
               Back to dashboard
             </Link>
-            <Link href={appRoutes.student.roadmap} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+            <Link href={learnerRoutes.roadmap} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
               <Sparkles className="h-4 w-4" />
               See roadmap area
             </Link>

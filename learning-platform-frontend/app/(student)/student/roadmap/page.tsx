@@ -13,8 +13,10 @@ import MetricCard from "@/components/ui/MetricCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import StatusPill from "@/components/ui/StatusPill";
 import { useToast } from "@/components/providers/ToastProvider";
+import { useAuth } from "@/hooks/useAuth";
 import { normalizeRoadmapGenerationStatus, normalizeRoadmapStatus, useStudentDashboard } from "@/hooks/useDashboard";
 import { updateRoadmapStep } from "@/services/roadmapService";
+import { getLearnerRoutes } from "@/utils/appRoutes";
 
 const ProgressLineChart = dynamic(() => import("@/components/charts/ProgressLineChart"));
 const ImmersiveQuestBoard = dynamic(() => import("@/components/student/ImmersiveQuestBoard"));
@@ -22,6 +24,8 @@ const InteractiveChallengeLab = dynamic(() => import("@/components/student/Inter
 const RoadmapFlow = dynamic(() => import("@/components/student/RoadmapFlow"));
 
 export default function StudentRoadmapPage() {
+  const { role } = useAuth();
+  const learnerRoutes = getLearnerRoutes(role);
   const dashboard = useStudentDashboard();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -82,7 +86,7 @@ export default function StudentRoadmapPage() {
         description="This workspace turns the roadmap into a visual journey with AI-powered next actions, graph storytelling, and step-by-step progression."
         actions={
           <Link
-            href="/mentor/dashboard"
+            href={learnerRoutes.mentor}
             className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
           >
             Mentor guidance
@@ -201,7 +205,7 @@ export default function StudentRoadmapPage() {
                           Open topic
                         </Link>
                         <Link
-                          href={`/mentor/chat?prompt=${encodeURIComponent(
+                          href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(
                             `Explain ${
                               dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`
                             } clearly, tell me why it matters in the roadmap, and give me one quick example.`,
@@ -212,7 +216,7 @@ export default function StudentRoadmapPage() {
                           <Sparkles className="h-4 w-4" />
                         </Link>
                         <Link
-                          href={`/mentor/chat?prompt=${encodeURIComponent(
+                          href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(
                             `Generate 3 practice questions for ${
                               dashboard.topicMap.get(step.topic_id) ?? `Topic ${step.topic_id}`
                             } with concise answers.`,

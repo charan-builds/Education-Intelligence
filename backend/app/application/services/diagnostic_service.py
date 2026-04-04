@@ -14,6 +14,7 @@ from app.application.services.outbox_service import OutboxService
 from app.application.services.retention_service import RetentionService
 from app.application.services.skill_vector_service import SkillVectorService
 from app.domain.models.diagnostic_test import DiagnosticTest
+from app.application.services.recommendation_service import RecommendationService
 from app.infrastructure.cache.cache_service import CacheService
 from app.infrastructure.repositories.goal_repository import GoalRepository
 from app.infrastructure.repositories.diagnostic_repository import DiagnosticRepository
@@ -40,6 +41,7 @@ class DiagnosticService:
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
         self.cache_service = CacheService()
+        self.recommendation_service = RecommendationService(session)
 
     def _score_answer(self, expected_answer: str, user_answer: str, accepted_answers: list[str] | None = None) -> float:
         evaluated = DiagnosticTest.evaluate_answers(
@@ -556,9 +558,31 @@ class DiagnosticService:
             test_id=test_id,
             tenant_id=tenant_id,
         )
+        prerequisite_map: dict[int, list[int]] = {}
+        prerequisite_edges = await self.topic_repository.get_prerequisite_edges(tenant_id=tenant_id)
+        for topic_id, prerequisite_topic_id in prerequisite_edges:
+            prerequisite_map.setdefault(int(topic_id), []).append(int(prerequisite_topic_id))
+        weakness_analysis = self.weakness_engine.analyze(
+            topic_scores={int(topic_id): float(score) for topic_id, score in scores.items()},
+            prerequisite_map=prerequisite_map,
+        )
+        foundation_gap_topic_ids = sorted(
+            {
+                int(prerequisite_topic_id)
+                for item in weakness_analysis.get("deep_weaknesses", [])
+                for prerequisite_topic_id in item.get("missing_foundations", [])
+            }
+        )
+        recommendation_levels = {
+            int(topic_id): self.recommendation_service.engine.classify_topic(float(score))
+            for topic_id, score in scores.items()
+        }
         return {
             "test_id": test_id,
             "topic_scores": scores,
+            "weak_topic_ids": [int(item["topic_id"]) for item in weakness_analysis.get("deep_weaknesses", [])],
+            "foundation_gap_topic_ids": foundation_gap_topic_ids,
+            "recommendation_levels": recommendation_levels,
             "roadmap": roadmap,
         }
 

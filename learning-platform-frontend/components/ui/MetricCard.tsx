@@ -21,10 +21,10 @@ export default function MetricCard({
 }: MetricCardProps) {
   const toneMap = {
     default:
-      "border-white/70 from-white via-slate-50 to-indigo-50/70 text-slate-950 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800 dark:text-slate-100",
-    info: "border-indigo-300/30 from-indigo-600 via-violet-600 to-cyan-500 text-white",
-    success: "border-emerald-300/30 from-emerald-500 via-teal-500 to-cyan-500 text-white",
-    warning: "border-amber-200/60 from-amber-300 via-orange-300 to-rose-300 text-slate-950",
+      "border-violet-200/80 from-white via-violet-50 to-fuchsia-50/80 text-violet-950 dark:from-violet-950 dark:via-violet-950 dark:to-violet-900 dark:text-violet-100",
+    info: "border-violet-300/30 from-violet-600 via-purple-600 to-fuchsia-500 text-white",
+    success: "border-violet-300/30 from-violet-500 via-purple-500 to-indigo-500 text-white",
+    warning: "border-fuchsia-200/60 from-fuchsia-200 via-violet-200 to-purple-200 text-violet-950",
   } as const;
 
   const darkTextClass = tone === "default" ? "text-slate-950 dark:text-slate-100" : "text-current";
@@ -32,12 +32,12 @@ export default function MetricCard({
     tone === "default"
       ? "text-slate-600 dark:text-slate-400"
       : tone === "warning"
-        ? "text-slate-800/80"
+        ? "text-violet-900/75"
         : "text-white/80";
 
   return (
     <article
-      className={`soft-ring rounded-[30px] border bg-gradient-to-br ${toneMap[tone]} p-5 shadow-panel transition duration-200 hover:-translate-y-1.5 hover:shadow-[0_24px_60px_rgba(79,70,229,0.12)]`}
+      className={`soft-ring rounded-[30px] border bg-gradient-to-br ${toneMap[tone]} p-6 shadow-panel transition duration-300 hover:-translate-y-1.5 hover:shadow-[0_24px_60px_rgba(124,58,237,0.18)]`}
     >
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -45,7 +45,7 @@ export default function MetricCard({
           <p className={`mt-2 text-sm font-medium ${mutedTextClass}`}>{title}</p>
         </div>
         {icon ? (
-          <div className="rounded-[18px] border border-white/20 bg-white/15 p-2.5 backdrop-blur">
+          <div className="rounded-[18px] border border-white/20 bg-white/15 p-3 backdrop-blur">
             <div className={mutedTextClass}>{icon}</div>
           </div>
         ) : null}

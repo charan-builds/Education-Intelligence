@@ -12,6 +12,7 @@ class TenantType(str, Enum):
     college = "college"
     company = "company"
     school = "school"
+    personal = "personal"
 
 
 class Tenant(Base):

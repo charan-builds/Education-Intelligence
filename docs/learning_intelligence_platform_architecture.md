@@ -1583,22 +1583,25 @@ There are two seed paths:
 
 Seeded panel credentials from `seed.py`:
 
-- platform super admin: `superadmin@platform.example.com` / `SuperAdmin123!`
+- platform super admin: `superadmin@platform.learnova.ai` / `SuperAdmin123!`
 - Demo University
-  - student: `student@example.com` / `Student123!`
-  - teacher: `teacher@example.com` / `Teacher123!`
-  - mentor: `mentor@example.com` / `Mentor123!`
-  - admin: `admin@example.com` / `admin123`
-- Northwind School
-  - student: `student@northwind.local` / `Student123!`
-  - teacher: `teacher@northwind.local` / `Teacher123!`
-  - mentor: `mentor@northwind.local` / `Mentor123!`
-  - admin: `admin@northwind.local` / `admin123`
+  - student: `maya.chen@demo.learnova.ai` / `Student123!`
+  - teacher: `teacher@demo.learnova.ai` / `Teacher123!`
+  - mentor: `mentor@demo.learnova.ai` / `Mentor123!`
+  - admin: `admin@demo.learnova.ai` / `admin123`
+- Northwind Academy
+  - student: `ethan.cole@northwind.learnova.ai` / `Student123!`
+  - teacher: `teacher@northwind.learnova.ai` / `Teacher123!`
+  - mentor: `mentor@northwind.learnova.ai` / `Mentor123!`
+  - admin: `admin@northwind.learnova.ai` / `admin123`
 - Acme Learning Co
-  - student: `student@acme.local` / `Student123!`
-  - teacher: `teacher@acme.local` / `Teacher123!`
-  - mentor: `mentor@acme.local` / `Mentor123!`
-  - admin: `admin@acme.local` / `admin123`
+  - student: `noah.brooks@acme.learnova.ai` / `Student123!`
+  - teacher: `teacher@acme.learnova.ai` / `Teacher123!`
+  - mentor: `mentor@acme.learnova.ai` / `Mentor123!`
+  - admin: `admin@acme.learnova.ai` / `admin123`
+- Independent learner workspaces
+  - `ava.martinez@workspace.learnova.ai` / `Student123!`
+  - `leo.kim@workspace.learnova.ai` / `Student123!`
 
 ### Verification commands
 

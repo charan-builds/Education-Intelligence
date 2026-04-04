@@ -11,7 +11,7 @@ type PieDatum = {
   value: number;
 };
 
-const PIE_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#06b6d4", "#f43f5e"];
+const PIE_COLORS = ["#6C5CE7", "#8B5CF6", "#A29BFE", "#C084FC", "#DDD6FE"];
 
 type MasteryPieChartProps = {
   title: string;
@@ -46,9 +46,9 @@ export default function MasteryPieChart({
               <Tooltip
                 contentStyle={{
                   borderRadius: 16,
-                  border: "1px solid rgba(148,163,184,0.18)",
-                  background: "rgba(15,23,42,0.92)",
-                  color: "#e2e8f0",
+                  border: "1px solid rgba(162,155,254,0.24)",
+                  background: "rgba(76,29,149,0.94)",
+                  color: "#f5f3ff",
                 }}
               />
             </PieChart>
@@ -62,16 +62,16 @@ export default function MasteryPieChart({
               viewport={{ once: true, amount: 0.2 }}
               transition={{ duration: 0.25, delay: index * 0.04 }}
               key={entry.name}
-              className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/70"
+              className="flex items-center gap-3 rounded-2xl border border-violet-200/70 bg-white/75 px-3 py-2 dark:border-violet-500/20 dark:bg-violet-950/55"
             >
               <span
                 className="h-3 w-3 rounded-full"
                 style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
               />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">{entry.name}</p>
+                <p className="text-sm font-semibold text-violet-950 dark:text-violet-50">{entry.name}</p>
               </div>
-              <span className="text-sm text-slate-600 dark:text-slate-400">{entry.value}</span>
+              <span className="text-sm text-violet-700/80 dark:text-violet-100/72">{entry.value}</span>
             </motion.div>
           ))}
         </div>

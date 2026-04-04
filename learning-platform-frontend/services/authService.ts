@@ -109,7 +109,11 @@ export async function confirmPasswordReset(token: string, password: string): Pro
 
 export async function getCurrentUser(): Promise<User | null> {
   try {
-    const { data } = await apiClient.get<User>("/users/me");
+    const { data } = await apiClient.get<User>("/users/me", {
+      headers: {
+        "X-Skip-Auth-Handling": "true",
+      },
+    });
     return data;
   } catch {
     return null;

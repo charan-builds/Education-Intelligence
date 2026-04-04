@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -20,6 +21,52 @@ from app.presentation.analytics_routes import (
     get_topic_mastery_analytics,
     get_weak_topics,
 )
+
+
+class StubAnalyticsSnapshotService:
+    def __init__(self, _db):
+        self.db = _db
+
+    async def get_latest_snapshot(self, tenant_id, snapshot_type, *, subject_id=None):
+        if snapshot_type == "learner_intelligence_overview":
+            return {
+                "created_at": None,
+                "data": {
+                    "tenant_id": tenant_id,
+                    "user_id": subject_id,
+                    "mastery_avg": 62.0,
+                    "confidence_avg": 0.71,
+                    "learning_speed_seconds": 38.0,
+                    "retry_count": 2,
+                    "tracked_topics": 5,
+                },
+            }
+        if snapshot_type == "learning_trends":
+            return {
+                "created_at": None,
+                "data": {
+                    "tenant_id": tenant_id,
+                    "points": [
+                        {
+                            "label": "2026-03-24",
+                            "events": 12,
+                            "minutes_spent": 48.0,
+                            "completions": 4,
+                            "retries": 2,
+                        }
+                    ],
+                },
+            }
+        return None
+
+
+class StubStaleAnalyticsSnapshotService(StubAnalyticsSnapshotService):
+    async def get_latest_snapshot(self, tenant_id, snapshot_type, *, subject_id=None):
+        snapshot = await super().get_latest_snapshot(tenant_id, snapshot_type, subject_id=subject_id)
+        if snapshot is None:
+            return None
+        snapshot["created_at"] = None
+        return snapshot
 
 
 class StubAnalyticsService:
@@ -350,6 +397,7 @@ class StubSkillVectorService:
 
 
 def test_student_intelligence_endpoints(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsSnapshotService", StubAnalyticsSnapshotService)
     monkeypatch.setattr("app.presentation.analytics_routes.SkillVectorService", StubSkillVectorService)
     current_user = SimpleNamespace(tenant_id=7, id=11)
 
@@ -360,7 +408,28 @@ def test_student_intelligence_endpoints(monkeypatch):
     assert vectors["vectors"][0]["topic_name"] == "SQL"
 
 
+def test_student_insights_returns_stale_snapshot_without_blocking(monkeypatch):
+    queued = {"called": False}
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsSnapshotService", StubAnalyticsSnapshotService)
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes._snapshot_status",
+        lambda last_updated: "stale" if last_updated is None else "ready",
+    )
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes._enqueue_deduplicated_analytics_job",
+        lambda **kwargs: queued.update({"called": True, "kwargs": kwargs}) or asyncio.sleep(0, result=True),
+    )
+
+    current_user = SimpleNamespace(tenant_id=7, id=11)
+    response = asyncio.run(get_student_insights(db=object(), current_user=current_user))
+
+    assert response["mastery_avg"] == 62.0
+    assert response["meta"]["status"] == "stale"
+    assert queued["called"] is True
+
+
 def test_teacher_intelligence_endpoints(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.AnalyticsSnapshotService", StubAnalyticsSnapshotService)
     monkeypatch.setattr("app.presentation.analytics_routes.SkillVectorService", StubSkillVectorService)
     current_user = SimpleNamespace(tenant_id=7)
 
@@ -369,6 +438,23 @@ def test_teacher_intelligence_endpoints(monkeypatch):
 
     trends = asyncio.run(get_learning_trends(db=object(), current_user=current_user))
     assert trends[0]["events"] == 12
+
+
+def test_precomputed_tenant_dashboard_marks_stale_snapshot(monkeypatch):
+    monkeypatch.setattr("app.presentation.analytics_routes.PrecomputedAnalyticsService", StubStalePrecomputedAnalyticsService)
+    queued = {"called": False}
+    monkeypatch.setattr(
+        "app.presentation.analytics_routes._enqueue_high_priority_snapshot_rebuild",
+        lambda **kwargs: queued.update({"called": True, "kwargs": kwargs}) or asyncio.sleep(0, result=True),
+    )
+    teacher = SimpleNamespace(tenant_id=9)
+
+    response = asyncio.run(get_precomputed_tenant_dashboard(db=object(), current_user=teacher))
+
+    assert response["tenant_id"] == 9
+    assert response["meta"]["status"] == "stale"
+    assert queued["called"] is True
+    assert queued["kwargs"] == {"tenant_id": 9, "snapshot_type": "tenant_dashboard"}
 
 
 def test_student_performance_analytics_endpoint(monkeypatch):
@@ -499,13 +585,17 @@ class StubPrecomputedAnalyticsService:
     def __init__(self, _db):
         self.db = _db
 
+    @staticmethod
+    def _fresh_timestamp() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
     async def latest_tenant_dashboard(self, *, tenant_id: int):
         return {
             "tenant_id": tenant_id,
             "active_learners": 14,
             "weekly_event_count": 200,
             "average_topic_mastery": 68.2,
-            "updated_at": "2026-03-27T00:00:00Z",
+            "updated_at": self._fresh_timestamp(),
         }
 
     async def refresh_tenant_dashboard(self, *, tenant_id: int):
@@ -517,8 +607,20 @@ class StubPrecomputedAnalyticsService:
             "user_id": user_id,
             "weekly_event_count": 18,
             "average_score": 72.5,
-            "updated_at": "2026-03-27T00:00:00Z",
+            "updated_at": self._fresh_timestamp(),
         }
+
+
+class StubStalePrecomputedAnalyticsService(StubPrecomputedAnalyticsService):
+    async def latest_tenant_dashboard(self, *, tenant_id: int):
+        payload = await super().latest_tenant_dashboard(tenant_id=tenant_id)
+        payload["updated_at"] = "2026-03-27T00:00:00Z"
+        return payload
+
+    async def latest_user_learning_summary(self, *, tenant_id: int, user_id: int):
+        payload = await super().latest_user_learning_summary(tenant_id=tenant_id, user_id=user_id)
+        payload["updated_at"] = "2026-03-27T00:00:00Z"
+        return payload
 
     async def refresh_user_learning_summary(self, *, tenant_id: int, user_id: int):
         return {"tenant_id": tenant_id, "user_id": user_id, "average_score": 70.0}
@@ -548,21 +650,17 @@ def test_precomputed_analytics_endpoints(monkeypatch):
 
     tenant_snapshot = asyncio.run(get_precomputed_tenant_dashboard(db=_Db(), current_user=teacher))
     assert tenant_snapshot["active_learners"] == 14
-    assert tenant_snapshot["meta"] == {
-        "status": "ready",
-        "last_updated": "2026-03-27T00:00:00Z",
-        "is_rebuilding": False,
-        "estimated_time": None,
-    }
+    assert tenant_snapshot["meta"]["status"] == "ready"
+    assert tenant_snapshot["meta"]["last_updated"]
+    assert tenant_snapshot["meta"]["is_rebuilding"] is False
+    assert tenant_snapshot["meta"]["estimated_time"] is None
 
     user_snapshot = asyncio.run(get_precomputed_user_learning_summary(db=_Db(), current_user=learner))
     assert user_snapshot["average_score"] == 72.5
-    assert user_snapshot["meta"] == {
-        "status": "ready",
-        "last_updated": "2026-03-27T00:00:00Z",
-        "is_rebuilding": False,
-        "estimated_time": None,
-    }
+    assert user_snapshot["meta"]["status"] == "ready"
+    assert user_snapshot["meta"]["last_updated"]
+    assert user_snapshot["meta"]["is_rebuilding"] is False
+    assert user_snapshot["meta"]["estimated_time"] is None
 
     refresh_result = asyncio.run(refresh_precomputed_analytics(db=_Db(), current_user=admin))
     assert refresh_result == {"status": "queued", "tenant_id": 6}

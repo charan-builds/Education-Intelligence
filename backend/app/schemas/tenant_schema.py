@@ -14,6 +14,7 @@ class TenantCreateRequest(BaseModel):
 class TenantResponse(BaseModel):
     id: int
     name: str
+    subdomain: str | None = None
     type: TenantType
     created_at: datetime
 

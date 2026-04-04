@@ -63,9 +63,10 @@ class UserService:
         display_name: str | None,
         phone_number: str | None,
         linkedin_url: str | None,
-        college_name: str | None,
         avatar_url: str | None,
         preferences: dict[str, object],
+        organization_name: str | None = None,
+        college_name: str | None = None,
     ) -> User:
         try:
             user = await self.get_profile(user_id=user_id, tenant_id=tenant_id)
@@ -74,7 +75,8 @@ class UserService:
             user.full_name = normalized_full_name
             user.phone_number = self._normalize_phone_number(phone_number) if phone_number else None
             user.linkedin_url = self._normalize_linkedin_url(linkedin_url) if linkedin_url else None
-            user.college_name = (college_name or "").strip() or None
+            resolved_organization_name = organization_name if organization_name is not None else college_name
+            user.college_name = (resolved_organization_name or "").strip() or None
             user.avatar_url = (avatar_url or "").strip() or None
             user.preferences_json = preferences or {}
             if normalized_full_name and not user.display_name:
@@ -94,7 +96,8 @@ class UserService:
         full_name: str,
         phone_number: str,
         linkedin_url: str,
-        college_name: str | None,
+        organization_name: str | None = None,
+        college_name: str | None = None,
     ) -> User:
         try:
             user = await self.get_profile(user_id=user_id, tenant_id=tenant_id)
@@ -105,7 +108,8 @@ class UserService:
             user.display_name = normalized_full_name
             user.phone_number = self._normalize_phone_number(phone_number)
             user.linkedin_url = self._normalize_linkedin_url(linkedin_url)
-            user.college_name = (college_name or "").strip() or None
+            resolved_organization_name = organization_name if organization_name is not None else college_name
+            user.college_name = (resolved_organization_name or "").strip() or None
             user.is_profile_completed = True
             await self.session.commit()
             await self.session.refresh(user)

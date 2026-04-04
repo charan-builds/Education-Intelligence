@@ -12,6 +12,8 @@ from app.infrastructure.repositories.user_skill_vector_repository import UserSki
 
 
 class SkillVectorService:
+    SNAPSHOT_BATCH_SIZE = 1000
+
     def __init__(self, session: AsyncSession):
         self.session = session
         self.repository = UserSkillVectorRepository(session)
@@ -158,31 +160,41 @@ class SkillVectorService:
 
     async def learning_trends(self, *, tenant_id: int, days: int = 14) -> list[dict]:
         since = datetime.now(timezone.utc) - timedelta(days=days)
-        rows = (
-            await self.session.execute(
-                select(LearningEvent.event_timestamp, LearningEvent.action_type, LearningEvent.time_spent_seconds)
-                .where(
-                    LearningEvent.tenant_id == tenant_id,
-                    func.coalesce(LearningEvent.event_timestamp, LearningEvent.created_at) >= since,
-                )
-                .order_by(func.coalesce(LearningEvent.event_timestamp, LearningEvent.created_at).asc())
-            )
-        ).all()
         trend: dict[str, dict[str, float | int | str]] = {}
-        for ts, action_type, time_spent_seconds in rows:
-            if ts is None:
-                continue
-            label = ts.date().isoformat()
-            bucket = trend.setdefault(
-                label,
-                {"label": label, "events": 0, "minutes_spent": 0.0, "completions": 0, "retries": 0},
+        stmt = (
+            select(LearningEvent.event_timestamp, LearningEvent.action_type, LearningEvent.time_spent_seconds)
+            .where(
+                LearningEvent.tenant_id == tenant_id,
+                func.coalesce(LearningEvent.event_timestamp, LearningEvent.created_at) >= since,
             )
-            bucket["events"] = int(bucket["events"]) + 1
-            bucket["minutes_spent"] = round(float(bucket["minutes_spent"]) + (float(time_spent_seconds or 0) / 60.0), 2)
-            if action_type == "complete":
-                bucket["completions"] = int(bucket["completions"]) + 1
-            if action_type == "retry":
-                bucket["retries"] = int(bucket["retries"]) + 1
+            .order_by(func.coalesce(LearningEvent.event_timestamp, LearningEvent.created_at).asc(), LearningEvent.id.asc())
+        )
+        offset = 0
+        while True:
+            rows = (
+                await self.session.execute(
+                    stmt.limit(self.SNAPSHOT_BATCH_SIZE).offset(offset)
+                )
+            ).all()
+            if not rows:
+                break
+            for ts, action_type, time_spent_seconds in rows:
+                if ts is None:
+                    continue
+                label = ts.date().isoformat()
+                bucket = trend.setdefault(
+                    label,
+                    {"label": label, "events": 0, "minutes_spent": 0.0, "completions": 0, "retries": 0},
+                )
+                bucket["events"] = int(bucket["events"]) + 1
+                bucket["minutes_spent"] = round(float(bucket["minutes_spent"]) + (float(time_spent_seconds or 0) / 60.0), 2)
+                if action_type == "complete":
+                    bucket["completions"] = int(bucket["completions"]) + 1
+                if action_type == "retry":
+                    bucket["retries"] = int(bucket["retries"]) + 1
+            if len(rows) < self.SNAPSHOT_BATCH_SIZE:
+                break
+            offset += self.SNAPSHOT_BATCH_SIZE
         return [trend[key] for key in sorted(trend.keys())]
 
     async def aggregated_feature_payload(self, *, tenant_id: int, user_id: int) -> dict:

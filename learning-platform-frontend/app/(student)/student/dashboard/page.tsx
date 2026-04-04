@@ -27,7 +27,9 @@ import EmptyState from "@/components/ui/EmptyState";
 import StatusPill from "@/components/ui/StatusPill";
 import Skeleton from "@/components/ui/Skeleton";
 import { useAdaptiveStudentUI } from "@/hooks/useAdaptiveStudentUI";
+import { useAuth } from "@/hooks/useAuth";
 import { useStudentDashboard } from "@/hooks/useDashboard";
+import { getLearnerRoutes } from "@/utils/appRoutes";
 
 const ActivityFeed = dynamic(() => import("@/components/dashboard/ActivityFeed"));
 const RecommendationPanel = dynamic(() => import("@/components/dashboard/RecommendationPanel"));
@@ -39,6 +41,8 @@ const AdaptiveGuidancePanel = dynamic(() => import("@/components/student/Adaptiv
 const ProgressStoryTimeline = dynamic(() => import("@/components/student/ProgressStoryTimeline"));
 
 export default function StudentDashboardPage() {
+  const { role } = useAuth();
+  const learnerRoutes = getLearnerRoutes(role);
   const dashboard = useStudentDashboard();
   const { activeUsers, connectionStatus, liveEvents } = useRealtime();
   const isLoading = dashboard.queries.dashboardQuery.isLoading && !dashboard.queries.dashboardQuery.data;
@@ -93,7 +97,7 @@ export default function StudentDashboardPage() {
   return (
     <div className={`space-y-7 ${focusShellClassName}`}>
       <PageHeader
-        eyebrow="Student workspace"
+        eyebrow={role === "independent_learner" ? "Independent learner workspace" : "Student workspace"}
         title={adaptiveUI.focusMode ? "Focus mode: one clear path forward" : "An adaptive learning command center"}
         description={
           adaptiveUI.focusMode
@@ -103,7 +107,7 @@ export default function StudentDashboardPage() {
         actions={
           <>
             <Link
-              href="/student/roadmap"
+              href={learnerRoutes.roadmap}
               onClick={() => adaptiveUI.recordFeatureUse("roadmap")}
               className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-semibold text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
@@ -111,7 +115,7 @@ export default function StudentDashboardPage() {
               <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
-              href={`/mentor/chat?prompt=${encodeURIComponent(
+              href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(
                 topWeakTopic
                   ? `Coach me through ${topWeakTopic.name}. Explain why it matters, then give me 3 practice questions.`
                   : "Give me a high-impact study plan for today based on my current dashboard.",
@@ -321,7 +325,7 @@ export default function StudentDashboardPage() {
             >
               <div className="grid gap-3 md:grid-cols-3">
                 <Link
-                  href={`/mentor/chat?prompt=${encodeURIComponent(
+                  href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(
                     topWeakTopic
                       ? `Explain ${topWeakTopic.name} to me like a top startup mentor: simple intuition, real-world analogy, and when learners usually get stuck.`
                       : "Explain the most important concept I should focus on next in simple terms.",
@@ -336,7 +340,7 @@ export default function StudentDashboardPage() {
                   <p className="mt-2 text-sm leading-6 text-slate-600">Turn a weak concept into a clean, memorable explanation.</p>
                 </Link>
                 <Link
-                  href={`/mentor/chat?prompt=${encodeURIComponent(
+                  href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(
                     topWeakTopic
                       ? `Generate 5 interview-style questions on ${topWeakTopic.name}, ordered from basic to advanced, with short answers after each one.`
                       : "Generate 5 high-signal practice questions for my current learning plan with short answers.",
@@ -351,7 +355,7 @@ export default function StudentDashboardPage() {
                   <p className="mt-2 text-sm leading-6 text-slate-600">Create recruiter-ready practice and instantly show product depth.</p>
                 </Link>
                 <Link
-                  href={`/mentor/chat?prompt=${encodeURIComponent(
+                  href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(
                     "Act as my AI mentor. Review my dashboard, identify the highest-leverage next step, and give me a short game plan for the next 30 minutes.",
                   )}`}
                   onClick={() => adaptiveUI.recordFeatureUse("mentor")}

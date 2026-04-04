@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { FormEvent } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, KeyRound, MailCheck, ShieldCheck, Sparkles, Users } from "lucide-react";
 
@@ -19,7 +19,7 @@ import {
   requestPasswordReset,
   setupMfa,
 } from "@/services/authService";
-import { appRoutes, buildAuthPath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
+import { appRoutes, buildAuthPath, getRoleProfilePath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 type AuthPageClientProps = {
@@ -27,6 +27,19 @@ type AuthPageClientProps = {
 };
 
 type AuthMode = "login" | "register" | "invite" | "forgot-password" | "reset-password" | "email-verification";
+
+function getLocalEmailInboxHint(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  const hostname = window.location.hostname;
+  if (hostname === "127.0.0.1" || hostname === "localhost") {
+    return " Local Docker email is routed to Mailpit at http://127.0.0.1:8025.";
+  }
+
+  return "";
+}
 
 export default function AuthPageClient({ initialMode = "login" }: AuthPageClientProps) {
   const router = useRouter();
@@ -42,9 +55,11 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
   const [success, setSuccess] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [nextPath, setNextPath] = useState<string | null>(null);
+  const autoVerifiedTokenRef = useRef<string | null>(null);
   const inviteToken = useMemo(() => searchParams.get("invite"), [searchParams]);
   const modeParam = useMemo(() => searchParams.get("mode") as AuthMode | null, [searchParams]);
   const nextParam = useMemo(() => searchParams.get("next"), [searchParams]);
+  const emailParam = useMemo(() => searchParams.get("email"), [searchParams]);
   const tenantIdParam = useMemo(() => searchParams.get("tenant_id"), [searchParams]);
   const tenantSubdomainParam = useMemo(() => searchParams.get("tenant"), [searchParams]);
   const verificationTokenParam = useMemo(
@@ -56,20 +71,53 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
   useEffect(() => {
     setNextPath(sanitizeAuthRedirectTarget(nextParam, appRoutes.auth));
     setTenantContext(tenantIdParam ?? tenantSubdomainParam ?? "");
+    setEmail(emailParam ?? "");
     setToken(inviteToken ?? verificationTokenParam ?? "");
     setManualMode(null);
-  }, [inviteToken, modeParam, nextParam, tenantIdParam, tenantSubdomainParam, verificationTokenParam]);
+  }, [emailParam, inviteToken, modeParam, nextParam, tenantIdParam, tenantSubdomainParam, verificationTokenParam]);
 
   useEffect(() => {
     if (!isReady || !isAuthenticated) {
       return;
     }
     if (requiresProfileCompletion) {
-      router.replace(appRoutes.student.profile);
+      router.replace(getRoleProfilePath(role));
       return;
     }
     router.replace(nextPath ?? getRoleRedirectPath(role));
   }, [isAuthenticated, isReady, nextPath, requiresProfileCompletion, role, router]);
+
+  useEffect(() => {
+    async function autoVerifyEmailLink(): Promise<void> {
+      if (mode !== "email-verification" || !token || autoVerifiedTokenRef.current === token) {
+        return;
+      }
+      autoVerifiedTokenRef.current = token;
+      setIsSubmitting(true);
+      setError("");
+      setSuccess("Verifying your email and preparing sign in...");
+      try {
+        await confirmEmailVerification(token);
+        const loginPath = buildAuthPath("login", null, {
+          email,
+          tenant_id: tenantIdParam ?? tenantContext,
+        });
+        if (typeof window !== "undefined") {
+          window.location.assign(loginPath);
+          return;
+        }
+        router.replace(loginPath);
+      } catch (verificationError) {
+        setError(
+          verificationError instanceof Error ? verificationError.message : "Unable to verify this email link.",
+        );
+      } finally {
+        setIsSubmitting(false);
+      }
+    }
+
+    void autoVerifyEmailLink();
+  }, [email, mode, router, tenantContext, tenantIdParam, token]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -84,16 +132,13 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
       const tenantSubdomain = Number.isInteger(numericTenantId) && numericTenantId > 0 ? null : (trimmedTenantContext || null);
 
       if (mode === "login") {
-        if (!tenantId && !tenantSubdomain) {
-          throw new Error("Tenant ID or workspace is required for login. Try tenant 2 for Demo University.");
-        }
         const session = await login(email, password, {
           tenant_id: tenantId,
           tenant_subdomain: tenantSubdomain,
         }, mfaCode);
         if (session.requires_profile_completion) {
           setSuccess("Profile completion is required before diagnostic, roadmap, and dashboard access.");
-          router.replace(appRoutes.student.profile);
+          router.replace(getRoleProfilePath(session.user.role));
           return;
         }
         router.replace(nextPath ?? getRoleRedirectPath(session.user.role));
@@ -101,11 +146,14 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
       }
 
       if (mode === "register") {
-        await register(email, password);
-        setSuccess("Account created. Check your email for a verification link before signing in.");
-        setManualMode("email-verification");
-        setToken("");
-        const verificationPath = buildAuthPath("email-verification");
+        const registeredUser = await register(email, password);
+        setSuccess(
+          `Account created. Your personal workspace tenant ID is ${registeredUser.tenant_id}. Check your email for the verification link before signing in.${getLocalEmailInboxHint()}`,
+        );
+        const verificationPath = buildAuthPath("email-verification", null, {
+          email: registeredUser.email,
+          tenant_id: registeredUser.tenant_id,
+        });
         if (typeof window !== "undefined") {
           window.location.assign(verificationPath);
         } else {
@@ -148,13 +196,25 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
           await confirmEmailVerification(token);
         } else {
           if (!tenantId) {
-            throw new Error("A numeric tenant ID is required to issue a verification token.");
+            throw new Error("A numeric tenant ID is required to resend a verification email.");
           }
           await requestEmailVerification(tenantId, email);
         }
-        setSuccess(token ? "Email verified. You can sign in now." : "Verification token issued for this account.");
+        setSuccess(
+          token
+            ? "Email verified. You can sign in now."
+            : `Verification email sent. Open the link in your inbox to finish account activation.${getLocalEmailInboxHint()}`,
+        );
         if (token) {
-          setManualMode("login");
+          const loginPath = buildAuthPath("login", null, {
+            email,
+            tenant_id: tenantIdParam ?? tenantId,
+          });
+          if (typeof window !== "undefined") {
+            window.location.assign(loginPath);
+          } else {
+            router.replace(loginPath);
+          }
         }
       }
     } catch (submitError) {
@@ -306,13 +366,13 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
                 />
                 {mode === "login" ? (
                   <p className="mt-2 text-xs leading-5 text-slate-400">
-                    Tenant context is required. Demo examples: `2` for Demo University, `4` for Acme Learning Co, `1` for Platform.
+                    Institution users can enter tenant context here. Independent learners can leave this blank and sign in with their email directly.
                   </p>
                 ) : null}
               </div>
             ) : null}
 
-            {["invite", "reset-password", "email-verification"].includes(mode) ? (
+            {["invite", "reset-password"].includes(mode) || (mode === "email-verification" && Boolean(token)) ? (
               <div>
                 <label className="text-sm font-medium text-slate-300" htmlFor="auth-token">
                   {mode === "invite" ? "Invite token" : mode === "reset-password" ? "Reset token" : "Verification token"}
@@ -326,7 +386,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
               </div>
             ) : null}
 
-            {mode !== "email-verification" || token ? (
+            {mode !== "email-verification" ? (
               <div>
                 <label className="text-sm font-medium text-slate-300" htmlFor="auth-password">
                   Password
@@ -367,11 +427,11 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
                       ? "Accept invite"
                       : mode === "forgot-password"
                         ? "Issue reset token"
-                        : mode === "reset-password"
-                          ? "Update password"
-                          : token
-                            ? "Verify email"
-                            : "Issue verification token"}
+                : mode === "reset-password"
+                  ? "Update password"
+                  : token
+                    ? "Verify email"
+                    : "Resend verification email"}
               <ArrowRight className="h-4 w-4" />
             </Button>
 
@@ -400,7 +460,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
             <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
               <MailCheck className="h-5 w-5 text-brand-300" />
               <p className="mt-3 text-sm font-semibold">Email ownership</p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">Verification can be requested or confirmed from the same surface.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">New accounts stay locked until the inbox verification link is opened.</p>
             </div>
             <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
               <KeyRound className="h-5 w-5 text-brand-300" />

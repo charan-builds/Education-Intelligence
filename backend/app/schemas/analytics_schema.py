@@ -99,6 +99,7 @@ class RetentionAnalyticsResponse(BaseModel):
     due_review_count: int
     retention_curve: list[RetentionCurvePointResponse]
     weak_retention_topics: list[WeakRetentionTopicResponse]
+    meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class SkillVectorItemResponse(BaseModel):
@@ -132,6 +133,7 @@ class LearnerIntelligenceOverviewResponse(BaseModel):
     learning_speed_seconds: float
     retry_count: int
     tracked_topics: int
+    meta: AnalyticsSnapshotMetaResponse | None = None
 
 
 class LearnerSkillVectorResponse(BaseModel):

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, model_validator
 
 from app.domain.models.user import UserRole
 from app.schemas.common_schema import PageMeta
@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     display_name: str | None = None
     phone_number: str | None = None
     linkedin_url: str | None = None
+    organization_name: str | None = None
     college_name: str | None = None
     avatar_url: str | None = None
     preferences: dict[str, object] = Field(default_factory=dict)
@@ -39,16 +40,34 @@ class UserProfileUpdateRequest(BaseModel):
     display_name: str | None = None
     phone_number: str | None = None
     linkedin_url: HttpUrl | None = None
+    organization_name: str | None = None
     college_name: str | None = None
     avatar_url: str | None = None
     preferences: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def sync_organization_alias(self) -> "UserProfileUpdateRequest":
+        if self.organization_name is None and self.college_name is not None:
+            self.organization_name = self.college_name
+        if self.college_name is None and self.organization_name is not None:
+            self.college_name = self.organization_name
+        return self
 
 
 class UserProfileCompletionRequest(BaseModel):
     full_name: str
     phone_number: str
     linkedin_url: HttpUrl
+    organization_name: str | None = None
     college_name: str | None = None
+
+    @model_validator(mode="after")
+    def sync_organization_alias(self) -> "UserProfileCompletionRequest":
+        if self.organization_name is None and self.college_name is not None:
+            self.organization_name = self.college_name
+        if self.college_name is None and self.organization_name is not None:
+            self.college_name = self.organization_name
+        return self
 
 
 class UserPageResponse(BaseModel):

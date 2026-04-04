@@ -24,10 +24,12 @@ export default function AccessState({
   if (mode === "loading") {
     return (
       <main className="mx-auto min-h-screen max-w-5xl px-6 py-12">
-        <div className="space-y-4">
-          <Skeleton className="h-12 w-48" />
-          <Skeleton className="h-40 w-full" />
-          <Skeleton className="h-28 w-full" />
+        <div className="rounded-[32px] border border-violet-200/80 bg-white/78 p-6 shadow-[0_24px_60px_-34px_rgba(109,40,217,0.26)] backdrop-blur dark:border-violet-500/20 dark:bg-violet-950/50">
+          <div className="space-y-4">
+            <Skeleton className="h-12 w-48" />
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
         </div>
       </main>
     );
@@ -50,8 +52,10 @@ export default function AccessState({
   }
 
   return (
-    <main className="mx-auto min-h-screen max-w-4xl px-6 py-12 text-slate-600">
-      {description ?? "Redirecting to the correct workspace..."}
+    <main className="mx-auto min-h-screen max-w-4xl px-6 py-12">
+      <div className="rounded-[28px] border border-violet-200/80 bg-white/78 px-6 py-5 text-sm font-medium text-violet-800 shadow-[0_20px_50px_-32px_rgba(109,40,217,0.28)] backdrop-blur dark:border-violet-500/20 dark:bg-violet-950/50 dark:text-violet-100">
+        {description ?? "Redirecting to the correct workspace..."}
+      </div>
     </main>
   );
 }

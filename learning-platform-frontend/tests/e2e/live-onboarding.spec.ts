@@ -19,26 +19,31 @@ test("live onboarding completes register, verify email, login, and required prof
   expect(registerResponse.ok()).toBeTruthy();
   await page.waitForURL(/\/auth\?mode=email-verification/);
 
-  const verificationResponsePromise = page.waitForResponse((response) => {
-    return response.url().includes("/auth/email-verification/request") && response.request().method() === "POST";
-  });
-
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Tenant ID or Workspace").fill(tenantId);
-  await page.getByRole("button", { name: /issue verification token/i }).click();
+  await page.getByRole("button", { name: /resend verification email/i }).click();
 
-  const verificationResponse = await verificationResponsePromise;
-  expect(verificationResponse.ok()).toBeTruthy();
-  const verificationPayload = await verificationResponse.json();
-  const verificationToken = String(verificationPayload.token ?? "");
-  expect(verificationToken).toBeTruthy();
+  const mailpitMessagesResponse = await page.request.get("http://127.0.0.1:8025/api/v1/messages");
+  expect(mailpitMessagesResponse.ok()).toBeTruthy();
+  const mailpitMessages = await mailpitMessagesResponse.json();
+  const verificationMessage = Array.isArray(mailpitMessages?.messages)
+    ? mailpitMessages.messages.find((message: { To?: Array<{ Address?: string }> }) =>
+        Array.isArray(message.To) && message.To.some((recipient) => recipient.Address === email),
+      )
+    : null;
+  expect(verificationMessage).toBeTruthy();
 
-  await page.goto(`/auth?mode=email-verification&token=${encodeURIComponent(verificationToken)}`);
-  await page.locator("form").getByRole("button", { name: /verify email/i }).click();
+  const messageId = String(verificationMessage.ID);
+  const messageResponse = await page.request.get(`http://127.0.0.1:8025/api/v1/message/${messageId}`);
+  expect(messageResponse.ok()).toBeTruthy();
+  const messageBody = await messageResponse.json();
+  const html = String(messageBody.HTML ?? "");
+  const verificationUrlMatch = html.match(/http:\/\/127\.0\.0\.1:3000\/auth\?mode=email-verification[^"'\\s<]+/);
+  expect(verificationUrlMatch).toBeTruthy();
 
-  await expect(page.getByText(/email verified/i)).toBeVisible();
+  await page.goto(String(verificationUrlMatch?.[0] ?? ""));
+  await page.waitForURL(/\/auth\?mode=login/);
 
-  await page.goto("/auth?mode=login");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill(password);
   await page.getByLabel("Tenant ID or Workspace").fill(tenantId);

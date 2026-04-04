@@ -244,7 +244,15 @@ class _CacheService:
 
 
 class _EmailService:
-    def build_verification_email(self, *, to_email: str, verification_url: str):
+    def build_verification_email(
+        self,
+        *,
+        to_email: str,
+        verification_url: str,
+        tenant_id: int,
+        account_email: str,
+        sign_in_url: str,
+    ):
         return type(
             "_EmailPayload",
             (),

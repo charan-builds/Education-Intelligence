@@ -21,6 +21,7 @@ router = APIRouter(prefix="/roadmap", tags=["roadmap"])
 
 
 @router.post("/generate", response_model=RoadmapResponse)
+@router.post("", response_model=RoadmapResponse, include_in_schema=False)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
 async def generate_roadmap(
@@ -47,6 +48,7 @@ async def generate_roadmap(
 
 
 @router.get("/view", response_model=RoadmapPageResponse)
+@router.get("", response_model=RoadmapPageResponse, include_in_schema=False)
 async def view_current_user_roadmaps(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_profile_completed),

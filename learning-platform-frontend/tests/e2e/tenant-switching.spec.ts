@@ -23,7 +23,7 @@ test("super admin tenant scope is forwarded to admin data requests", async ({ pa
         body: JSON.stringify({
           id: 99,
           tenant_id: 1,
-          email: "super-admin@example.com",
+          email: "superadmin@platform.learnova.ai",
           role: "super_admin",
           created_at: "2026-03-28T00:00:00Z",
         }),
@@ -44,7 +44,7 @@ test("super admin tenant scope is forwarded to admin data requests", async ({ pa
           user: {
             id: 99,
             tenant_id: 1,
-            email: "super-admin@example.com",
+            email: "superadmin@platform.learnova.ai",
             role: "super_admin",
             created_at: "2026-03-28T00:00:00Z",
           },
@@ -99,8 +99,8 @@ test("super admin tenant scope is forwarded to admin data requests", async ({ pa
   });
 
   await page.goto("/auth");
-  await page.getByLabel("Email").fill("super-admin@example.com");
-  await page.getByLabel("Password").fill("Secret123!");
+  await page.getByLabel("Email").fill("superadmin@platform.learnova.ai");
+  await page.getByLabel("Password").fill("SuperAdmin123!");
   await page.getByLabel("Tenant ID or Workspace").fill("1");
   await page.getByRole("button", { name: "Sign in" }).last().click();
   const token = fakeJwt("super_admin");

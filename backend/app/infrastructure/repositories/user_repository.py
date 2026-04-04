@@ -55,6 +55,13 @@ class UserRepository(BaseRepository):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_by_email(self, email: str) -> list[User]:
+        normalized_email = email.strip().lower()
+        result = await self.session.execute(
+            select(User).where(User.email == normalized_email).order_by(User.id.asc())
+        )
+        return list(result.scalars().all())
+
     async def get_by_id(self, user_id: int) -> User | None:
         result = await self.session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()

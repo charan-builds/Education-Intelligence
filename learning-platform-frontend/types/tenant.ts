@@ -1,8 +1,9 @@
-export type TenantType = "platform" | "college" | "company" | "school";
+export type TenantType = "platform" | "college" | "company" | "school" | "personal";
 
 export type Tenant = {
   id: number;
   name: string;
+  subdomain?: string | null;
   type: TenantType;
   created_at: string;
 };

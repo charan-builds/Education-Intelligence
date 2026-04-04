@@ -5,6 +5,8 @@ import { Brain, Compass, ScanSearch, Sparkles } from "lucide-react";
 
 import Button from "@/components/ui/Button";
 import SurfaceCard from "@/components/ui/SurfaceCard";
+import { useAuth } from "@/hooks/useAuth";
+import { getLearnerRoutes } from "@/utils/appRoutes";
 
 type AdaptiveGuidancePanelProps = {
   emotionalState: {
@@ -47,6 +49,9 @@ export default function AdaptiveGuidancePanel({
   focusMode,
   onToggleFocusMode,
 }: AdaptiveGuidancePanelProps) {
+  const { role } = useAuth();
+  const learnerRoutes = getLearnerRoutes(role);
+
   return (
     <SurfaceCard
       title="Adaptive guidance"
@@ -73,7 +78,7 @@ export default function AdaptiveGuidancePanel({
           <p className="mt-4 max-w-2xl text-sm leading-7 text-white/75">{nextBestAction.description}</p>
           <div className="mt-5 flex flex-wrap gap-3">
             <Link
-              href={`/mentor/chat?prompt=${encodeURIComponent(nextBestAction.prompt)}`}
+              href={`${learnerRoutes.mentor}?prompt=${encodeURIComponent(nextBestAction.prompt)}`}
               className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-slate-950"
             >
               <Sparkles className="h-4 w-4 text-brand-700" />

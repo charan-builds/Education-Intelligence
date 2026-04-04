@@ -30,8 +30,8 @@ from app.domain.models.topic_prerequisite import TopicPrerequisite
 from app.domain.models.topic_score import TopicScore
 from app.domain.models.user import User, UserRole
 from app.domain.models.user_answer import UserAnswer
-from app.infrastructure.database import AsyncSessionLocal
-from scripts.demo_data_factory import build_demo_tenants, build_goal_topic_names
+from app.infrastructure.database import open_system_session
+from scripts.demo_data_factory import build_demo_personal_workspaces, build_demo_tenants, build_goal_topic_names
 
 
 def _utcnow() -> datetime:
@@ -40,7 +40,7 @@ def _utcnow() -> datetime:
 
 PLATFORM_SUPER_ADMIN = {
     "label": "Super Admin Panel",
-    "email": "superadmin@platform.example.com",
+    "email": "superadmin@platform.learnova.ai",
     "password": "SuperAdmin123!",
     "role": UserRole.super_admin,
 }
@@ -62,24 +62,45 @@ BADGE_LIBRARY = [
 ]
 
 
-async def _get_or_create_tenant(session, *, name: str, tenant_type: TenantType) -> Tenant:
+async def _get_or_create_tenant(
+    session,
+    *,
+    name: str,
+    tenant_type: TenantType,
+    subdomain: str | None = None,
+) -> Tenant:
     tenant = (await session.execute(select(Tenant).where(Tenant.name == name))).scalar_one_or_none()
     if tenant is None:
-        tenant = Tenant(name=name, type=tenant_type, created_at=_utcnow())
+        tenant = Tenant(name=name, type=tenant_type, subdomain=subdomain, created_at=_utcnow())
         session.add(tenant)
         await session.flush()
+    elif subdomain and tenant.subdomain != subdomain:
+        tenant.subdomain = subdomain
     return tenant
 
 
-async def _ensure_user(session, *, tenant: Tenant, email: str, password: str, role: UserRole, display_name: str | None = None) -> User:
+async def _ensure_user(
+    session,
+    *,
+    tenant: Tenant,
+    email: str,
+    password: str,
+    role: UserRole,
+    display_name: str | None = None,
+    organization_name: str | None = None,
+) -> User:
     user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if user is None:
         user = User(
             tenant_id=tenant.id,
             email=email,
             display_name=display_name,
+            college_name=organization_name,
             password_hash=hash_password(password),
             role=role,
+            is_email_verified=True,
+            email_verified_at=_utcnow(),
+            is_profile_completed=True,
             created_at=_utcnow() - timedelta(days=Random(email).randint(40, 300)),
         )
         session.add(user)
@@ -92,13 +113,18 @@ async def _ensure_user(session, *, tenant: Tenant, email: str, password: str, ro
         user.role = role
     if display_name:
         user.display_name = display_name
+    if organization_name is not None:
+        user.college_name = organization_name
     if not verify_password(password, user.password_hash):
         user.password_hash = hash_password(password)
+    user.is_email_verified = True
+    user.email_verified_at = user.email_verified_at or _utcnow()
+    user.is_profile_completed = True
     return user
 
 
 async def _seed_platform_super_admin(session) -> tuple[Tenant, dict]:
-    tenant = await _get_or_create_tenant(session, name="Platform", tenant_type=TenantType.platform)
+    tenant = await _get_or_create_tenant(session, name="Platform", tenant_type=TenantType.platform, subdomain="platform")
     await _ensure_user(
         session,
         tenant=tenant,
@@ -263,32 +289,32 @@ def _daily_timestamp(*, rng: Random, days_ago: int, min_hour: int = 7, max_hour:
     return base.replace(hour=hour, minute=minute, second=rng.randint(0, 50), microsecond=0)
 
 
-async def _seed_student_activity(
+async def _seed_learner_activity(
     session,
     *,
     tenant: Tenant,
-    student_spec: dict,
-    student_index: int,
+    learner_spec: dict,
+    learner_index: int,
     topic_rows: dict[str, Topic],
     goal_rows: dict[str, Goal],
     communities: list[Community],
-    teacher_user: User,
-    mentor_user: User,
 ) -> User:
-    rng = Random(f"{tenant.name}-{student_spec['email']}")
+    rng = Random(f"{tenant.name}-{learner_spec['email']}")
+    learner_role = learner_spec.get("role", UserRole.student)
     user = await _ensure_user(
         session,
         tenant=tenant,
-        email=student_spec["email"],
-        password=student_spec["password"],
-        role=UserRole.student,
-        display_name=student_spec["display_name"],
+        email=learner_spec["email"],
+        password=learner_spec["password"],
+        role=learner_role,
+        display_name=learner_spec["display_name"],
+        organization_name=learner_spec.get("organization_name") or tenant.name,
     )
-    user.experience_points = 700 + student_index * 190 + rng.randint(0, 180)
+    user.experience_points = 700 + learner_index * 190 + rng.randint(0, 180)
     user.current_streak_days = 2 + rng.randint(0, 10)
-    user.focus_score = round(62 + student_index * 5 + rng.uniform(0, 14), 1)
+    user.focus_score = round(62 + learner_index * 5 + rng.uniform(0, 14), 1)
 
-    selected_goal = list(goal_rows.values())[student_index % len(goal_rows)]
+    selected_goal = list(goal_rows.values())[learner_index % len(goal_rows)]
     goal_topic_links = (
         await session.execute(select(GoalTopic).where(GoalTopic.goal_id == selected_goal.id))
     ).scalars().all()
@@ -296,11 +322,15 @@ async def _seed_student_activity(
     if not goal_topics:
         goal_topics = list(topic_rows.values())[:7]
 
-    diagnostic_started = _utcnow() - timedelta(days=28 - student_index * 2)
+    diagnostic_started = _utcnow() - timedelta(days=28 - learner_index * 2)
     diagnostic_completed = diagnostic_started + timedelta(minutes=45 + rng.randint(0, 18))
     diagnostic = (
-        await session.execute(select(DiagnosticTest).where(DiagnosticTest.user_id == user.id, DiagnosticTest.goal_id == selected_goal.id))
-    ).scalar_one_or_none()
+        await session.execute(
+            select(DiagnosticTest)
+            .where(DiagnosticTest.user_id == user.id, DiagnosticTest.goal_id == selected_goal.id)
+            .order_by(DiagnosticTest.completed_at.desc().nullslast(), DiagnosticTest.id.desc())
+        )
+    ).scalars().first()
     if diagnostic is None:
         diagnostic = DiagnosticTest(
             user_id=user.id,
@@ -316,13 +346,15 @@ async def _seed_student_activity(
 
     roadmap = (
         await session.execute(
-            select(Roadmap).where(
+            select(Roadmap)
+            .where(
                 Roadmap.user_id == user.id,
                 Roadmap.goal_id == selected_goal.id,
                 Roadmap.test_id == diagnostic.id,
             )
+            .order_by(Roadmap.generated_at.desc().nullslast(), Roadmap.id.desc())
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
     if roadmap is None:
         roadmap = Roadmap(
             user_id=user.id,
@@ -348,7 +380,7 @@ async def _seed_student_activity(
         questions_by_topic_id[question.topic_id].append(question)
 
     for position, topic in enumerate(goal_topics, start=1):
-        base_score = max(38.0, min(92.0, 48 + position * 4 + student_index * 3 + rng.uniform(-9, 12)))
+        base_score = max(38.0, min(92.0, 48 + position * 4 + learner_index * 3 + rng.uniform(-9, 12)))
         if position <= 2:
             progress_status = "completed"
         elif position <= 4:
@@ -524,7 +556,7 @@ async def _seed_student_activity(
                     )
                 )
 
-    chosen_badges = BADGE_LIBRARY[: 2 + (student_index % 2)]
+    chosen_badges = BADGE_LIBRARY[: 2 + (learner_index % 2)]
     for badge_name, description, awarded_for in chosen_badges:
         existing_badge = (
             await session.execute(select(Badge).where(Badge.user_id == user.id, Badge.name == badge_name))
@@ -553,7 +585,7 @@ async def _seed_community_activity(
     topic_rows: dict[str, Topic],
 ) -> None:
     rng = Random(f"community-{tenant.name}")
-    students = [user for user in users if user.role == UserRole.student]
+    students = [user for user in users if user.role in {UserRole.student, UserRole.independent_learner}]
     staff = [user for user in users if user.role in {UserRole.teacher, UserRole.mentor, UserRole.admin}]
     for community in communities:
         topic = next(topic for topic in topic_rows.values() if topic.id == community.topic_id)
@@ -581,7 +613,10 @@ async def _seed_community_activity(
                 session.add(thread)
                 await session.flush()
             for reply_index in range(2):
-                reply_author = (staff + students)[(index + reply_index) % (len(staff) + len(students))]
+                participants = (staff + students) if (staff or students) else []
+                if not participants:
+                    continue
+                reply_author = participants[(index + reply_index) % len(participants)]
                 body = (
                     f"Start with the artifact for {topic.name}, then check the most common pitfall before you submit."
                     if reply_index == 0
@@ -651,14 +686,19 @@ async def _seed_experiments(session, *, tenant: Tenant) -> None:
 
 async def seed() -> None:
     seeded_tenants: list[tuple[Tenant, list[dict]]] = []
-    async with AsyncSessionLocal() as session:
+    async with open_system_session() as session:
         platform_tenant, super_admin = await _seed_platform_super_admin(session)
-        tenant_specs = build_demo_tenants()
+        tenant_specs = [*build_demo_tenants(), *build_demo_personal_workspaces()]
         for tenant_spec in tenant_specs:
-            tenant = await _get_or_create_tenant(session, name=tenant_spec["name"], tenant_type=tenant_spec["type"])
+            tenant = await _get_or_create_tenant(
+                session,
+                name=tenant_spec["name"],
+                tenant_type=tenant_spec["type"],
+                subdomain=tenant_spec.get("slug"),
+            )
 
             staff_users: list[User] = []
-            for user_spec in tenant_spec["panel_users"]:
+            for user_spec in tenant_spec.get("panel_users", []):
                 staff_users.append(
                     await _ensure_user(
                         session,
@@ -667,6 +707,7 @@ async def seed() -> None:
                         password=user_spec["password"],
                         role=user_spec["role"],
                         display_name=user_spec["label"].replace(" Panel", ""),
+                        organization_name=tenant.name,
                     )
                 )
 
@@ -678,21 +719,18 @@ async def seed() -> None:
                 for community_spec in tenant_spec["communities"]
             ]
 
-            teacher_user = next(user for user in staff_users if user.role == UserRole.teacher)
-            mentor_user = next(user for user in staff_users if user.role == UserRole.mentor)
-            student_users: list[User] = []
-            for student_index, student_spec in enumerate(tenant_spec["students"]):
-                student_users.append(
-                    await _seed_student_activity(
+            learner_specs = tenant_spec.get("students", []) + tenant_spec.get("learners", [])
+            learner_users: list[User] = []
+            for learner_index, learner_spec in enumerate(learner_specs):
+                learner_users.append(
+                    await _seed_learner_activity(
                         session,
                         tenant=tenant,
-                        student_spec=student_spec,
-                        student_index=student_index,
+                        learner_spec=learner_spec,
+                        learner_index=learner_index,
                         topic_rows=topic_rows,
                         goal_rows=goal_rows,
                         communities=communities,
-                        teacher_user=teacher_user,
-                        mentor_user=mentor_user,
                     )
                 )
 
@@ -700,11 +738,11 @@ async def seed() -> None:
                 session,
                 tenant=tenant,
                 communities=communities,
-                users=[*staff_users, *student_users],
+                users=[*staff_users, *learner_users],
                 topic_rows=topic_rows,
             )
             await _seed_experiments(session, tenant=tenant)
-            seeded_tenants.append((tenant, [*tenant_spec["panel_users"], *tenant_spec["students"]]))
+            seeded_tenants.append((tenant, [*tenant_spec.get("panel_users", []), *learner_specs]))
 
         await session.commit()
 

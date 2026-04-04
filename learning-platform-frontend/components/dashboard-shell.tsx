@@ -7,14 +7,14 @@ import { useRouter } from "next/navigation";
 
 import { useAuth } from "@/hooks/useAuth";
 import { useHealthCheck } from "@/hooks/use-health-check";
-import { appRoutes, normalizeAppPath } from "@/utils/appRoutes";
+import { appRoutes, getRoleProfilePath, normalizeAppPath } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 export default function DashboardShell() {
   const router = useRouter();
   const { data, isLoading, isError } = useHealthCheck();
   const { isAuthenticated, role, login, logout, user } = useAuth();
-  const [email, setEmail] = useState("admin@example.com");
+  const [email, setEmail] = useState("admin@demo.learnova.ai");
   const [password, setPassword] = useState("admin123");
   const [tenantContext, setTenantContext] = useState("2");
   const [error, setError] = useState("");
@@ -54,7 +54,7 @@ export default function DashboardShell() {
       });
       router.replace(
         authenticatedUser.requires_profile_completion
-          ? appRoutes.student.profile
+          ? getRoleProfilePath(authenticatedUser.user.role ?? role)
           : (nextPath ?? getRoleRedirectPath(authenticatedUser.user.role ?? role)),
       );
     } catch (submitError) {
@@ -165,7 +165,7 @@ export default function DashboardShell() {
                     placeholder="2 or demo-university"
                     type="text"
                   />
-                  <p className="mt-2 text-xs text-slate-400">Demo defaults: tenant `2`, user `admin@example.com`, password `admin123`.</p>
+                  <p className="mt-2 text-xs text-slate-400">Demo defaults: tenant `2`, user `admin@demo.learnova.ai`, password `admin123`.</p>
                 </div>
                 <button
                   type="submit"

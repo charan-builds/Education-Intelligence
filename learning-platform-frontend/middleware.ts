@@ -7,6 +7,7 @@ import { canonicalizeRole, getRoleRedirectPath } from "@/utils/roleRedirect";
 
 const PROTECTED_PREFIXES = [
   "/student",
+  "/independent-learner",
   "/teacher",
   "/admin",
   "/super-admin",

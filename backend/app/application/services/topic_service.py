@@ -243,9 +243,20 @@ class TopicService:
             topic_id=topic_id,
             tenant_id=tenant_id,
         )
+        topics = await self.repository.get_topics(tenant_id=tenant_id)
+        topic_names = {int(topic.id): str(topic.name) for topic in topics}
         next_offset = offset + limit if (offset + limit) < total else None
         return {
-            "items": items,
+            "items": [
+                {
+                    "id": int(item.id),
+                    "topic_id": int(item.topic_id),
+                    "prerequisite_topic_id": int(item.prerequisite_topic_id),
+                    "topic_name": topic_names.get(int(item.topic_id)),
+                    "prerequisite_topic_name": topic_names.get(int(item.prerequisite_topic_id)),
+                }
+                for item in items
+            ],
             "meta": {
                 "total": total,
                 "limit": limit,
@@ -295,7 +306,13 @@ class TopicService:
 
         link = await self.repository.create_prerequisite_link(topic_id, prerequisite_topic_id)
         await self.repository.session.commit()
-        return link
+        return {
+            "id": int(link.id),
+            "topic_id": int(link.topic_id),
+            "prerequisite_topic_id": int(link.prerequisite_topic_id),
+            "topic_name": str(topic.name),
+            "prerequisite_topic_name": str(prerequisite.name),
+        }
 
     async def delete_prerequisite(self, prerequisite_id: int, tenant_id: int = 1) -> None:
         link = await self._call_with_optional_tenant(

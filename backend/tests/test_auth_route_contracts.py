@@ -52,7 +52,7 @@ async def test_login_route_returns_token_response(monkeypatch):
     result = await auth_routes.login(
         request=request,
         response=response,
-        payload=LoginRequest(email="student@example.com", password="Student123!", tenant_id=2),
+        payload=LoginRequest(email="maya.chen@demo.learnova.ai", password="Student123!", tenant_id=2),
         db=SimpleNamespace(),
     )
 

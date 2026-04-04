@@ -57,5 +57,11 @@ ON user_skill_vectors (tenant_id, user_id, last_updated DESC);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_analytics_snapshots_tenant_type_subject_updated
 ON analytics_snapshots (tenant_id, snapshot_type, subject_id, updated_at DESC);
 
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_analytics_snapshots_tenant_snapshot_latest
+ON analytics_snapshots (tenant_id, snapshot_type, is_latest);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_analytics_snapshots_created_at_desc
+ON analytics_snapshots (created_at DESC);
+
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_outbox_events_status_available_id
 ON outbox_events (status, available_at, id);

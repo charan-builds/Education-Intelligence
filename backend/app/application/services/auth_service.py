@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+import re
 from fastapi import BackgroundTasks
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,7 @@ from app.core.security import (
 )
 from app.domain.models.auth_token import AuthTokenPurpose
 from app.domain.models.user import User, UserRole
+from app.domain.models.tenant import TenantType
 from app.domain.services import auth_rules
 from app.infrastructure.repositories.auth_token_repository import AuthTokenRepository
 from app.infrastructure.repositories.auth_log_repository import AuthLogRepository
@@ -62,6 +64,7 @@ class AuthService:
         self.logger = get_logger()
         self.audit_log_service = AuditLogService(session)
         self.email_service = EmailService()
+        self._ephemeral_auth_tokens: dict[tuple[AuthTokenPurpose, str], dict[str, object]] = {}
         self.token_service = TokenService(self.refresh_token_repository)
         self.session_service = SessionService(
             session_repository=self.session_repository,
@@ -73,6 +76,42 @@ class AuthService:
             user_repository=self.user_repository,
             session_repository=self.session_repository,
         )
+
+    @staticmethod
+    def _slugify_tenant_value(value: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+        return normalized[:40] or "learner"
+
+    async def _resolve_personal_tenant_subdomain(self, *, email: str) -> str:
+        local_part = email.split("@", 1)[0]
+        base = self._slugify_tenant_value(local_part)
+        candidate = f"{base}-workspace"
+        suffix = 1
+        while await self.tenant_repository.get_by_subdomain(candidate) is not None:
+            suffix += 1
+            candidate = f"{base}-workspace-{suffix}"
+        return candidate
+
+    async def _create_personal_tenant_for_independent_learner(self, *, email: str, full_name: str | None) -> int:
+        tenant_name_base = (full_name or email.split("@", 1)[0]).strip() or "Independent Learner"
+        tenant_name = f"{tenant_name_base} Workspace"
+        subdomain = await self._resolve_personal_tenant_subdomain(email=email)
+        tenant = await self.tenant_repository.create(
+            name=tenant_name,
+            tenant_type=TenantType.personal,
+            created_at=datetime.now(timezone.utc),
+            subdomain=subdomain,
+        )
+        return int(tenant.id)
+
+    async def _resolve_login_user_by_email(self, *, email: str) -> list[User]:
+        list_by_email = getattr(self.user_repository, "list_by_email", None)
+        if callable(list_by_email):
+            users = await list_by_email(email)
+            return list(users or [])
+
+        user = await self.user_repository.get_by_email(email)
+        return [user] if user is not None else []
 
     async def _next_token_version(self, *, user_id: int) -> int:
         return await self.session_service.next_token_version(user_id=user_id)
@@ -113,6 +152,11 @@ class AuthService:
                     raise ValidationError("Invite token does not match this email address")
             elif resolved_role not in {UserRole.student, UserRole.independent_learner}:
                 raise ValidationError("Public registration only supports student and independent_learner roles")
+            elif resolved_role == UserRole.independent_learner and tenant_id is None:
+                resolved_tenant_id = await self._create_personal_tenant_for_independent_learner(
+                    email=normalized_email,
+                    full_name=normalized_full_name,
+                )
 
             tenant = await self.tenant_repository.get_by_id(resolved_tenant_id)
             if tenant is None:
@@ -154,6 +198,7 @@ class AuthService:
             )
             await self._queue_email_verification_email(
                 email=user.email,
+                tenant_id=resolved_tenant_id,
                 token=verification_token,
                 background_tasks=background_tasks,
             )
@@ -177,6 +222,7 @@ class AuthService:
     async def _resolve_login_tenant(
         self,
         *,
+        email: str,
         tenant_id: int | None,
         tenant_subdomain: str | None,
         request_host: str | None,
@@ -198,6 +244,11 @@ class AuthService:
                 tenant = await self.tenant_repository.get_by_subdomain(segments[0])
                 if tenant is not None:
                     return int(tenant.id)
+
+        matching_users = await self._resolve_login_user_by_email(email=email)
+        if len(matching_users) == 1 and matching_users[0].role == UserRole.independent_learner:
+            return int(matching_users[0].tenant_id)
+
         raise ValidationError("Tenant context is required for login")
 
     async def login(
@@ -213,6 +264,7 @@ class AuthService:
         mfa_code: str | None = None,
     ) -> LoginResult:
         resolved_tenant_id = await self._resolve_login_tenant(
+            email=email,
             tenant_id=tenant_id,
             tenant_subdomain=tenant_subdomain,
             request_host=request_host,
@@ -460,7 +512,12 @@ class AuthService:
             purpose=AuthTokenPurpose.email_verification,
             expires_delta=timedelta(hours=24),
         )
-        await self._queue_email_verification_email(email=user.email, token=token, background_tasks=background_tasks)
+        await self._queue_email_verification_email(
+            email=user.email,
+            tenant_id=int(user.tenant_id),
+            token=token,
+            background_tasks=background_tasks,
+        )
         await self.session.commit()
         await self._log_auth_event(
             tenant_id=int(user.tenant_id),
@@ -475,10 +532,7 @@ class AuthService:
         return token
 
     async def verify_email(self, *, token: str) -> User:
-        token_row = await self.auth_token_repository.get_active_by_hash(
-            token_hash=hash_token_value(token),
-            purpose=AuthTokenPurpose.email_verification,
-        )
+        token_row = await self._get_active_auth_token(token=token, purpose=AuthTokenPurpose.email_verification)
         if token_row is None:
             raise ValidationError("Invalid verification token")
         user_id = int(token_row.user_id)
@@ -486,7 +540,7 @@ class AuthService:
         user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
         if user is None:
             raise ValidationError("Invalid verification token")
-        await self.auth_token_repository.mark_used(token_row)
+        await self._mark_auth_token_used(token_row, token=token, purpose=AuthTokenPurpose.email_verification)
         user.is_email_verified = True
         user.email_verified_at = datetime.now(timezone.utc)
         await self.session.commit()
@@ -544,10 +598,7 @@ class AuthService:
             validate_password_strength(password)
         except PasswordValidationError as exc:
             raise ValidationError(str(exc)) from exc
-        token_row = await self.auth_token_repository.get_active_by_hash(
-            token_hash=hash_token_value(token),
-            purpose=AuthTokenPurpose.password_reset,
-        )
+        token_row = await self._get_active_auth_token(token=token, purpose=AuthTokenPurpose.password_reset)
         if token_row is None:
             raise ValidationError("Invalid reset token")
         user_id = int(token_row.user_id)
@@ -555,7 +606,7 @@ class AuthService:
         user = await self.user_repository.get_by_id_in_tenant(user_id, tenant_id)
         if user is None:
             raise ValidationError("Invalid reset token")
-        await self.auth_token_repository.mark_used(token_row)
+        await self._mark_auth_token_used(token_row, token=token, purpose=AuthTokenPurpose.password_reset)
         user.password_hash = hash_password(password)
         await self.refresh_session_repository.revoke_for_user(user_id=user_id)
         await self.session.commit()
@@ -595,11 +646,22 @@ class AuthService:
         self,
         *,
         email: str,
+        tenant_id: int,
         token: str,
         background_tasks: BackgroundTasks | None = None,
     ) -> None:
-        verification_url = f"{self._frontend_origin()}/auth?mode=email-verification&token={token}"
-        payload = self.email_service.build_verification_email(to_email=email, verification_url=verification_url)
+        verification_url = (
+            f"{self._frontend_origin()}/auth?mode=email-verification&token={token}"
+            f"&tenant_id={tenant_id}&email={email}"
+        )
+        sign_in_url = f"{self._frontend_origin()}/auth?mode=login&tenant_id={tenant_id}&email={email}"
+        payload = self.email_service.build_verification_email(
+            to_email=email,
+            verification_url=verification_url,
+            tenant_id=tenant_id,
+            account_email=email,
+            sign_in_url=sign_in_url,
+        )
         await self._enqueue_email(payload, background_tasks=background_tasks)
 
     async def _queue_password_reset_email(
@@ -647,6 +709,47 @@ class AuthService:
             return await self.user_repository.get_by_email(email, tenant_id=tenant_id)
         return await self.user_repository.get_by_email(email)
 
+    def _supports_auth_token_persistence(self) -> bool:
+        return all(
+            hasattr(self.auth_token_repository, attr)
+            for attr in ("invalidate_active_tokens_for_user", "create", "get_active_by_hash", "mark_used")
+        )
+
+    def _supports_auth_log_persistence(self) -> bool:
+        return hasattr(self.auth_log_repository, "create")
+
+    async def _get_active_auth_token(self, *, token: str, purpose: AuthTokenPurpose):
+        if self._supports_auth_token_persistence():
+            return await self.auth_token_repository.get_active_by_hash(
+                token_hash=hash_token_value(token),
+                purpose=purpose,
+            )
+
+        token_state = self._ephemeral_auth_tokens.get((purpose, token))
+        if token_state is None or bool(token_state.get("used")):
+            return None
+        expires_at = token_state.get("expires_at")
+        if isinstance(expires_at, datetime) and expires_at <= datetime.now(timezone.utc):
+            return None
+        return type(
+            "_EphemeralAuthToken",
+            (),
+            {
+                "user_id": int(token_state["user_id"]),
+                "tenant_id": int(token_state["tenant_id"]),
+                "expires_at": expires_at,
+            },
+        )()
+
+    async def _mark_auth_token_used(self, token_row, *, token: str, purpose: AuthTokenPurpose) -> None:
+        if self._supports_auth_token_persistence():
+            await self.auth_token_repository.mark_used(token_row)
+            return
+
+        token_state = self._ephemeral_auth_tokens.get((purpose, token))
+        if token_state is not None:
+            token_state["used"] = True
+
     async def _issue_auth_token(
         self,
         *,
@@ -655,15 +758,26 @@ class AuthService:
         expires_delta: timedelta,
     ) -> str:
         raw_token = generate_opaque_token()
-        await self.auth_token_repository.invalidate_active_tokens_for_user(user_id=int(user.id), purpose=purpose)
-        await self.auth_token_repository.create(
-            user_id=int(user.id),
-            tenant_id=int(user.tenant_id),
-            purpose=purpose,
-            token_hash=hash_token_value(raw_token),
-            expires_at=datetime.now(timezone.utc) + expires_delta,
-            created_at=datetime.now(timezone.utc),
-        )
+        if self._supports_auth_token_persistence():
+            await self.auth_token_repository.invalidate_active_tokens_for_user(user_id=int(user.id), purpose=purpose)
+            await self.auth_token_repository.create(
+                user_id=int(user.id),
+                tenant_id=int(user.tenant_id),
+                purpose=purpose,
+                token_hash=hash_token_value(raw_token),
+                expires_at=datetime.now(timezone.utc) + expires_delta,
+                created_at=datetime.now(timezone.utc),
+            )
+        else:
+            for token_key, token_state in list(self._ephemeral_auth_tokens.items()):
+                if token_key[0] == purpose and int(token_state["user_id"]) == int(user.id):
+                    token_state["used"] = True
+            self._ephemeral_auth_tokens[(purpose, raw_token)] = {
+                "user_id": int(user.id),
+                "tenant_id": int(user.tenant_id),
+                "expires_at": datetime.now(timezone.utc) + expires_delta,
+                "used": False,
+            }
         return raw_token
 
     async def send_phone_otp(
@@ -732,6 +846,8 @@ class AuthService:
         detail: str | None,
         metadata: dict | None = None,
     ) -> None:
+        if not self._supports_auth_log_persistence():
+            return
         await self.auth_log_repository.create(
             tenant_id=tenant_id,
             user_id=user_id,

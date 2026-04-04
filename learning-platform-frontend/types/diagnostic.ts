@@ -55,6 +55,9 @@ export type DiagnosticAnswerResponse = {
 export type DiagnosticResult = {
   test_id: number;
   topic_scores: Record<number, number>;
+  weak_topic_ids: number[];
+  foundation_gap_topic_ids: number[];
+  recommendation_levels: Record<number, string>;
   roadmap: Roadmap | null;
 };
 import type { Roadmap } from "@/types/roadmap";

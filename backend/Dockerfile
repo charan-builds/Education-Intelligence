@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml /app/
 COPY app /app/app
 COPY alembic /app/alembic
+COPY sql /app/sql
 COPY scripts /app/scripts
 COPY seed.py /app/
 COPY alembic.ini /app/
@@ -39,6 +40,7 @@ RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
 COPY app /app/app
 COPY alembic /app/alembic
+COPY sql /app/sql
 COPY scripts /app/scripts
 COPY seed.py /app/
 COPY alembic.ini /app/

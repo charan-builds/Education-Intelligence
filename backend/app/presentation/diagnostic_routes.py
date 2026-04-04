@@ -24,6 +24,7 @@ router = APIRouter(prefix="/diagnostic", tags=["diagnostic"])
 
 
 @router.post("/start", response_model=DiagnosticStartResponse)
+@router.post("", response_model=DiagnosticStartResponse, include_in_schema=False)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
 async def start_diagnostic(
@@ -55,6 +56,7 @@ async def answer_diagnostic_question(
 
 
 @router.post("/submit", response_model=DiagnosticSubmitResponse)
+@router.post("/complete", response_model=DiagnosticSubmitResponse, include_in_schema=False)
 @limiter.limit("50/minute", key_func=rate_limit_key_by_ip)
 @limiter.limit("100/minute", key_func=rate_limit_key_by_user)
 async def submit_diagnostic(

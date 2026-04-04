@@ -14,10 +14,13 @@ import Skeleton from "@/components/ui/Skeleton";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import { startDiagnostic } from "@/services/diagnosticService";
 import { getGoals } from "@/services/goalService";
-import { appRoutes } from "@/utils/appRoutes";
+import { useAuth } from "@/hooks/useAuth";
+import { getLearnerRoutes } from "@/utils/appRoutes";
 
 export default function StudentGoalsPage() {
   const router = useRouter();
+  const { role } = useAuth();
+  const learnerRoutes = getLearnerRoutes(role);
   const [selectedGoalId, setSelectedGoalId] = useState<number | null>(null);
 
   const goalsQuery = useQuery({
@@ -30,7 +33,7 @@ export default function StudentGoalsPage() {
   const startDiagnosticMutation = useMutation({
     mutationFn: async (goalId: number) => startDiagnostic(goalId),
     onSuccess: (session) => {
-      router.push(`${appRoutes.student.diagnostic}?test_id=${session.id}&goal_id=${session.goal_id}`);
+      router.push(`${learnerRoutes.diagnostic}?test_id=${session.id}&goal_id=${session.goal_id}`);
     },
   });
 
@@ -42,15 +45,15 @@ export default function StudentGoalsPage() {
   }
 
   return (
-    <RequireRole allowedRoles={["student", "teacher", "admin", "super_admin"]}>
+    <RequireRole allowedRoles={["student", "independent_learner", "teacher", "admin", "super_admin"]}>
       <RoleDashboardLayout
         roleLabel="Learning Flow"
         title="Select Your Goal"
         description="Choose the target path that should drive diagnostic question selection and roadmap generation."
         navItems={[
-          { label: "Student Dashboard", href: appRoutes.student.dashboard },
-          { label: "Diagnostic", href: appRoutes.student.diagnostic },
-          { label: "Roadmap", href: appRoutes.student.roadmap },
+          { label: "Learning Dashboard", href: learnerRoutes.dashboard },
+          { label: "Diagnostic", href: learnerRoutes.diagnostic },
+          { label: "Roadmap", href: learnerRoutes.roadmap },
         ]}
       >
         <SurfaceCard title="Available Goals" description="These goals are loaded from the backend `/goals` API.">

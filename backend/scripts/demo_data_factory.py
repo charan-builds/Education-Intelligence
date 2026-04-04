@@ -77,14 +77,14 @@ def build_demo_tenants() -> list[dict]:
             "slug": "demo",
             "type": TenantType.college,
             "panel_users": [
-                {"label": "Admin Panel", "email": "admin@example.com", "password": "admin123", "role": UserRole.admin},
-                {"label": "Teacher Panel", "email": "teacher@example.com", "password": "Teacher123!", "role": UserRole.teacher},
-                {"label": "Mentor Panel", "email": "mentor@example.com", "password": "Mentor123!", "role": UserRole.mentor},
+                {"label": "Admin Panel", "email": "admin@demo.learnova.ai", "password": "admin123", "role": UserRole.admin},
+                {"label": "Teacher Panel", "email": "teacher@demo.learnova.ai", "password": "Teacher123!", "role": UserRole.teacher},
+                {"label": "Mentor Panel", "email": "mentor@demo.learnova.ai", "password": "Mentor123!", "role": UserRole.mentor},
             ],
             "students": [
-                {"display_name": "Maya Chen", "email": "maya.chen@demo.example.com", "password": "Student123!"},
-                {"display_name": "Jordan Rivera", "email": "jordan.rivera@demo.example.com", "password": "Student123!"},
-                {"display_name": "Aisha Patel", "email": "aisha.patel@demo.example.com", "password": "Student123!"},
+                {"display_name": "Maya Chen", "email": "maya.chen@demo.learnova.ai", "password": "Student123!"},
+                {"display_name": "Jordan Rivera", "email": "jordan.rivera@demo.learnova.ai", "password": "Student123!"},
+                {"display_name": "Aisha Patel", "email": "aisha.patel@demo.learnova.ai", "password": "Student123!"},
             ],
             "topics": [
                 _topic("Linear Algebra", "Vectors, matrices, and transformations for intelligent systems.", "matrix operations", "matrix decomposition notebook", "treating vectors as scalars", "projection accuracy"),
@@ -121,14 +121,14 @@ def build_demo_tenants() -> list[dict]:
             "slug": "acme",
             "type": TenantType.company,
             "panel_users": [
-                {"label": "Admin Panel", "email": "admin@acme.local", "password": "admin123", "role": UserRole.admin},
-                {"label": "Teacher Panel", "email": "teacher@acme.local", "password": "Teacher123!", "role": UserRole.teacher},
-                {"label": "Mentor Panel", "email": "mentor@acme.local", "password": "Mentor123!", "role": UserRole.mentor},
+                {"label": "Admin Panel", "email": "admin@acme.learnova.ai", "password": "admin123", "role": UserRole.admin},
+                {"label": "Teacher Panel", "email": "teacher@acme.learnova.ai", "password": "Teacher123!", "role": UserRole.teacher},
+                {"label": "Mentor Panel", "email": "mentor@acme.learnova.ai", "password": "Mentor123!", "role": UserRole.mentor},
             ],
             "students": [
-                {"display_name": "Noah Brooks", "email": "noah.brooks@acme.local", "password": "Student123!"},
-                {"display_name": "Sofia Kim", "email": "sofia.kim@acme.local", "password": "Student123!"},
-                {"display_name": "Priya Shah", "email": "priya.shah@acme.local", "password": "Student123!"},
+                {"display_name": "Noah Brooks", "email": "noah.brooks@acme.learnova.ai", "password": "Student123!"},
+                {"display_name": "Sofia Kim", "email": "sofia.kim@acme.learnova.ai", "password": "Student123!"},
+                {"display_name": "Priya Shah", "email": "priya.shah@acme.learnova.ai", "password": "Student123!"},
             ],
             "topics": [
                 _topic("Product Analytics", "Use events, funnels, and cohorts to understand product behavior.", "behavior analysis", "funnel dashboard", "confusing correlation with causation", "funnel conversion"),
@@ -161,18 +161,18 @@ def build_demo_tenants() -> list[dict]:
             ],
         },
         {
-            "name": "Northwind Independent Learners",
+            "name": "Northwind Academy",
             "slug": "northwind",
             "type": TenantType.school,
             "panel_users": [
-                {"label": "Admin Panel", "email": "admin@northwind.local", "password": "admin123", "role": UserRole.admin},
-                {"label": "Teacher Panel", "email": "teacher@northwind.local", "password": "Teacher123!", "role": UserRole.teacher},
-                {"label": "Mentor Panel", "email": "mentor@northwind.local", "password": "Mentor123!", "role": UserRole.mentor},
+                {"label": "Admin Panel", "email": "admin@northwind.learnova.ai", "password": "admin123", "role": UserRole.admin},
+                {"label": "Teacher Panel", "email": "teacher@northwind.learnova.ai", "password": "Teacher123!", "role": UserRole.teacher},
+                {"label": "Mentor Panel", "email": "mentor@northwind.learnova.ai", "password": "Mentor123!", "role": UserRole.mentor},
             ],
             "students": [
-                {"display_name": "Ethan Cole", "email": "ethan.cole@northwind.local", "password": "Student123!"},
-                {"display_name": "Lina Gomez", "email": "lina.gomez@northwind.local", "password": "Student123!"},
-                {"display_name": "Marcus Reed", "email": "marcus.reed@northwind.local", "password": "Student123!"},
+                {"display_name": "Ethan Cole", "email": "ethan.cole@northwind.learnova.ai", "password": "Student123!"},
+                {"display_name": "Lina Gomez", "email": "lina.gomez@northwind.learnova.ai", "password": "Student123!"},
+                {"display_name": "Marcus Reed", "email": "marcus.reed@northwind.learnova.ai", "password": "Student123!"},
             ],
             "topics": [
                 _topic("Reading Comprehension", "Understand, summarize, and compare written passages.", "main idea analysis", "passage summary", "missing textual evidence", "summary accuracy"),
@@ -196,12 +196,83 @@ def build_demo_tenants() -> list[dict]:
             ],
             "goals": [
                 {"name": "STEM Foundations", "description": "Strengthen core quantitative and scientific reasoning skills."},
-                {"name": "Independent Learner", "description": "Build durable learning habits and self-management skills."},
+                {"name": "Academic Momentum", "description": "Build durable learning habits and self-management skills."},
                 {"name": "Communication Builder", "description": "Improve writing, reading, and presentation confidence."},
             ],
             "communities": [
                 {"name": "Study Hall", "topic_name": "Study Planning", "description": "Peer accountability, planning templates, and study streak encouragement."},
-                {"name": "Foundations Forum", "topic_name": "Reading Comprehension", "description": "Reading, writing, and math support for self-learners."},
+                {"name": "Foundations Forum", "topic_name": "Reading Comprehension", "description": "Reading, writing, and math support for school learners."},
+            ],
+        },
+    ]
+
+
+def build_demo_personal_workspaces() -> list[dict]:
+    return [
+        {
+            "name": "Ava Martinez Workspace",
+            "slug": "ava-martinez",
+            "type": TenantType.personal,
+            "learners": [
+                {
+                    "display_name": "Ava Martinez",
+                    "email": "ava.martinez@workspace.learnova.ai",
+                    "password": "Student123!",
+                    "role": UserRole.independent_learner,
+                    "organization_name": "Independent learner workspace",
+                }
+            ],
+            "topics": [
+                _topic("Python Foundations", "Core Python fluency for automation and data workflows.", "control flow", "clean utility module", "copy-paste scripting", "runtime correctness"),
+                _topic("SQL Analytics", "Query relational datasets and validate decisions with data.", "grouping and joins", "validated SQL workbook", "missing join conditions", "query accuracy"),
+                _topic("Data Visualization", "Turn metrics into clear dashboards and narratives.", "visual storytelling", "executive dashboard", "chart clutter", "insight clarity"),
+                _topic("APIs for AI", "Integrate model-backed services into product experiences safely.", "API integration", "service contract", "unbounded payloads", "latency stability"),
+                _topic("Prompt Design", "Create reliable prompts for structured and useful outputs.", "instruction design", "prompt template", "underspecified constraints", "response consistency"),
+                _topic("RAG Basics", "Ground answers in retrieved knowledge and source-aware workflows.", "retrieval augmentation", "context pipeline", "irrelevant retrieval", "answer grounding"),
+                _topic("Learning Analytics", "Turn learning signals into next-step decisions.", "learner signal analysis", "insight memo", "tracking vanity metrics", "intervention precision"),
+                _topic("Capstone Communication", "Present technical recommendations to mixed audiences.", "decision communication", "capstone presentation", "jargon overload", "stakeholder alignment"),
+            ],
+            "goals": [
+                {"name": "AI Product Builder", "description": "Build grounded AI experiences and communicate the outcome clearly."},
+                {"name": "Career Switch to Data", "description": "Build a portfolio around SQL, dashboards, and analytical reasoning."},
+                {"name": "Independent Learner Operating System", "description": "Develop repeatable self-directed learning habits and review loops."},
+            ],
+            "communities": [
+                {"name": "Solo Builder Circle", "topic_name": "APIs for AI", "description": "Feedback and accountability for self-directed AI product work."},
+                {"name": "Momentum Reviews", "topic_name": "Learning Analytics", "description": "Weekly reflection, planning, and roadmap review rituals."},
+            ],
+        },
+        {
+            "name": "Leo Kim Workspace",
+            "slug": "leo-kim",
+            "type": TenantType.personal,
+            "learners": [
+                {
+                    "display_name": "Leo Kim",
+                    "email": "leo.kim@workspace.learnova.ai",
+                    "password": "Student123!",
+                    "role": UserRole.independent_learner,
+                    "organization_name": "Independent learner workspace",
+                }
+            ],
+            "topics": [
+                _topic("Reading Comprehension", "Understand, summarize, and compare written passages.", "main idea analysis", "passage summary", "missing textual evidence", "summary accuracy"),
+                _topic("Critical Thinking", "Evaluate arguments and evidence with care.", "argument evaluation", "claim comparison sheet", "jumping to conclusions", "reasoning quality"),
+                _topic("Digital Literacy", "Use online tools, research workflows, and safe practices.", "digital workflow", "research checklist", "unverified sources", "task completion"),
+                _topic("Study Planning", "Build repeatable routines and realistic weekly plans.", "study organization", "study calendar", "overcommitting sessions", "plan consistency"),
+                _topic("Goal Setting", "Define measurable and motivating learning targets.", "goal framing", "goal tracker", "vague objectives", "goal completion"),
+                _topic("Independent Research", "Gather and evaluate sources for self-directed learning.", "source evaluation", "research notes", "trusting weak sources", "source quality"),
+                _topic("Reflection Practice", "Turn recent learning into better future habits.", "self-reflection", "reflection journal", "generic takeaways", "habit improvement"),
+                _topic("Revision Strategy", "Improve work through deliberate review cycles.", "iterative revision", "revision checklist", "editing too late", "improvement rate"),
+            ],
+            "goals": [
+                {"name": "Self-Directed Foundations", "description": "Build core reading, research, and planning habits for independent growth."},
+                {"name": "Communication Confidence", "description": "Strengthen writing, reflection, and presentation routines."},
+                {"name": "Learning Habit Reset", "description": "Recover consistency with a simple roadmap and regular reviews."},
+            ],
+            "communities": [
+                {"name": "Independent Research Circle", "topic_name": "Independent Research", "description": "Source review, reflection prompts, and progress accountability."},
+                {"name": "Habit Builders", "topic_name": "Study Planning", "description": "Planning templates, streak support, and practical next-step coaching."},
             ],
         },
     ]

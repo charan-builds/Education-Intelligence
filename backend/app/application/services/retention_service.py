@@ -13,6 +13,8 @@ from app.domain.models.topic_score import TopicScore
 
 
 class RetentionService:
+    SNAPSHOT_BATCH_SIZE = 1000
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
@@ -289,19 +291,27 @@ class RetentionService:
         }
 
     async def tenant_retention_summary(self, *, tenant_id: int) -> dict:
-        scores_result = await self.session.execute(
-            select(TopicScore, Topic.name)
-            .join(Topic, Topic.id == TopicScore.topic_id)
-            .where(TopicScore.tenant_id == tenant_id)
-        )
-        rows = scores_result.all()
         now = datetime.now(timezone.utc)
         topic_buckets: dict[str, list[float]] = defaultdict(list)
         due_count = 0
-        for row, topic_name in rows:
-            topic_buckets[topic_name].append(float(row.retention_score) * 100)
-            if row.review_due_at is not None and row.review_due_at <= now:
-                due_count += 1
+        stmt = (
+            select(TopicScore, Topic.name)
+            .join(Topic, Topic.id == TopicScore.topic_id)
+            .where(TopicScore.tenant_id == tenant_id)
+            .order_by(TopicScore.id.asc())
+        )
+        offset = 0
+        while True:
+            rows = (await self.session.execute(stmt.limit(self.SNAPSHOT_BATCH_SIZE).offset(offset))).all()
+            if not rows:
+                break
+            for row, topic_name in rows:
+                topic_buckets[topic_name].append(float(row.retention_score) * 100)
+                if row.review_due_at is not None and row.review_due_at <= now:
+                    due_count += 1
+            if len(rows) < self.SNAPSHOT_BATCH_SIZE:
+                break
+            offset += self.SNAPSHOT_BATCH_SIZE
 
         curve = []
         for offset in range(6, -1, -1):

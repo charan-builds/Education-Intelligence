@@ -9,7 +9,11 @@ from app.infrastructure.repositories.analytics_snapshot_repository import Analyt
 
 
 class _FakeResult:
-    pass
+    def __init__(self, row=None):
+        self.row = row
+
+    def scalar_one_or_none(self):
+        return self.row
 
 
 class _FakeSession:
@@ -111,3 +115,56 @@ async def test_create_snapshot_version_retries_once_on_integrity_error():
     advisory_lock_calls = [statement for statement, _ in session.executed if "pg_advisory_xact_lock" in str(statement)]
     assert len(advisory_lock_calls) == 2
     assert session.flushed is True
+
+
+async def test_latest_snapshot_filters_on_is_latest():
+    expected = object()
+
+    class _LatestSession(_FakeSession):
+        async def execute(self, statement, params=None):
+            self.executed.append((statement, params))
+            return _FakeResult(expected)
+
+    session = _LatestSession(dialect_name="postgresql")
+    repo = AnalyticsSnapshotRepository(session)
+
+    result = await repo.latest_snapshot(
+        tenant_id=5,
+        snapshot_type="tenant_dashboard",
+        subject_id=None,
+    )
+
+    statement, _ = session.executed[0]
+    rendered = str(statement)
+    assert "is_latest" in rendered
+    assert result is expected
+
+
+async def test_create_snapshot_version_prunes_versions_older_than_configured_window(monkeypatch):
+    session = _FakeSession(dialect_name="postgresql")
+    repo = AnalyticsSnapshotRepository(session)
+
+    monkeypatch.setattr(
+        "app.infrastructure.repositories.analytics_snapshot_repository.get_settings",
+        lambda: SimpleNamespace(analytics_snapshot_versions_to_keep=5),
+    )
+
+    await repo.create_snapshot_version(
+        tenant_id=3,
+        snapshot_type="tenant_dashboard",
+        subject_id=None,
+        payload_json="{}",
+        window_start=datetime.now(timezone.utc),
+        window_end=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+
+    delete_statements = [(statement, params) for statement, params in session.executed if "DELETE FROM analytics_snapshots" in str(statement)]
+    assert len(delete_statements) == 1
+    _, params = delete_statements[0]
+    assert params == {
+        "tenant_id": 3,
+        "snapshot_type": "tenant_dashboard",
+        "subject_id": None,
+        "cutoff_version": 3,
+    }

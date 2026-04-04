@@ -1,3 +1,5 @@
+import type { TenantType } from "@/types/tenant";
+
 export type LearnerRoadmapProgress = {
   user_id: number;
   email: string;
@@ -33,7 +35,7 @@ export type AnalyticsOverview = {
 export type TenantAnalyticsSummary = {
   tenant_id: number;
   tenant_name: string;
-  tenant_type: string;
+  tenant_type: TenantType;
   student_count: number;
   mentor_count: number;
   teacher_count: number;

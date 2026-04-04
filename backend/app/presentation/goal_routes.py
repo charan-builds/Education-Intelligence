@@ -51,7 +51,10 @@ async def list_goal_topics(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(get_current_user),
 ):
-    return await GoalService(db).list_goal_topics_page(tenant_id=_current_user.tenant_id, goal_id=goal_id)
+    return await GoalService(db).list_goal_topics_page(
+        tenant_id=_current_user.tenant_id,
+        goal_id=goal_id,
+    )
 
 
 @router.post("/topics", response_model=GoalTopicResponse)
@@ -73,7 +76,10 @@ async def delete_goal_topic(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    await GoalService(db).delete_goal_topic(_current_user.tenant_id, link_id)
+    await GoalService(db).delete_goal_topic(
+        tenant_id=_current_user.tenant_id,
+        link_id=link_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -85,8 +91,8 @@ async def update_goal(
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
     return await GoalService(db).update_goal(
-        _current_user.tenant_id,
-        goal_id,
+        tenant_id=_current_user.tenant_id,
+        goal_id=goal_id,
         name=payload.name,
         description=payload.description,
     )
@@ -98,5 +104,8 @@ async def delete_goal(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    await GoalService(db).delete_goal(_current_user.tenant_id, goal_id)
+    await GoalService(db).delete_goal(
+        tenant_id=_current_user.tenant_id,
+        goal_id=goal_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)

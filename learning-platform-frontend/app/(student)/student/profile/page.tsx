@@ -12,11 +12,12 @@ import SurfaceCard from "@/components/ui/SurfaceCard";
 import { useAuth } from "@/hooks/useAuth";
 import { disableMfa, enableMfa, setupMfa } from "@/services/authService";
 import { completeMyProfile, getMyProfile, updateMyProfile } from "@/services/userService";
-import { appRoutes } from "@/utils/appRoutes";
+import { getRoleHomePath } from "@/utils/appRoutes";
 
 export default function StudentProfilePage() {
   const router = useRouter();
-  const { refresh } = useAuth();
+  const { refresh, role } = useAuth();
+  const isIndependentLearner = role === "independent_learner";
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const profileQuery = useQuery({
@@ -26,12 +27,28 @@ export default function StudentProfilePage() {
   const [fullName, setFullName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [linkedinUrl, setLinkedinUrl] = useState("");
-  const [collegeName, setCollegeName] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
   const [preferences, setPreferences] = useState('{\n  "theme": "adaptive",\n  "study_reminders": true\n}');
   const [mfaSecret, setMfaSecret] = useState("");
   const [mfaCode, setMfaCode] = useState("");
+  const workspaceLabel = isIndependentLearner ? "independent learner workspace" : "student workspace";
+  const onboardingDescription = isIndependentLearner
+    ? "Complete your required onboarding details, then personalize your self-directed learning profile and secure your account with authenticator-based MFA."
+    : "Complete your required onboarding details, then personalize your profile and secure your account with authenticator-based MFA.";
+  const completionUnlockDescription = isIndependentLearner
+    ? "Goal selection, diagnostics, roadmap, and progress tracking unlock after this first-time onboarding step."
+    : "Diagnostic, roadmap, and dashboard access unlock after this first-time onboarding step.";
+  const onboardingOrganizationPlaceholder = isIndependentLearner
+    ? "Learning organization or community (optional)"
+    : "College or institution (optional)";
+  const profileCardDescription = isIndependentLearner
+    ? "These fields are stored in the platform API and reused across your independent learner workspace."
+    : "These fields are stored in the platform API and reused across the student workspace.";
+  const profileOrganizationPlaceholder = isIndependentLearner
+    ? "Learning organization, company, or community"
+    : "College name";
 
   useEffect(() => {
     if (!profileQuery.data) {
@@ -40,7 +57,7 @@ export default function StudentProfilePage() {
     setFullName(profileQuery.data.full_name ?? "");
     setPhoneNumber(profileQuery.data.phone_number ?? "");
     setLinkedinUrl(profileQuery.data.linkedin_url ?? "");
-    setCollegeName(profileQuery.data.college_name ?? "");
+    setOrganizationName(profileQuery.data.organization_name ?? profileQuery.data.college_name ?? "");
     setDisplayName(profileQuery.data.display_name ?? "");
     setAvatarUrl(profileQuery.data.avatar_url ?? "");
     setPreferences(JSON.stringify(profileQuery.data.preferences ?? {}, null, 2));
@@ -61,10 +78,10 @@ export default function StudentProfilePage() {
   const completeProfileMutation = useMutation({
     mutationFn: completeMyProfile,
     onSuccess: async () => {
-      toast({ title: "Profile completed", description: "You now have full access to the student workspace.", variant: "success" });
+      toast({ title: "Profile completed", description: `You now have full access to the ${workspaceLabel}.`, variant: "success" });
       await queryClient.invalidateQueries({ queryKey: ["student", "profile"] });
       await refresh();
-      router.replace(appRoutes.student.dashboard);
+      router.replace(getRoleHomePath(role));
     },
     onError: (error: Error) => {
       toast({ title: "Profile completion failed", description: error.message, variant: "error" });
@@ -112,14 +129,14 @@ export default function StudentProfilePage() {
       <PageHeader
         eyebrow="Profile"
         title="Manage your learning identity"
-        description="Complete your required onboarding details, then personalize your profile and secure your account with authenticator-based MFA."
+        description={onboardingDescription}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
         {!profileQuery.data?.is_profile_completed ? (
           <SurfaceCard
             title="Complete your profile"
-            description="Diagnostic, roadmap, and dashboard access unlock after this first-time onboarding step."
+            description={completionUnlockDescription}
           >
             <form
               className="space-y-4"
@@ -129,14 +146,14 @@ export default function StudentProfilePage() {
                   full_name: fullName,
                   phone_number: phoneNumber,
                   linkedin_url: linkedinUrl,
-                  college_name: collegeName || null,
+                  organization_name: organizationName || null,
                 });
               }}
             >
               <Input value={fullName} onChange={(event) => setFullName(event.target.value)} placeholder="Full name" />
               <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+14155550123" />
               <Input value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} placeholder="https://www.linkedin.com/in/your-profile/" />
-              <Input value={collegeName} onChange={(event) => setCollegeName(event.target.value)} placeholder="College or institution (optional)" />
+              <Input value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} placeholder={onboardingOrganizationPlaceholder} />
               <Button type="submit" disabled={completeProfileMutation.isPending}>
                 {completeProfileMutation.isPending ? "Completing..." : "Complete profile"}
               </Button>
@@ -144,7 +161,7 @@ export default function StudentProfilePage() {
           </SurfaceCard>
         ) : null}
 
-        <SurfaceCard title="Profile" description="These fields are stored in the platform API and reused across the student workspace.">
+        <SurfaceCard title="Profile" description={profileCardDescription}>
           <form
             className="space-y-4"
             onSubmit={(event) => {
@@ -161,7 +178,7 @@ export default function StudentProfilePage() {
                 display_name: displayName || null,
                 phone_number: phoneNumber || null,
                 linkedin_url: linkedinUrl || null,
-                college_name: collegeName || null,
+                organization_name: organizationName || null,
                 avatar_url: avatarUrl || null,
                 preferences: parsedPreferences,
               });
@@ -171,7 +188,7 @@ export default function StudentProfilePage() {
             <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" />
             <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="Phone number" />
             <Input value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} placeholder="LinkedIn URL" />
-            <Input value={collegeName} onChange={(event) => setCollegeName(event.target.value)} placeholder="College name" />
+            <Input value={organizationName} onChange={(event) => setOrganizationName(event.target.value)} placeholder={profileOrganizationPlaceholder} />
             <Input value={avatarUrl} onChange={(event) => setAvatarUrl(event.target.value)} placeholder="Avatar URL" />
             <textarea
               value={preferences}

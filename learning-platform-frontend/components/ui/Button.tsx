@@ -16,13 +16,13 @@ export default function Button({
 }: ButtonProps) {
   const variantClasses = {
     primary:
-      "bg-gradient-to-r from-brand-700 via-brand-600 to-brand-500 text-white shadow-glow hover:brightness-105",
+      "workspace-button-primary text-white hover:-translate-y-0.5",
     secondary:
-      "border border-slate-200 bg-white/90 text-slate-900 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800",
+      "border border-violet-200/80 bg-white/88 text-violet-950 shadow-sm shadow-violet-200/40 backdrop-blur-sm hover:-translate-y-0.5 hover:border-violet-300 hover:bg-white dark:border-violet-400/20 dark:bg-violet-950/55 dark:text-violet-100 dark:hover:bg-violet-900/70",
     ghost:
-      "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800",
+      "text-violet-700 hover:bg-violet-100/80 hover:text-violet-900 dark:text-violet-200 dark:hover:bg-violet-900/70 dark:hover:text-violet-50",
     danger:
-      "bg-rose-600 text-white hover:bg-rose-500",
+      "bg-gradient-to-r from-violet-700 via-purple-700 to-fuchsia-700 text-white shadow-sm shadow-violet-400/30 hover:-translate-y-0.5 hover:from-violet-600 hover:via-purple-600 hover:to-fuchsia-600",
   } as const;
 
   return (

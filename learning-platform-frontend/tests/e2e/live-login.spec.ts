@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const tenantId = process.env.E2E_TENANT_ID ?? "2";
-const email = process.env.E2E_STUDENT_EMAIL ?? "student@example.com";
+const email = process.env.E2E_STUDENT_EMAIL ?? "maya.chen@demo.learnova.ai";
 const password = process.env.E2E_STUDENT_PASSWORD ?? "Student123!";
 
 test("live student login reaches the real dashboard", async ({ page }) => {

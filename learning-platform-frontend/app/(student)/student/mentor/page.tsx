@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import React from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import MarkdownMessage from "@/components/chat/MarkdownMessage";
@@ -19,9 +21,12 @@ type ConversationItem = {
 };
 
 export default function StudentMentorPage() {
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState("");
+  const prompt = useMemo(() => searchParams.get("prompt")?.trim() ?? "", [searchParams]);
+  const seededPromptRef = useRef(false);
 
   const historyQuery = useQuery({
     queryKey: ["student", "ai-chat", "history"],
@@ -61,10 +66,15 @@ export default function StudentMentorPage() {
   });
 
   useEffect(() => {
+    if (prompt && !seededPromptRef.current) {
+      seededPromptRef.current = true;
+      setMessage(prompt);
+      return;
+    }
     if (!message && conversation.length === 0) {
       setMessage("Explain my next roadmap topic and tell me why it matters.");
     }
-  }, [conversation.length, message]);
+  }, [conversation.length, message, prompt]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

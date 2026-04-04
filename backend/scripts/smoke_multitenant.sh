@@ -90,15 +90,15 @@ curl -fsS "${BASE_URL}/health" >/dev/null
 
 verify_tenant \
   "Demo University" \
-  "admin@example.com" \
+  "admin@demo.learnova.ai" \
   "admin123" \
   "AI/ML Engineer" \
   "Linear Algebra" \
   "Machine Learning"
 
 verify_tenant \
-  "Northwind School" \
-  "admin@northwind.local" \
+  "Northwind Academy" \
+  "admin@northwind.learnova.ai" \
   "admin123" \
   "STEM Foundations" \
   "Reading Comprehension" \
@@ -106,7 +106,7 @@ verify_tenant \
 
 verify_tenant \
   "Acme Learning Co" \
-  "admin@acme.local" \
+  "admin@acme.learnova.ai" \
   "admin123" \
   "Product Analyst" \
   "Product Analytics" \

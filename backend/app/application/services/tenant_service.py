@@ -14,12 +14,13 @@ class TenantService:
         self.session = session
         self.repository = TenantRepository(session)
 
-    async def create_tenant(self, name: str, tenant_type: TenantType) -> Tenant:
+    async def create_tenant(self, name: str, tenant_type: TenantType, *, subdomain: str | None = None) -> Tenant:
         try:
             tenant = await self.repository.create(
                 name=name,
                 tenant_type=tenant_type,
                 created_at=datetime.now(timezone.utc),
+                subdomain=subdomain,
             )
             await self.session.commit()
             return tenant

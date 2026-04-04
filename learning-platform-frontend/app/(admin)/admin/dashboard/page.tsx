@@ -1,12 +1,11 @@
 "use client";
-
-import Link from "next/link";
 import { BookOpen, Flag, MessagesSquare, Target, Users } from "lucide-react";
 
 import MasteryPieChart from "@/components/charts/MasteryPieChart";
 import ProgressLineChart from "@/components/charts/ProgressLineChart";
 import PageHeader from "@/components/layouts/PageHeader";
 import MetricCard from "@/components/ui/MetricCard";
+import QuickLinkCard from "@/components/ui/QuickLinkCard";
 import SurfaceCard from "@/components/ui/SurfaceCard";
 import { useAdminDashboard } from "@/hooks/useDashboard";
 
@@ -50,36 +49,34 @@ export default function AdminDashboardPage() {
               href: "/admin/users",
               title: "User management",
               description: "Create and review tenant users.",
+              icon: Users,
             },
             {
               href: "/admin/content",
               title: "Topic + question management",
               description: "Maintain content graph, practice questions, and imports.",
+              icon: BookOpen,
             },
             {
               href: "/admin/goals",
               title: "Goal management",
               description: "Create learning goals and map them to topics.",
+              icon: Target,
             },
             {
               href: "/admin/community",
               title: "Community moderation",
               description: "Track discussion health and resolve threads.",
+              icon: MessagesSquare,
             },
             {
               href: "/admin/feature-flags",
               title: "Feature flags",
               description: "Turn tenant capabilities on or off.",
+              icon: Flag,
             },
           ].map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="rounded-[28px] border border-slate-200 bg-white/75 p-5 transition hover:-translate-y-1 hover:shadow-panel dark:border-slate-700 dark:bg-slate-900/75"
-            >
-              <p className="text-base font-semibold text-slate-950 dark:text-slate-100">{item.title}</p>
-              <p className="mt-2 text-sm leading-7 text-slate-600 dark:text-slate-400">{item.description}</p>
-            </Link>
+            <QuickLinkCard key={item.href} href={item.href} title={item.title} description={item.description} icon={item.icon} />
           ))}
         </div>
       </SurfaceCard>

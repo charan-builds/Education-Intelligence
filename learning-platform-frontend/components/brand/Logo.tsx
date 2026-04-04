@@ -19,7 +19,7 @@ export default function Logo({ className, showWordmark = true, labelClassName }:
       </div>
       {showWordmark ? (
         <div className={labelClassName}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-brand-700 dark:text-teal-200">Learnova AI</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.34em] text-brand-700 dark:text-violet-200">Learnova AI</p>
           <p className="text-lg font-semibold tracking-tight text-slate-950 dark:text-slate-100">Adaptive Learning Intelligence</p>
         </div>
       ) : null}

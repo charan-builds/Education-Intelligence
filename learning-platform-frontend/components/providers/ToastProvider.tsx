@@ -33,20 +33,20 @@ function variantStyles(variant: ToastVariant) {
   if (variant === "success") {
     return {
       icon: CheckCircle2,
-      className: "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-100",
+      className: "border-violet-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(243,232,255,0.96))] text-violet-950 dark:border-violet-500/30 dark:bg-violet-500/12 dark:text-violet-100",
     };
   }
 
   if (variant === "error") {
     return {
       icon: AlertCircle,
-      className: "border-rose-200 bg-rose-50 text-rose-900 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-100",
+      className: "border-violet-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(250,245,255,0.96))] text-violet-950 dark:border-violet-500/30 dark:bg-violet-500/12 dark:text-violet-100",
     };
   }
 
   return {
     icon: Info,
-    className: "border-indigo-200 bg-indigo-50 text-indigo-900 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-100",
+    className: "border-violet-200 bg-[linear-gradient(135deg,rgba(255,255,255,0.96),rgba(237,233,254,0.96))] text-violet-950 dark:border-violet-500/30 dark:bg-violet-500/12 dark:text-violet-100",
   };
 }
 

@@ -1,9 +1,11 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.services.analytics_service import AnalyticsService
+from app.application.services.analytics_snapshot_service import AnalyticsSnapshotService
 from app.application.services.precomputed_analytics_service import PrecomputedAnalyticsService
 from app.application.services.skill_vector_service import SkillVectorService
 from app.core.dependencies import get_current_user
@@ -29,6 +31,7 @@ from app.schemas.analytics_schema import (
 from app.application.services.retention_service import RetentionService
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+STALE_SNAPSHOT_THRESHOLD = timedelta(minutes=5)
 
 
 def _dead_letter_tenant_scope(current_user) -> int | None:
@@ -43,6 +46,29 @@ def _snapshot_meta(*, status: str, last_updated: str | None, estimated_time: int
         "is_rebuilding": status == "pending",
         "estimated_time": estimated_time if status == "pending" else None,
     }
+
+
+def _snapshot_status(last_updated: str | None) -> str:
+    if not last_updated:
+        return "pending"
+    try:
+        parsed = datetime.fromisoformat(last_updated.replace("Z", "+00:00"))
+    except ValueError:
+        return "ready"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)
+    return "stale" if age > STALE_SNAPSHOT_THRESHOLD else "ready"
+
+
+async def _enqueue_high_priority_snapshot_rebuild(*, tenant_id: int, snapshot_type: str) -> bool:
+    from app.infrastructure.jobs.tasks import enqueue_snapshot_rebuild
+
+    return await enqueue_snapshot_rebuild(
+        tenant_id=int(tenant_id),
+        snapshot_type=str(snapshot_type),
+        priority=9,
+    )
 
 
 async def _enqueue_deduplicated_analytics_job(*, task_name: str, lock_key: str, kwargs: dict, ttl_seconds: int = 300) -> bool:
@@ -63,7 +89,16 @@ async def get_analytics_overview(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
-    return await AnalyticsService(db).aggregated_metrics(current_user.tenant_id)
+    payload = await AnalyticsService(db).aggregated_metrics(current_user.tenant_id)
+    if payload.get("meta", {}).get("status") in {"pending", "stale"}:
+        if payload.get("meta", {}).get("status") == "stale":
+            await _enqueue_high_priority_snapshot_rebuild(
+                tenant_id=int(current_user.tenant_id),
+                snapshot_type="tenant_dashboard",
+            )
+        else:
+            enqueue_job_with_options("jobs.refresh_precomputed_analytics", kwargs={"tenant_id": int(current_user.tenant_id)})
+    return payload
 
 
 @router.get("/roadmap-progress", response_model=RoadmapProgressSummaryResponse)
@@ -72,11 +107,25 @@ async def get_roadmap_progress_analytics(
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    return await AnalyticsService(db).roadmap_progress_summary(
+    payload = await AnalyticsService(db).roadmap_progress_summary(
         current_user.tenant_id,
         limit=pagination.limit,
         offset=pagination.offset,
     )
+    snapshot_meta = payload.get("snapshot_meta") or {}
+    if snapshot_meta.get("status") in {"pending", "stale"}:
+        if snapshot_meta.get("status") == "stale":
+            await _enqueue_high_priority_snapshot_rebuild(
+                tenant_id=int(current_user.tenant_id),
+                snapshot_type="roadmap_progress_summary",
+            )
+        else:
+            await _enqueue_deduplicated_analytics_job(
+                task_name="jobs.refresh_roadmap_progress_summary",
+                lock_key=f"analytics:roadmap-progress:{int(current_user.tenant_id)}",
+                kwargs={"tenant_id": int(current_user.tenant_id)},
+            )
+    return payload
 
 
 @router.get("/topic-mastery", response_model=TopicMasteryAnalyticsResponse)
@@ -84,7 +133,16 @@ async def get_topic_mastery_analytics(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
-    return await AnalyticsService(db).topic_mastery_summary(current_user.tenant_id)
+    payload = await AnalyticsService(db).topic_mastery_summary(current_user.tenant_id)
+    if payload.get("meta", {}).get("status") in {"pending", "stale"}:
+        if payload.get("meta", {}).get("status") == "stale":
+            await _enqueue_high_priority_snapshot_rebuild(
+                tenant_id=int(current_user.tenant_id),
+                snapshot_type="tenant_dashboard",
+            )
+        else:
+            enqueue_job_with_options("jobs.refresh_precomputed_analytics", kwargs={"tenant_id": int(current_user.tenant_id)})
+    return payload
 
 
 @router.get("/platform-overview", response_model=PlatformAnalyticsOverviewResponse)
@@ -100,7 +158,33 @@ async def get_retention_analytics(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
-    return await RetentionService(db).tenant_retention_summary(tenant_id=current_user.tenant_id)
+    snapshot = await AnalyticsSnapshotService(db).get_latest_snapshot(
+        current_user.tenant_id,
+        "tenant_retention_summary",
+    )
+    if snapshot is not None:
+        payload = dict(snapshot["data"])
+        last_updated = snapshot["created_at"].isoformat() if snapshot.get("created_at") else None
+        status = _snapshot_status(last_updated)
+        payload["meta"] = _snapshot_meta(status=status, last_updated=last_updated)
+        if status == "stale":
+            await _enqueue_high_priority_snapshot_rebuild(
+                tenant_id=int(current_user.tenant_id),
+                snapshot_type="tenant_retention_summary",
+            )
+        return payload
+    await _enqueue_deduplicated_analytics_job(
+        task_name="jobs.refresh_retention_summary",
+        lock_key=f"analytics:retention:{int(current_user.tenant_id)}",
+        kwargs={"tenant_id": int(current_user.tenant_id)},
+    )
+    return {
+        "tenant_id": current_user.tenant_id,
+        "due_review_count": 0,
+        "retention_curve": [],
+        "weak_retention_topics": [],
+        "meta": _snapshot_meta(status="pending", last_updated=None, estimated_time=30),
+    }
 
 
 @router.get("/student-insights", response_model=LearnerIntelligenceOverviewResponse)
@@ -108,14 +192,37 @@ async def get_student_insights(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    payload = await SkillVectorService(db).aggregated_feature_payload(
-        tenant_id=current_user.tenant_id,
-        user_id=current_user.id,
+    snapshot = await AnalyticsSnapshotService(db).get_latest_snapshot(
+        current_user.tenant_id,
+        "learner_intelligence_overview",
+        subject_id=current_user.id,
+    )
+    if snapshot is not None:
+        payload = dict(snapshot["data"])
+        last_updated = snapshot["created_at"].isoformat() if snapshot.get("created_at") else None
+        status = _snapshot_status(last_updated)
+        payload["meta"] = _snapshot_meta(status=status, last_updated=last_updated)
+        if status == "stale":
+            await _enqueue_deduplicated_analytics_job(
+                task_name="jobs.refresh_learner_intelligence_overview",
+                lock_key=f"analytics:learner-intelligence:{int(current_user.id)}",
+                kwargs={"tenant_id": int(current_user.tenant_id), "user_id": int(current_user.id)},
+            )
+        return payload
+    await _enqueue_deduplicated_analytics_job(
+        task_name="jobs.refresh_learner_intelligence_overview",
+        lock_key=f"analytics:learner-intelligence:{int(current_user.id)}",
+        kwargs={"tenant_id": int(current_user.tenant_id), "user_id": int(current_user.id)},
     )
     return {
         "tenant_id": current_user.tenant_id,
         "user_id": current_user.id,
-        **payload,
+        "mastery_avg": 0.0,
+        "confidence_avg": 0.0,
+        "learning_speed_seconds": 0.0,
+        "retry_count": 0,
+        "tracked_topics": 0,
+        "meta": _snapshot_meta(status="pending", last_updated=None, estimated_time=30),
     }
 
 
@@ -148,7 +255,24 @@ async def get_learning_trends(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(require_roles("teacher", "mentor", "admin", "super_admin")),
 ):
-    return await SkillVectorService(db).learning_trends(tenant_id=current_user.tenant_id)
+    snapshot = await AnalyticsSnapshotService(db).get_latest_snapshot(
+        current_user.tenant_id,
+        "learning_trends",
+    )
+    if snapshot is not None:
+        last_updated = snapshot["created_at"].isoformat() if snapshot.get("created_at") else None
+        if _snapshot_status(last_updated) == "stale":
+            await _enqueue_high_priority_snapshot_rebuild(
+                tenant_id=int(current_user.tenant_id),
+                snapshot_type="learning_trends",
+            )
+        return list(snapshot["data"].get("points") or [])
+    await _enqueue_deduplicated_analytics_job(
+        task_name="jobs.refresh_learning_trends",
+        lock_key=f"analytics:learning-trends:{int(current_user.tenant_id)}",
+        kwargs={"tenant_id": int(current_user.tenant_id)},
+    )
+    return []
 
 
 @router.get("/student/{user_id}", response_model=StudentPerformanceAnalyticsResponse)
@@ -211,9 +335,15 @@ async def get_precomputed_tenant_dashboard(
     service = PrecomputedAnalyticsService(db)
     snapshot = await service.latest_tenant_dashboard(tenant_id=current_user.tenant_id)
     if snapshot is not None:
+        status = _snapshot_status(snapshot.get("updated_at"))
+        if status == "stale":
+            await _enqueue_high_priority_snapshot_rebuild(
+                tenant_id=int(current_user.tenant_id),
+                snapshot_type="tenant_dashboard",
+            )
         return {
             **snapshot,
-            "meta": _snapshot_meta(status="ready", last_updated=snapshot.get("updated_at")),
+            "meta": _snapshot_meta(status=status, last_updated=snapshot.get("updated_at")),
         }
     return {
         "tenant_id": current_user.tenant_id,
@@ -235,9 +365,10 @@ async def get_precomputed_user_learning_summary(
         user_id=current_user.id,
     )
     if snapshot is not None:
+        status = _snapshot_status(snapshot.get("updated_at"))
         return {
             **snapshot,
-            "meta": _snapshot_meta(status="ready", last_updated=snapshot.get("updated_at")),
+            "meta": _snapshot_meta(status=status, last_updated=snapshot.get("updated_at")),
         }
     return {
         "tenant_id": current_user.tenant_id,

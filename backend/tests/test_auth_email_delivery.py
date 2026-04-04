@@ -41,6 +41,19 @@ class _RefreshRepo:
         return 1
 
 
+class _AuthTokenRepo:
+    async def invalidate_active_tokens_for_user(self, *, user_id: int, purpose):
+        return 0
+
+    async def create(self, **kwargs):
+        return type("_AuthToken", (), kwargs)()
+
+
+class _AuthLogRepo:
+    async def create(self, **kwargs):
+        return type("_AuthLog", (), kwargs)()
+
+
 class _MembershipRepo:
     async def get_membership(self, *, user_id: int, tenant_id: int):
         return type("_Membership", (), {"user_id": user_id, "tenant_id": tenant_id, "role": UserRole.student})()
@@ -93,6 +106,8 @@ def test_auth_requests_queue_email_jobs(monkeypatch):
         service.tenant_repository = _TenantRepo()
         service.user_repository = _UserRepo()
         service.refresh_session_repository = _RefreshRepo()
+        service.auth_token_repository = _AuthTokenRepo()
+        service.auth_log_repository = _AuthLogRepo()
         service.audit_log_service = _AuditLogService()
         service.user_tenant_role_repository = _MembershipRepo()
 

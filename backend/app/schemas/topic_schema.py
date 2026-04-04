@@ -130,6 +130,8 @@ class TopicPrerequisiteResponse(BaseModel):
     id: int
     topic_id: int
     prerequisite_topic_id: int
+    topic_name: str | None = None
+    prerequisite_topic_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

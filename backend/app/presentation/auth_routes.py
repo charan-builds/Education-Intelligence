@@ -47,6 +47,7 @@ def _serialize_user(user, *, tenant_id: int, role) -> UserResponse:
             "display_name": getattr(user, "display_name", None),
             "phone_number": getattr(user, "phone_number", None),
             "linkedin_url": getattr(user, "linkedin_url", None),
+            "organization_name": getattr(user, "college_name", None),
             "college_name": getattr(user, "college_name", None),
             "avatar_url": getattr(user, "avatar_url", None),
             "preferences": getattr(user, "preferences_json", None) or {},

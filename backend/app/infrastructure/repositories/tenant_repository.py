@@ -9,8 +9,8 @@ class TenantRepository(BaseRepository):
     def __init__(self, session: AsyncSession):
         super().__init__(session)
 
-    async def create(self, name: str, tenant_type: TenantType, created_at):
-        tenant = Tenant(name=name, type=tenant_type, created_at=created_at)
+    async def create(self, name: str, tenant_type: TenantType, created_at, *, subdomain: str | None = None):
+        tenant = Tenant(name=name, subdomain=subdomain, type=tenant_type, created_at=created_at)
         self.session.add(tenant)
         await self.session.flush()
         return tenant

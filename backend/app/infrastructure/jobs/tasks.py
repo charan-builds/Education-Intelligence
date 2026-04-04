@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import json
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from app.application.services.analytics_service import AnalyticsService
+from app.application.services.analytics_snapshot_service import AnalyticsSnapshotService
+from app.application.services.analytics_snapshot_types import (
+    INSTITUTION_DASHBOARD_SNAPSHOT,
+    PLATFORM_OVERVIEW_SNAPSHOT,
+    SYSTEM_SUMMARY_SNAPSHOT,
+    TEACHER_DASHBOARD_SNAPSHOT,
+    TENANT_DASHBOARD_SNAPSHOT,
+    USER_DASHBOARD_SNAPSHOT,
+    USER_LEARNING_SUMMARY_SNAPSHOT,
+    normalize_snapshot_type,
+)
 from app.application.services.diagnostic_service import DiagnosticService
 from app.application.services.ai_request_service import AIRequestService
 from app.application.services.domain_event_consumer_service import DomainEventConsumerService
@@ -18,6 +32,7 @@ from app.application.services.mentor_service import MentorService
 from app.application.services.notification_service import NotificationService
 from app.application.services.outbox_service import OutboxService
 from app.application.services.precomputed_analytics_service import PrecomputedAnalyticsService
+from app.application.services.retention_service import RetentionService
 from app.application.services.roadmap_service import RoadmapService
 from app.application.services.mentor_notification_service import MentorNotificationService
 from app.application.services.skill_vector_service import SkillVectorService
@@ -39,11 +54,52 @@ from app.infrastructure.repositories.dead_letter_repository import DeadLetterRep
 from app.infrastructure.database import open_super_admin_session, open_tenant_session
 from app.infrastructure.cache.cache_service import CacheService
 from app.infrastructure.jobs.celery_app import celery_app
+from app.infrastructure.jobs.queue_config import AI_QUEUE, ANALYTICS_QUEUE, CRITICAL_QUEUE, OPS_QUEUE
 from app.core.metrics import event_processing_duration_seconds
 from app.infrastructure.jobs.dispatcher import enqueue_job_with_options
 from app.realtime.hub import realtime_hub
 
 logger = logging.getLogger("learning_platform.jobs")
+MAX_ANALYTICS_JOBS_PER_TENANT = 3
+
+
+def enforce_queue(task_func):
+    if not getattr(task_func, "queue", None):
+        raise ValueError(f"Task {task_func.__name__} missing queue assignment")
+    return task_func
+
+
+def _print_task_queue_duration(task_self, start: float) -> None:
+    request = getattr(task_self, "request", None)
+    delivery_info = getattr(request, "delivery_info", None) if request is not None else None
+    if not isinstance(delivery_info, dict):
+        delivery_info = {}
+    routing_key = delivery_info.get("routing_key", "unknown")
+    duration = time.time() - start
+    print(f"[QUEUE={routing_key}] duration={duration}")
+
+
+def _task(*, queue: str, **kwargs):
+    if not queue:
+        raise ValueError("Celery tasks must declare an explicit queue")
+
+    def _decorator(func):
+        func.queue = queue
+        enforce_queue(func)
+
+        @functools.wraps(func)
+        def _wrapped(*args, **inner_kwargs):
+            task_self = args[0] if args else inner_kwargs.get("self")
+            start = time.time()
+            try:
+                return func(*args, **inner_kwargs)
+            finally:
+                _print_task_queue_duration(task_self, start)
+
+        _wrapped.queue = queue
+        return celery_app.task(queue=queue, **kwargs)(_wrapped)
+
+    return _decorator
 
 
 def _run_async(coro):
@@ -96,6 +152,61 @@ async def _release_dispatch_lock(*, lock_key: str | None, lock_token: str | None
     await CacheService().release_lock(lock_key, lock_token)
 
 
+async def _release_tenant_job_counter(*, tenant_id: int | None) -> None:
+    if tenant_id is None or tenant_id <= 0:
+        return
+    counter_key = f"analytics:tenant_jobs:{int(tenant_id)}"
+    await CacheService().decrement_counter(counter_key)
+
+
+async def enqueue_snapshot_rebuild(*, tenant_id: int, snapshot_type: str, ttl_seconds: int = 60, priority: int | None = None) -> bool:
+    lock_key = f"analytics:lock:{int(tenant_id)}:{snapshot_type}"
+    counter_key = f"analytics:tenant_jobs:{int(tenant_id)}"
+    cache = CacheService()
+    token = await cache.acquire_lock(lock_key, ttl=ttl_seconds)
+    if token is None:
+        return False
+    current_jobs = await cache.increment_counter(counter_key, ttl=ttl_seconds)
+    if current_jobs > MAX_ANALYTICS_JOBS_PER_TENANT:
+        await cache.decrement_counter(counter_key)
+        await cache.release_lock(lock_key, token)
+        return False
+    job_kwargs = {
+        "tenant_id": int(tenant_id),
+        "snapshot_type": str(snapshot_type),
+        "dispatch_lock_key": lock_key,
+        "dispatch_lock_token": token,
+    }
+    try:
+        if priority is not None:
+            rebuild_snapshot.apply_async(
+                args=[int(tenant_id), str(snapshot_type)],
+                kwargs={
+                    "dispatch_lock_key": lock_key,
+                    "dispatch_lock_token": token,
+                },
+                queue=ANALYTICS_QUEUE,
+                priority=int(priority),
+            )
+            queued = True
+        else:
+            queued = enqueue_job_with_options(
+                "jobs.rebuild_snapshot",
+                kwargs=job_kwargs,
+            )
+    except Exception:
+        logger.exception(
+            "enqueue_snapshot_rebuild failed",
+            extra={"tenant_id": tenant_id, "snapshot_type": snapshot_type, "priority": priority},
+        )
+        queued = False
+    if not queued:
+        await cache.decrement_counter(counter_key)
+        await cache.release_lock(lock_key, token)
+        return False
+    return True
+
+
 async def _create_analytics_dead_letter(
     *,
     job_name: str,
@@ -146,6 +257,23 @@ async def _list_student_tenant_ids(*, limit: int) -> list[int]:
         return [int(row.tenant_id) for row in rows]
 
 
+async def _list_active_tenant_ids(*, limit: int, active_within_minutes: int = 5) -> list[int]:
+    if limit <= 0:
+        return []
+    active_since = datetime.now(timezone.utc) - timedelta(minutes=max(active_within_minutes, 1))
+    async with open_super_admin_session(reason="list_active_tenant_ids") as session:
+        rows = (
+            await session.execute(
+                select(LearningEvent.tenant_id)
+                .where(func.coalesce(LearningEvent.event_timestamp, LearningEvent.created_at) >= active_since)
+                .group_by(LearningEvent.tenant_id)
+                .order_by(func.max(func.coalesce(LearningEvent.event_timestamp, LearningEvent.created_at)).desc())
+                .limit(limit)
+            )
+        ).all()
+        return [int(row.tenant_id) for row in rows]
+
+
 async def _run_generate_roadmap(user_id: int, tenant_id: int, goal_id: int, test_id: int) -> dict[str, Any]:
     async with open_tenant_session(tenant_id=tenant_id, role="system", actor_user_id=user_id) as session:
         roadmap = await RoadmapService(session).generate(
@@ -161,13 +289,16 @@ async def _run_generate_roadmap(user_id: int, tenant_id: int, goal_id: int, test
         }
 
 
-@celery_app.task(
+@_task(
+    queue=CRITICAL_QUEUE,
+    bind=True,
     name="jobs.generate_roadmap",
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def generate_roadmap(user_id: int, tenant_id: int, goal_id: int, test_id: int) -> dict[str, Any]:
+def generate_roadmap(self=None, user_id: int = 0, tenant_id: int = 0, goal_id: int = 0, test_id: int = 0) -> dict[str, Any]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_generate_roadmap(user_id, tenant_id, goal_id, test_id))
@@ -202,13 +333,16 @@ async def _run_analyze_diagnostic(test_id: int, user_id: int, tenant_id: int) ->
         }
 
 
-@celery_app.task(
+@_task(
+    queue=CRITICAL_QUEUE,
+    bind=True,
     name="jobs.analyze_diagnostic",
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def analyze_diagnostic(test_id: int, user_id: int, tenant_id: int) -> dict[str, Any]:
+def analyze_diagnostic(self=None, test_id: int = 0, user_id: int = 0, tenant_id: int = 0) -> dict[str, Any]:
+    _ = self
     try:
         result = _run_async(_run_analyze_diagnostic(test_id, user_id, tenant_id))
         logger.info(
@@ -320,13 +454,16 @@ async def _run_process_mentor_chat(tenant_id: int, user_id: int, request_id: str
             return {"status": "failed", "tenant_id": tenant_id, "user_id": user_id, "request_id": request_id}
 
 
-@celery_app.task(
+@_task(
+    queue=AI_QUEUE,
+    bind=True,
     name="jobs.process_mentor_chat",
     autoretry_for=(Exception,),
     retry_backoff=True,
     retry_kwargs={"max_retries": 3},
 )
-def process_mentor_chat(tenant_id: int, user_id: int, request_id: str) -> dict[str, Any]:
+def process_mentor_chat(self=None, tenant_id: int = 0, user_id: int = 0, request_id: str = "") -> dict[str, Any]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_process_mentor_chat(tenant_id, user_id, request_id))
@@ -351,8 +488,9 @@ async def _run_process_ai_request(tenant_id: int, user_id: int, request_id: str)
         )
 
 
-@celery_app.task(name="jobs.process_ai_request", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def process_ai_request(tenant_id: int, user_id: int, request_id: str) -> dict[str, Any]:
+@_task(queue=AI_QUEUE, bind=True, name="jobs.process_ai_request", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def process_ai_request(self=None, tenant_id: int = 0, user_id: int = 0, request_id: str = "") -> dict[str, Any]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_process_ai_request(tenant_id, user_id, request_id))
@@ -377,8 +515,9 @@ async def _run_process_learning_event(event_id: int, tenant_id: int) -> dict[str
         return {"status": "processed", "event_id": event_id, "user_id": event.user_id, "tenant_id": event.tenant_id}
 
 
-@celery_app.task(name="jobs.process_learning_event", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def process_learning_event(event_id: int, tenant_id: int, outbox_idempotency_key: str | None = None) -> dict[str, Any]:
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.process_learning_event", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def process_learning_event(self=None, event_id: int = 0, tenant_id: int = 0, outbox_idempotency_key: str | None = None) -> dict[str, Any]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_process_learning_event(event_id, tenant_id))
@@ -437,12 +576,16 @@ async def _run_send_notifications(
     ]
 
 
-@celery_app.task(name="jobs.send_notifications")
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.send_notifications")
 def send_notifications(
-    roadmap_steps: list[dict[str, Any]],
-    topic_scores: dict[int, float],
+    self=None,
+    roadmap_steps: list[dict[str, Any]] | None = None,
+    topic_scores: dict[int, float] | None = None,
     last_activity_at_iso: str | None = None,
 ) -> list[dict[str, str]]:
+    _ = self
+    roadmap_steps = roadmap_steps or []
+    topic_scores = topic_scores or {}
     try:
         result = _run_async(_run_send_notifications(roadmap_steps, topic_scores, last_activity_at_iso))
         logger.info("send_notifications completed", extra={"count": len(result)})
@@ -464,8 +607,9 @@ async def _run_send_email(to_email: str, subject: str, html_content: str, text_c
     )
 
 
-@celery_app.task(name="jobs.send_email", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 5})
-def send_email(to_email: str, subject: str, html_content: str, text_content: str) -> dict[str, str | bool]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.send_email", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 5})
+def send_email(self=None, to_email: str = "", subject: str = "", html_content: str = "", text_content: str = "") -> dict[str, str | bool]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_send_email(to_email=to_email, subject=subject, html_content=html_content, text_content=text_content))
@@ -495,8 +639,9 @@ async def _run_generate_notifications(tenant_id: int | None = None, limit_users:
     return {"created": total_created, "tenant_id": None}
 
 
-@celery_app.task(name="jobs.generate_notifications", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def generate_notifications(tenant_id: int | None = None, limit_users: int = 100) -> dict[str, int | None]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.generate_notifications", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def generate_notifications(self=None, tenant_id: int | None = None, limit_users: int = 100) -> dict[str, int | None]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_generate_notifications(tenant_id=tenant_id, limit_users=limit_users))
@@ -532,8 +677,9 @@ async def _run_decay_skill_vectors(tenant_id: int | None = None, inactive_days: 
     return {"decayed": total_decayed, "tenant_id": None}
 
 
-@celery_app.task(name="jobs.decay_skill_vectors", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def decay_skill_vectors(tenant_id: int | None = None, inactive_days: int = 21) -> dict[str, int | None]:
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.decay_skill_vectors", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def decay_skill_vectors(self=None, tenant_id: int | None = None, inactive_days: int = 21) -> dict[str, int | None]:
+    _ = self
     try:
         result = _run_async(_run_decay_skill_vectors(tenant_id=tenant_id, inactive_days=inactive_days))
         logger.info("decay_skill_vectors completed", extra=result)
@@ -551,8 +697,9 @@ async def _run_process_outbox_events(limit: int = 100) -> dict[str, int]:
     return await _run_global_super_admin_job(reason="process_outbox_events", operation=_operation)
 
 
-@celery_app.task(name="jobs.process_outbox_events")
-def process_outbox_events(limit: int = 100) -> dict[str, int]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.process_outbox_events")
+def process_outbox_events(self=None, limit: int = 100) -> dict[str, int]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_process_outbox_events(limit=limit))
@@ -572,8 +719,9 @@ async def _run_cleanup_outbox_events() -> dict[str, int]:
     )
 
 
-@celery_app.task(name="jobs.cleanup_outbox_events")
-def cleanup_outbox_events() -> dict[str, int]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.cleanup_outbox_events")
+def cleanup_outbox_events(self=None) -> dict[str, int]:
+    _ = self
     try:
         result = _run_async(_run_cleanup_outbox_events())
         logger.info("cleanup_outbox_events completed", extra=result)
@@ -591,8 +739,9 @@ async def _run_refresh_outbox_metrics() -> dict[str, str]:
     return await _run_global_super_admin_job(reason="refresh_outbox_metrics", operation=_operation)
 
 
-@celery_app.task(name="jobs.refresh_outbox_metrics")
-def refresh_outbox_metrics() -> dict[str, str]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.refresh_outbox_metrics")
+def refresh_outbox_metrics(self=None) -> dict[str, str]:
+    _ = self
     try:
         result = _run_async(_run_refresh_outbox_metrics())
         logger.info("refresh_outbox_metrics completed")
@@ -610,8 +759,9 @@ async def _run_recover_stuck_outbox_events(limit: int = 500) -> dict[str, int]:
     return await _run_global_super_admin_job(reason="recover_stuck_outbox_events", operation=_operation)
 
 
-@celery_app.task(name="jobs.recover_stuck_outbox_events")
-def recover_stuck_outbox_events(limit: int = 500) -> dict[str, int]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.recover_stuck_outbox_events")
+def recover_stuck_outbox_events(self=None, limit: int = 500) -> dict[str, int]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_recover_stuck_outbox_events(limit=limit))
@@ -649,14 +799,18 @@ async def _run_refresh_precomputed_analytics(tenant_id: int | None = None, limit
     return {"refreshed_tenants": refreshed_tenants, "tenant_id": tenant_id}
 
 
-async def _run_refresh_active_user_analytics(limit_users: int = 50, tenant_limit: int = 25) -> dict[str, int]:
-    tenant_ids = await _list_student_tenant_ids(limit=tenant_limit)
+async def _run_refresh_active_tenant_analytics(
+    limit_users: int = 50,
+    tenant_limit: int = 25,
+    active_within_minutes: int = 5,
+) -> dict[str, int]:
+    tenant_ids = await _list_active_tenant_ids(limit=tenant_limit, active_within_minutes=active_within_minutes)
     refreshed_tenants = 0
     refreshed_users = 0
     for tenant_id in tenant_ids:
         async with open_tenant_session(tenant_id=tenant_id, role="system") as session:
             service = PrecomputedAnalyticsService(session)
-            batch_result = await service.refresh_priority_user_batch(
+            batch_result = await service.refresh_scheduled_tenant_projections(
                 tenant_id=tenant_id,
                 limit_users=limit_users,
             )
@@ -669,8 +823,9 @@ async def _run_refresh_active_user_analytics(limit_users: int = 50, tenant_limit
     }
 
 
-@celery_app.task(name="jobs.refresh_precomputed_analytics", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def refresh_precomputed_analytics(tenant_id: int | None = None, limit_users: int = 250) -> dict[str, int | None]:
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_precomputed_analytics", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_precomputed_analytics(self=None, tenant_id: int | None = None, limit_users: int = 250) -> dict[str, int | None]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_refresh_precomputed_analytics(tenant_id=tenant_id, limit_users=limit_users))
@@ -683,19 +838,35 @@ def refresh_precomputed_analytics(tenant_id: int | None = None, limit_users: int
         raise exc
 
 
-@celery_app.task(name="jobs.refresh_active_user_analytics", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def refresh_active_user_analytics(limit_users: int = 50, tenant_limit: int = 25) -> dict[str, int]:
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_active_tenant_analytics", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_active_tenant_analytics(
+    self=None,
+    limit_users: int = 50,
+    tenant_limit: int = 25,
+    active_within_minutes: int = 5,
+) -> dict[str, int]:
+    _ = self
     started_at = time.perf_counter()
     try:
-        result = _run_async(_run_refresh_active_user_analytics(limit_users=limit_users, tenant_limit=tenant_limit))
-        _record_task_duration("jobs.refresh_active_user_analytics", "success", started_at)
-        logger.info("refresh_active_user_analytics completed", extra=result)
+        result = _run_async(
+            _run_refresh_active_tenant_analytics(
+                limit_users=limit_users,
+                tenant_limit=tenant_limit,
+                active_within_minutes=active_within_minutes,
+            )
+        )
+        _record_task_duration("jobs.refresh_active_tenant_analytics", "success", started_at)
+        logger.info("refresh_active_tenant_analytics completed", extra=result)
         return result
     except Exception as exc:  # pragma: no cover
-        _record_task_duration("jobs.refresh_active_user_analytics", "failed", started_at)
+        _record_task_duration("jobs.refresh_active_tenant_analytics", "failed", started_at)
         logger.exception(
-            "refresh_active_user_analytics failed",
-            extra={"limit_users": limit_users, "tenant_limit": tenant_limit},
+            "refresh_active_tenant_analytics failed",
+            extra={
+                "limit_users": limit_users,
+                "tenant_limit": tenant_limit,
+                "active_within_minutes": active_within_minutes,
+            },
         )
         raise exc
 
@@ -719,8 +890,87 @@ async def _run_refresh_user_projection(tenant_id: int, user_id: int, projection_
         }
 
 
-@celery_app.task(name="jobs.refresh_user_projection", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def refresh_user_projection(tenant_id: int, user_id: int, projection_type: str) -> dict[str, int | str]:
+async def _run_refresh_roadmap_progress_summary(tenant_id: int) -> dict[str, int | str]:
+    async with open_tenant_session(tenant_id=tenant_id, role="system") as session:
+        analytics_service = AnalyticsService(session)
+        learners = await analytics_service._roadmap_progress_rows(tenant_id=tenant_id)
+        total = len(learners)
+        average_completion_percent = round(sum(int(item["completion_percent"]) for item in learners) / max(total, 1)) if learners else 0
+        average_mastery_percent = round(sum(int(item["mastery_percent"]) for item in learners) / max(total, 1)) if learners else 0
+        payload = {
+            "tenant_id": tenant_id,
+            "student_count": total,
+            "average_completion_percent": int(average_completion_percent),
+            "average_mastery_percent": int(average_mastery_percent),
+            "learners": learners,
+        }
+        await AnalyticsSnapshotService(session).write_snapshot(tenant_id, "roadmap_progress_summary", payload)
+        return {"status": "processed", "tenant_id": tenant_id, "snapshot": "roadmap_progress_summary"}
+
+
+async def _run_refresh_learner_intelligence_overview(tenant_id: int, user_id: int) -> dict[str, int | str]:
+    async with open_tenant_session(tenant_id=tenant_id, role="system", actor_user_id=user_id) as session:
+        payload = await SkillVectorService(session).aggregated_feature_payload(tenant_id=tenant_id, user_id=user_id)
+        await AnalyticsSnapshotService(session).write_snapshot(
+            tenant_id,
+            "learner_intelligence_overview",
+            {"tenant_id": tenant_id, "user_id": user_id, **payload},
+            subject_id=user_id,
+        )
+        return {"status": "processed", "tenant_id": tenant_id, "user_id": user_id, "snapshot": "learner_intelligence_overview"}
+
+
+async def _run_refresh_learning_trends(tenant_id: int) -> dict[str, int | str]:
+    async with open_tenant_session(tenant_id=tenant_id, role="system") as session:
+        payload = await SkillVectorService(session).learning_trends(tenant_id=tenant_id)
+        await AnalyticsSnapshotService(session).write_snapshot(
+            tenant_id,
+            "learning_trends",
+            {"tenant_id": tenant_id, "points": payload},
+        )
+        return {"status": "processed", "tenant_id": tenant_id, "snapshot": "learning_trends", "point_count": len(payload)}
+
+
+async def _run_refresh_retention_summary(tenant_id: int) -> dict[str, int | str]:
+    async with open_tenant_session(tenant_id=tenant_id, role="system") as session:
+        payload = await RetentionService(session).tenant_retention_summary(tenant_id=tenant_id)
+        await AnalyticsSnapshotService(session).write_snapshot(tenant_id, "tenant_retention_summary", payload)
+        return {"status": "processed", "tenant_id": tenant_id, "snapshot": "tenant_retention_summary"}
+
+
+async def _run_rebuild_snapshot(tenant_id: int, snapshot_type: str) -> dict[str, int | str]:
+    """
+    1. Fetch raw data
+    2. Compute analytics
+    3. Store using write_snapshot()
+    """
+    normalized = normalize_snapshot_type(snapshot_type)
+    if normalized == INSTITUTION_DASHBOARD_SNAPSHOT:
+        async with open_tenant_session(tenant_id=tenant_id, role="system") as session:
+            payload = await PrecomputedAnalyticsService(session).refresh_tenant_dashboard(tenant_id=tenant_id)
+            await session.commit()
+            return {"status": "processed", "tenant_id": tenant_id, "snapshot": normalized, "subject_id": 0}
+    if normalized == TEACHER_DASHBOARD_SNAPSHOT:
+        return await _run_refresh_roadmap_progress_summary(tenant_id)
+    if normalized == USER_DASHBOARD_SNAPSHOT:
+        raise ValueError("user_dashboard rebuild requires a user-scoped refresh task")
+    if normalized == "roadmap_progress_summary":
+        return await _run_refresh_roadmap_progress_summary(tenant_id)
+    if normalized == "learning_trends":
+        return await _run_refresh_learning_trends(tenant_id)
+    if normalized == "tenant_retention_summary":
+        return await _run_refresh_retention_summary(tenant_id)
+    if normalized == SYSTEM_SUMMARY_SNAPSHOT:
+        async with open_super_admin_session(reason="rebuild_system_summary_snapshot") as session:
+            payload = await PrecomputedAnalyticsService(session).refresh_platform_overview()
+            await session.commit()
+            return {"status": "processed", "tenant_id": tenant_id, "snapshot": normalized, "subject_id": 0}
+    raise ValueError(f"Unsupported snapshot_type: {snapshot_type}")
+
+
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_user_projection", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_user_projection(self=None, tenant_id: int = 0, user_id: int = 0, projection_type: str = "") -> dict[str, int | str]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_refresh_user_projection(tenant_id=tenant_id, user_id=user_id, projection_type=projection_type))
@@ -736,6 +986,50 @@ def refresh_user_projection(tenant_id: int, user_id: int, projection_type: str) 
         raise exc
 
 
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_roadmap_progress_summary", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_roadmap_progress_summary(self=None, tenant_id: int = 0) -> dict[str, int | str]:
+    _ = self
+    return _run_async(_run_refresh_roadmap_progress_summary(tenant_id=tenant_id))
+
+
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_learner_intelligence_overview", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_learner_intelligence_overview(self=None, tenant_id: int = 0, user_id: int = 0) -> dict[str, int | str]:
+    _ = self
+    return _run_async(_run_refresh_learner_intelligence_overview(tenant_id=tenant_id, user_id=user_id))
+
+
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_learning_trends", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_learning_trends(self=None, tenant_id: int = 0) -> dict[str, int | str]:
+    _ = self
+    return _run_async(_run_refresh_learning_trends(tenant_id=tenant_id))
+
+
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_retention_summary", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def refresh_retention_summary(self=None, tenant_id: int = 0) -> dict[str, int | str]:
+    _ = self
+    return _run_async(_run_refresh_retention_summary(tenant_id=tenant_id))
+
+
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.rebuild_snapshot", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def rebuild_snapshot(
+    self=None,
+    tenant_id: int = 0,
+    snapshot_type: str = "",
+    dispatch_lock_key: str | None = None,
+    dispatch_lock_token: str | None = None,
+) -> dict[str, int | str]:
+    _ = self
+    try:
+        result = _run_async(_run_rebuild_snapshot(tenant_id=tenant_id, snapshot_type=snapshot_type))
+        _run_async(_release_dispatch_lock(lock_key=dispatch_lock_key, lock_token=dispatch_lock_token))
+        _run_async(_release_tenant_job_counter(tenant_id=tenant_id))
+        return result
+    except Exception:
+        _run_async(_release_dispatch_lock(lock_key=dispatch_lock_key, lock_token=dispatch_lock_token))
+        _run_async(_release_tenant_job_counter(tenant_id=tenant_id))
+        raise
+
+
 async def _run_refresh_student_analytics(tenant_id: int, user_id: int) -> dict[str, int | str]:
     async with open_tenant_session(tenant_id=tenant_id, role="system", actor_user_id=user_id) as session:
         payload = await PrecomputedAnalyticsService(session).refresh_student_performance_analytics(
@@ -746,14 +1040,16 @@ async def _run_refresh_student_analytics(tenant_id: int, user_id: int) -> dict[s
         return {"status": "processed", "tenant_id": tenant_id, "user_id": user_id, "snapshot": "student_performance_analytics"}
 
 
-@celery_app.task(name="jobs.refresh_student_analytics")
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_student_analytics")
 def refresh_student_analytics(
-    tenant_id: int,
-    user_id: int,
+    self=None,
+    tenant_id: int = 0,
+    user_id: int = 0,
     delivery_attempt: int = 1,
     dispatch_lock_key: str | None = None,
     dispatch_lock_token: str | None = None,
 ) -> dict[str, int | str]:
+    _ = self
     started_at = time.perf_counter()
     job_name = "jobs.refresh_student_analytics"
     try:
@@ -839,14 +1135,16 @@ async def _run_refresh_topic_analytics(tenant_id: int, topic_id: int) -> dict[st
         return {"status": "processed", "tenant_id": tenant_id, "topic_id": topic_id, "snapshot": "topic_performance_analytics"}
 
 
-@celery_app.task(name="jobs.refresh_topic_analytics")
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.refresh_topic_analytics")
 def refresh_topic_analytics(
-    tenant_id: int,
-    topic_id: int,
+    self=None,
+    tenant_id: int = 0,
+    topic_id: int = 0,
     delivery_attempt: int = 1,
     dispatch_lock_key: str | None = None,
     dispatch_lock_token: str | None = None,
 ) -> dict[str, int | str]:
+    _ = self
     started_at = time.perf_counter()
     job_name = "jobs.refresh_topic_analytics"
     try:
@@ -927,8 +1225,9 @@ async def _run_process_notification_event(notification_id: int, tenant_id: int) 
         return {"status": "processed", "notification_id": notification_id, "tenant_id": int(notification.tenant_id)}
 
 
-@celery_app.task(name="jobs.process_notification_event", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def process_notification_event(notification_id: int, tenant_id: int, outbox_idempotency_key: str | None = None) -> dict[str, int | str]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.process_notification_event", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def process_notification_event(self=None, notification_id: int = 0, tenant_id: int = 0, outbox_idempotency_key: str | None = None) -> dict[str, int | str]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_process_notification_event(notification_id, tenant_id))
@@ -956,8 +1255,9 @@ async def _run_process_analytics_event(tenant_id: int, snapshot_type: str, subje
     return {"status": "processed", "tenant_id": tenant_id, "snapshot_type": snapshot_type, "subject_id": subject_id}
 
 
-@celery_app.task(name="jobs.process_analytics_event", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def process_analytics_event(tenant_id: int, snapshot_type: str, subject_id: int | None = None, outbox_idempotency_key: str | None = None) -> dict[str, int | str | None]:
+@_task(queue=ANALYTICS_QUEUE, bind=True, name="jobs.process_analytics_event", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def process_analytics_event(self=None, tenant_id: int = 0, snapshot_type: str = "", subject_id: int | None = None, outbox_idempotency_key: str | None = None) -> dict[str, int | str | None]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_process_analytics_event(tenant_id=tenant_id, snapshot_type=snapshot_type, subject_id=subject_id))
@@ -1059,8 +1359,10 @@ async def _run_process_domain_event(envelope: dict[str, Any], delivery_attempt: 
             }
 
 
-@celery_app.task(name="jobs.process_domain_event")
-def process_domain_event(envelope: dict[str, Any], delivery_attempt: int = 1, outbox_idempotency_key: str | None = None) -> dict[str, Any]:
+@_task(queue=CRITICAL_QUEUE, bind=True, name="jobs.process_domain_event")
+def process_domain_event(self=None, envelope: dict[str, Any] | None = None, delivery_attempt: int = 1, outbox_idempotency_key: str | None = None) -> dict[str, Any]:
+    _ = self
+    envelope = envelope or {}
     started_at = time.perf_counter()
     result = _run_async(
         _run_process_domain_event(
@@ -1122,8 +1424,9 @@ async def _run_consume_kafka_events(limit: int = 100) -> dict[str, int]:
     )
 
 
-@celery_app.task(name="jobs.consume_kafka_events", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def consume_kafka_events(limit: int = 100) -> dict[str, int]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.consume_kafka_events", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def consume_kafka_events(self=None, limit: int = 100) -> dict[str, int]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_consume_kafka_events(limit=limit))
@@ -1148,8 +1451,9 @@ async def _run_replay_kafka_topic(topic: str, partition: int, offset: int, limit
     )
 
 
-@celery_app.task(name="jobs.replay_kafka_topic", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
-def replay_kafka_topic(topic: str, partition: int, offset: int, limit: int = 100) -> dict[str, int]:
+@_task(queue=OPS_QUEUE, bind=True, name="jobs.replay_kafka_topic", autoretry_for=(Exception,), retry_backoff=True, retry_kwargs={"max_retries": 3})
+def replay_kafka_topic(self=None, topic: str = "", partition: int = 0, offset: int = 0, limit: int = 100) -> dict[str, int]:
+    _ = self
     started_at = time.perf_counter()
     try:
         result = _run_async(_run_replay_kafka_topic(topic=topic, partition=partition, offset=offset, limit=limit))

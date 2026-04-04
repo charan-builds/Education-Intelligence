@@ -98,25 +98,29 @@ python seed.py
 
 Seeded credentials:
 - platform tenant: `Platform`
-- super admin: `superadmin@platform.example.com` / `SuperAdmin123!`
+- super admin: `superadmin@platform.learnova.ai` / `SuperAdmin123!`
 - tenant: `Demo University`
-- tenant_id: `1`
-- student panel: `student@example.com` / `Student123!`
-- teacher panel: `teacher@example.com` / `Teacher123!`
-- mentor panel: `mentor@example.com` / `Mentor123!`
-- admin panel: `admin@example.com` / `admin123`
+- tenant_id: `2`
+- student panel: `maya.chen@demo.learnova.ai` / `Student123!`
+- teacher panel: `teacher@demo.learnova.ai` / `Teacher123!`
+- mentor panel: `mentor@demo.learnova.ai` / `Mentor123!`
+- admin panel: `admin@demo.learnova.ai` / `admin123`
 
 Additional demo tenant users:
-- tenant: `Northwind School`
-  - student: `student@northwind.local` / `Student123!`
-  - teacher: `teacher@northwind.local` / `Teacher123!`
-  - mentor: `mentor@northwind.local` / `Mentor123!`
-  - admin: `admin@northwind.local` / `admin123`
+- tenant: `Northwind Academy`
+  - student: `ethan.cole@northwind.learnova.ai` / `Student123!`
+  - teacher: `teacher@northwind.learnova.ai` / `Teacher123!`
+  - mentor: `mentor@northwind.learnova.ai` / `Mentor123!`
+  - admin: `admin@northwind.learnova.ai` / `admin123`
 - tenant: `Acme Learning Co`
-  - student: `student@acme.local` / `Student123!`
-  - teacher: `teacher@acme.local` / `Teacher123!`
-  - mentor: `mentor@acme.local` / `Mentor123!`
-  - admin: `admin@acme.local` / `admin123`
+  - student: `noah.brooks@acme.learnova.ai` / `Student123!`
+  - teacher: `teacher@acme.learnova.ai` / `Teacher123!`
+  - mentor: `mentor@acme.learnova.ai` / `Mentor123!`
+  - admin: `admin@acme.learnova.ai` / `admin123`
+- tenant: `Ava Martinez Workspace`
+  - independent learner: `ava.martinez@workspace.learnova.ai` / `Student123!`
+- tenant: `Leo Kim Workspace`
+  - independent learner: `leo.kim@workspace.learnova.ai` / `Student123!`
 
 ## Docker (API + Gateway + DB + Redis + Worker)
 ```bash
@@ -155,11 +159,7 @@ Notes:
 - Automatic startup seeding is disabled by default in Docker; set `RUN_SEED_ON_STARTUP=true` only for intentional demo/bootstrap environments.
 - Compose binds Postgres to `127.0.0.1:5433` and Redis to `127.0.0.1:6380` by default to avoid conflicts with local developer services. Override with `POSTGRES_HOST_PORT` or `REDIS_HOST_PORT` if needed.
 - `docker compose up` credentials from `scripts/bootstrap_seed.py`:
-  - `superadmin@platform.example.com` / `SuperAdmin123!`
-  - `admin@platform.example.com` / `Admin123!`
-  - `teacher@platform.example.com` / `Teacher123!`
-  - `mentor@platform.example.com` / `Mentor123!`
-  - `student@platform.example.com` / `Student123!`
+  - `superadmin@platform.learnova.ai` / `SuperAdmin123!`
 - Nginx config includes gzip, request rate limiting, forwarded headers, and SSL-ready template config.
 - `./logs` is mounted into API and Celery containers so rotating audit/application logs persist outside container restarts.
 - Prometheus: `http://localhost:9090`

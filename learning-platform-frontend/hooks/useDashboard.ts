@@ -28,6 +28,7 @@ import { getQuestions, getTopics } from "@/services/topicService";
 import { getUsers } from "@/services/userService";
 import { useAuth } from "@/hooks/useAuth";
 import { useTenantScope } from "@/hooks/useTenantScope";
+import { formatTenantTypeLabel } from "@/utils/tenantLabels";
 
 export function normalizeRoadmapStatus(status: string): "completed" | "in_progress" | "pending" {
   const normalized = status.toLowerCase();
@@ -460,6 +461,8 @@ export function useSuperAdminDashboard() {
       kpis: {
         totalTenants: platformOverview?.tenant_count ?? tenants.length,
         totalLearners: platformOverview?.student_count ?? 0,
+        institutionTenants: (byType.college ?? 0) + (byType.school ?? 0) + (byType.company ?? 0),
+        personalWorkspaces: byType.personal ?? 0,
         averageCompletion: platformOverview?.average_completion_percent ?? 0,
         averageMastery: platformOverview?.average_mastery_percent ?? 0,
         deadOutbox: outboxStatsQuery.data?.dead ?? 0,
@@ -477,7 +480,7 @@ export function useSuperAdminDashboard() {
             label: tenant.name.slice(0, 10),
             progress: index + 1,
           })),
-        tenantPie: Object.entries(byType).map(([name, value]) => ({ name, value })),
+        tenantPie: Object.entries(byType).map(([name, value]) => ({ name: formatTenantTypeLabel(name), value })),
         masteryPie: [
           {
             name: "Mastered",

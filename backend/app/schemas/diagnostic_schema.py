@@ -81,6 +81,9 @@ class DiagnosticSubmitResponse(DiagnosticStartResponse):
 class DiagnosticResultResponse(BaseModel):
     test_id: int
     topic_scores: dict[int, float]
+    weak_topic_ids: list[int] = []
+    foundation_gap_topic_ids: list[int] = []
+    recommendation_levels: dict[int, str] = {}
     roadmap: RoadmapResponse | None = None
 
 

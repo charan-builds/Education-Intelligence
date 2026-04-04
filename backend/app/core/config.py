@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     event_consumer_retry_base_delay_seconds: int = 30
     analytics_rebuild_max_attempts: int = 4
     analytics_rebuild_retry_base_delay_seconds: int = 30
+    analytics_snapshot_versions_to_keep: int = 5
     realtime_instance_id: str = uuid4().hex
     realtime_pubsub_channel_prefix: str = "realtime"
     realtime_presence_ttl_seconds: int = 60

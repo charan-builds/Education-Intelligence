@@ -23,11 +23,11 @@ class Account:
     tenant_id: int
 
 
-STUDENT = Account("student", "student@example.com", "Student123!", 2)
-TEACHER = Account("teacher", "teacher@example.com", "Teacher123!", 2)
-MENTOR = Account("mentor", "mentor@example.com", "Mentor123!", 2)
-ADMIN = Account("admin", "admin@example.com", "admin123", 2)
-SUPER_ADMIN = Account("super_admin", "superadmin@platform.example.com", "SuperAdmin123!", 1)
+STUDENT = Account("student", "maya.chen@demo.learnova.ai", "Student123!", 2)
+TEACHER = Account("teacher", "teacher@demo.learnova.ai", "Teacher123!", 2)
+MENTOR = Account("mentor", "mentor@demo.learnova.ai", "Mentor123!", 2)
+ADMIN = Account("admin", "admin@demo.learnova.ai", "admin123", 2)
+SUPER_ADMIN = Account("super_admin", "superadmin@platform.learnova.ai", "SuperAdmin123!", 1)
 
 
 class SmokeFailure(RuntimeError):

@@ -171,3 +171,56 @@ class CacheService:
             )
             self.redis = None
             return False
+
+    async def increment_counter(self, key: str, *, ttl: int | None = None) -> int:
+        if self.redis is None:
+            return 0
+        try:
+            value = int(await self.redis.incr(key))
+            if ttl is not None and value == 1:
+                await self.redis.expire(key, ttl)
+            cache_operations_total.labels(operation="counter_increment", result="ok").inc()
+            return value
+        except Exception as exc:  # fail open
+            cache_operations_total.labels(operation="counter_increment", result="error").inc()
+            self.logger.warning(
+                "cache counter increment failed",
+                extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
+            )
+            self.redis = None
+            return 0
+
+    async def decrement_counter(self, key: str) -> int:
+        if self.redis is None:
+            return 0
+        try:
+            value = int(await self.redis.decr(key))
+            if value <= 0:
+                await self.redis.delete(key)
+                value = 0
+            cache_operations_total.labels(operation="counter_decrement", result="ok").inc()
+            return value
+        except Exception as exc:  # fail open
+            cache_operations_total.labels(operation="counter_decrement", result="error").inc()
+            self.logger.warning(
+                "cache counter decrement failed",
+                extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
+            )
+            self.redis = None
+            return 0
+
+    async def get_counter(self, key: str) -> int:
+        if self.redis is None:
+            return 0
+        try:
+            raw = await self.redis.get(key)
+            cache_operations_total.labels(operation="counter_get", result="ok").inc()
+            return int(raw) if raw is not None else 0
+        except Exception as exc:  # fail open
+            cache_operations_total.labels(operation="counter_get", result="error").inc()
+            self.logger.warning(
+                "cache counter get failed",
+                extra={"log_data": {"cache_key": key, "error_type": type(exc).__name__}},
+            )
+            self.redis = None
+            return 0

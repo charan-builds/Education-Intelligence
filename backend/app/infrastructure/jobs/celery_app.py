@@ -2,6 +2,7 @@ import time
 
 from celery import Celery
 from celery.signals import before_task_publish, task_failure, task_postrun, task_prerun, task_retry
+from kombu import Exchange, Queue
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -9,6 +10,24 @@ from app.core.metrics import queue_wait_duration_seconds, task_retries_total
 
 settings = get_settings()
 logger = get_logger()
+
+CELERY_TASK_QUEUES = (
+    Queue("critical", Exchange("critical"), routing_key="critical.#"),
+    Queue("analytics", Exchange("analytics"), routing_key="analytics.#"),
+    Queue("ai", Exchange("ai"), routing_key="ai.#"),
+    Queue("ops", Exchange("ops"), routing_key="ops.#"),
+)
+
+CELERY_TASK_DEFAULT_QUEUE = "critical"
+
+CELERY_TASK_ROUTES = {
+    "app.application.services.diagnostic_service.*": {"queue": "critical"},
+    "app.application.services.roadmap_service.*": {"queue": "critical"},
+    "app.application.services.precomputed_analytics_service.*": {"queue": "analytics"},
+    "app.application.services.ai_execution_service.*": {"queue": "ai"},
+    "app.application.services.mentor_ai_service.*": {"queue": "ai"},
+    "app.infrastructure.jobs.tasks.*": {"queue": "ops"},
+}
 
 celery_app = Celery(
     "learning_platform",
@@ -30,6 +49,9 @@ celery_app.conf.update(
     task_time_limit=300,
     task_soft_time_limit=240,
     result_expires=3600,
+    task_queues=CELERY_TASK_QUEUES,
+    task_default_queue=CELERY_TASK_DEFAULT_QUEUE,
+    task_routes=CELERY_TASK_ROUTES,
     beat_schedule={
         "process-outbox-events-every-minute": {
             "task": "jobs.process_outbox_events",
@@ -64,15 +86,17 @@ celery_app.conf.update(
             "schedule": 86400.0,
             "kwargs": {"inactive_days": 21},
         },
-        "refresh-precomputed-analytics-every-5m": {
-            "task": "jobs.refresh_precomputed_analytics",
+        "refresh-active-tenant-analytics-every-5m": {
+            "task": "jobs.refresh_active_tenant_analytics",
             "schedule": 300.0,
-            "kwargs": {"limit_users": 250},
+            "kwargs": {"limit_users": 50, "tenant_limit": 25, "active_within_minutes": 5},
+            "options": {"queue": "analytics"},
         },
-        "refresh-active-user-analytics-every-5m": {
-            "task": "jobs.refresh_active_user_analytics",
-            "schedule": 300.0,
-            "kwargs": {"limit_users": 50, "tenant_limit": 25},
+        "refresh-precomputed-analytics-hourly": {
+            "task": "jobs.refresh_precomputed_analytics",
+            "schedule": 3600.0,
+            "kwargs": {"limit_users": 250},
+            "options": {"queue": "analytics", "priority": 1},
         },
     },
 )
