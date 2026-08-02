@@ -19,6 +19,11 @@ class RuleEngine(RecommendationEngine):
     ) -> list[int]:
         classifications = {topic_id: self.classify_topic(score) for topic_id, score in topic_scores.items()}
         weak_topics = [topic_id for topic_id, level in classifications.items() if level != "mastered"]
+        bias = str((learning_profile or {}).get("recommendation_bias", "foundations_first"))
+        if bias == "goal_accelerated":
+            weak_topics = sorted(weak_topics, key=lambda topic_id: topic_scores.get(topic_id, 0.0), reverse=True)
+        elif bias == "concept_first":
+            weak_topics = sorted(weak_topics, key=lambda topic_id: topic_scores.get(topic_id, 0.0))
 
         tracer = PrerequisiteTracer(prerequisite_edges)
         ordered: list[int] = []

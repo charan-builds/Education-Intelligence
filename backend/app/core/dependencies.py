@@ -100,8 +100,6 @@ async def require_email_verified(current_user=Depends(get_current_user)) -> Auth
 async def require_profile_completed(current_user=Depends(require_email_verified)) -> AuthContext:
     if not bool(getattr(current_user.user, "is_profile_completed", False)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Profile incomplete")
-    if getattr(current_user, "token_scope", TOKEN_SCOPE_FULL_ACCESS) != TOKEN_SCOPE_FULL_ACCESS:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Full access required")
     return current_user
 
 

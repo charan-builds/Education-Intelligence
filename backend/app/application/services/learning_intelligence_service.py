@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.exceptions import NotFoundError
 from app.application.services.analytics_service import AnalyticsService
 from app.application.services.cognitive_modeling_service import CognitiveModelingService
+from app.application.services.learning_profile_service import LearningProfileService
 from app.application.services.retention_service import RetentionService
 from app.domain.engines.learning_profile_engine import LearningProfileEngine
 from app.domain.engines.predictive_intelligence_engine import PredictiveIntelligenceEngine
@@ -39,6 +40,7 @@ class LearningIntelligenceService:
         self.analytics_service = AnalyticsService(session)
         self.retention_service = RetentionService(session)
         self.learning_profile_engine = LearningProfileEngine()
+        self.learning_profile_service = LearningProfileService(session)
         self.cognitive_modeling_service = CognitiveModelingService()
         self.predictive_engine = PredictiveIntelligenceEngine()
         self.weakness_engine = WeaknessModelingEngine()
@@ -196,12 +198,14 @@ class LearningIntelligenceService:
             "risk_prediction": risk_prediction,
             "weakness_clusters": weakness_analysis["weakness_clusters"],
             "learning_profile": {
-                "profile_type": profile.profile_type,
+                "profile_type": stored_learning_profile.get("profile_type", profile.profile_type),
                 "confidence": profile.confidence,
-                "speed": profile.speed,
+                "speed": stored_learning_profile.get("learning_speed", profile.speed),
                 "accuracy": profile.accuracy,
                 "consistency": profile.consistency,
                 "stamina": profile.stamina,
+                "difficulty_preference": stored_learning_profile.get("difficulty_preference", "moderate"),
+                "recommendation_bias": stored_learning_profile.get("recommendation_bias", "foundations_first"),
             },
         }
 
@@ -577,3 +581,4 @@ class LearningIntelligenceService:
             "best_answers": sum(1 for reply in replies if bool(reply.is_best_answer)),
             "ai_assisted_answers": sum(1 for reply in replies if bool(reply.is_ai_assisted)),
         }
+        stored_learning_profile = await self.learning_profile_service.get_for_user(user_id=user_id, tenant_id=tenant_id)

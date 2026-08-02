@@ -1,36 +1,87 @@
+from __future__ import annotations
+
+import itertools
 import os
 import random
 from collections.abc import Sequence
 
 from locust import HttpUser, between, task
+from locust.exception import StopUser
 
 
 TENANT_ID = int(os.getenv("LOAD_TEST_TENANT_ID", "2"))
-STUDENT_CREDENTIALS: Sequence[tuple[str, str]] = (
+QUESTION_COUNT = int(os.getenv("LOAD_TEST_QUESTION_COUNT", "20"))
+START_USER_COUNT = int(os.getenv("LOAD_TEST_START_USERS", "100"))
+SUBMIT_USER_COUNT = int(os.getenv("LOAD_TEST_SUBMIT_USERS", "100"))
+DEFAULT_WAIT_MIN_SECONDS = float(os.getenv("LOAD_TEST_WAIT_MIN_SECONDS", "0.25"))
+DEFAULT_WAIT_MAX_SECONDS = float(os.getenv("LOAD_TEST_WAIT_MAX_SECONDS", "1.25"))
+
+DEFAULT_STUDENT_CREDENTIALS: Sequence[tuple[str, str]] = (
     ("maya.chen@demo.learnova.ai", "Student123!"),
     ("jordan.rivera@demo.learnova.ai", "Student123!"),
     ("aisha.patel@demo.learnova.ai", "Student123!"),
 )
-MENTOR_CREDENTIALS = (os.getenv("LOAD_TEST_MENTOR_EMAIL", "mentor@demo.learnova.ai"), os.getenv("LOAD_TEST_MENTOR_PASSWORD", "Mentor123!"))
-TEACHER_CREDENTIALS = (os.getenv("LOAD_TEST_TEACHER_EMAIL", "teacher@demo.learnova.ai"), os.getenv("LOAD_TEST_TEACHER_PASSWORD", "Teacher123!"))
 
 
-class AuthenticatedUser(HttpUser):
-    wait_time = between(1, 3)
+def _student_credentials() -> list[tuple[str, str]]:
+    raw_credentials = os.getenv("LOAD_TEST_STUDENT_CREDENTIALS", "").strip()
+    if not raw_credentials:
+        return list(DEFAULT_STUDENT_CREDENTIALS)
+
+    credentials: list[tuple[str, str]] = []
+    for raw_item in raw_credentials.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            raise RuntimeError("LOAD_TEST_STUDENT_CREDENTIALS entries must use email:password")
+        email, password = item.split(":", 1)
+        credentials.append((email.strip(), password.strip()))
+    if not credentials:
+        raise RuntimeError("LOAD_TEST_STUDENT_CREDENTIALS did not contain any usable credentials")
+    return credentials
+
+
+STUDENT_CREDENTIALS = _student_credentials()
+_CREDENTIAL_ROTATION = itertools.cycle(STUDENT_CREDENTIALS)
+
+
+def _answer_for_question(question: dict) -> str:
+    options = question.get("options") or question.get("answer_options") or []
+    if options:
+        preferred = options[1] if len(options) > 1 else options[0]
+        if isinstance(preferred, dict):
+            return str(
+                preferred.get("text")
+                or preferred.get("option_text")
+                or preferred.get("label")
+                or preferred.get("value")
+                or preferred.get("key")
+                or "A"
+            )
+        return str(preferred)
+    return random.choice(("A", "B", "C", "practice", "benchmark"))
+
+
+class DiagnosticLoadUser(HttpUser):
     abstract = True
+    wait_time = between(DEFAULT_WAIT_MIN_SECONDS, DEFAULT_WAIT_MAX_SECONDS)
 
-    credentials: tuple[str, str] | None = None
-
-    def on_start(self):
-        if self.credentials is None:
-            raise RuntimeError("credentials must be configured")
+    def on_start(self) -> None:
+        self.auth_headers: dict[str, str] = {}
         self.csrf_headers: dict[str, str] = {}
-        self.current_user_id: int | None = None
-        self.goal_id: int | None = None
-        self.current_test_id: int | None = None
-        self._login(*self.credentials)
+        self.goal_id = int(os.getenv("LOAD_TEST_GOAL_ID", "0")) or None
+        email, password = next(_CREDENTIAL_ROTATION)
+        self._login(email=email, password=password)
+        self._ensure_goal()
 
-    def _login(self, email: str, password: str) -> None:
+    def _headers(self, *, unsafe: bool = False) -> dict[str, str]:
+        headers = dict(self.auth_headers)
+        if unsafe:
+            headers.update(self.csrf_headers)
+        return headers
+
+    def _login(self, *, email: str, password: str) -> None:
         with self.client.post(
             "/auth/login",
             json={"email": email, "password": password, "tenant_id": TENANT_ID},
@@ -39,158 +90,94 @@ class AuthenticatedUser(HttpUser):
         ) as response:
             if response.status_code != 200:
                 response.failure(f"login failed: {response.status_code}")
-                return
+                raise StopUser()
             payload = response.json()
-            self.current_user_id = int(payload["user"]["id"])
+            access_token = payload.get("access_token")
+            if access_token:
+                self.auth_headers = {"Authorization": f"Bearer {access_token}"}
             csrf = self.client.cookies.get("csrf_token")
             self.csrf_headers = {"X-CSRF-Token": csrf} if csrf else {}
 
-    def _ensure_goal(self) -> int | None:
+    def _ensure_goal(self) -> int:
         if self.goal_id is not None:
             return self.goal_id
-        with self.client.get("/goals?limit=5&offset=0", name="/goals", catch_response=True) as response:
+        with self.client.get(
+            "/goals?limit=5&offset=0",
+            headers=self._headers(),
+            name="/goals",
+            catch_response=True,
+        ) as response:
             if response.status_code != 200:
                 response.failure(f"goals failed: {response.status_code}")
-                return None
+                raise StopUser()
             items = response.json().get("items") or []
             if not items:
                 response.failure("no goals available")
-                return None
+                raise StopUser()
             self.goal_id = int(items[0]["id"])
             return self.goal_id
 
-
-class StudentJourneyUser(AuthenticatedUser):
-    weight = 5
-
-    def on_start(self):
-        self.credentials = random.choice(STUDENT_CREDENTIALS)
-        super().on_start()
-        self._ensure_goal()
-
-    def _ensure_test(self) -> int | None:
-        goal_id = self._ensure_goal()
-        if goal_id is None:
-            return None
+    def _start_diagnostic(self, *, request_name: str) -> dict | None:
         with self.client.post(
             "/diagnostic/start",
-            json={"goal_id": goal_id},
-            headers=self.csrf_headers,
-            name="/diagnostic/start",
+            json={"goal_id": self._ensure_goal(), "question_count": QUESTION_COUNT},
+            headers=self._headers(unsafe=True),
+            name=request_name,
             catch_response=True,
         ) as response:
             if response.status_code != 200:
                 response.failure(f"diagnostic start failed: {response.status_code}")
                 return None
-            self.current_test_id = int(response.json()["id"])
-            return self.current_test_id
+            payload = response.json()
+            if not payload.get("id"):
+                response.failure("diagnostic start response missing id")
+                return None
+            if "questions" in payload and not payload.get("questions"):
+                response.failure("diagnostic start response returned no questions")
+                return None
+            return payload
 
-    @task(4)
-    def student_reads(self):
-        self.client.get("/analytics/student-insights", name="/analytics/student-insights")
-        if self.current_user_id is not None:
-            self.client.get(
-                f"/roadmap/{self.current_user_id}?limit=5&offset=0",
-                name="/roadmap/{user_id}",
-            )
 
-    @task(2)
-    def student_dashboard(self):
-        self.client.get("/dashboard/student", name="/dashboard/student")
+class StartDiagnosticUser(DiagnosticLoadUser):
+    fixed_count = START_USER_COUNT
 
-    @task(2)
-    def roadmap_generate(self):
-        test_id = self._ensure_test()
-        goal_id = self._ensure_goal()
-        if test_id is None or goal_id is None:
+    @task
+    def start_test(self) -> None:
+        self._start_diagnostic(request_name="/diagnostic/start [100 start users]")
+
+
+class SubmitDiagnosticAnswersUser(DiagnosticLoadUser):
+    fixed_count = SUBMIT_USER_COUNT
+
+    @task
+    def submit_answers(self) -> None:
+        diagnostic = self._start_diagnostic(request_name="/diagnostic/start [submit setup]")
+        if diagnostic is None:
             return
-        with self.client.post(
-            "/roadmap/generate",
-            json={"goal_id": goal_id, "test_id": test_id},
-            headers=self.csrf_headers,
-            name="/roadmap/generate",
-            catch_response=True,
-        ) as response:
-            if response.status_code != 200:
-                response.failure(f"roadmap generate failed: {response.status_code}")
 
-    @task(1)
-    def diagnostic_step(self):
-        test_id = self._ensure_test()
-        if test_id is None:
-            return
-        with self.client.get(
-            f"/diagnostic/next/{test_id}",
-            name="/diagnostic/next/{test_id}",
-            catch_response=True,
-        ) as response:
-            if response.status_code != 200:
-                response.failure(f"diagnostic next failed: {response.status_code}")
-                return
-            if response.text == "null":
-                response.success()
-                self.current_test_id = None
-                return
-            question = response.json()
-        answer_text = random.choice(["A", "B", "C", "benchmark", "practice"])
-        with self.client.post(
-            "/diagnostic/answer",
-            json={
-                "test_id": test_id,
+        questions = diagnostic.get("questions") or []
+        answers = [
+            {
                 "question_id": int(question["id"]),
-                "user_answer": answer_text,
-                "time_taken": random.randint(2, 12),
-            },
-            headers=self.csrf_headers,
-            name="/diagnostic/answer",
-            catch_response=True,
-        ) as response:
-            if response.status_code not in {200, 400, 409, 429}:
-                response.failure(f"diagnostic answer unexpected: {response.status_code}")
+                "selected_answer": _answer_for_question(question),
+                "time_taken": random.uniform(3.0, 18.0),
+            }
+            for question in questions
+            if question.get("id") is not None
+        ]
+        if not answers:
+            return
 
-
-class TeacherAnalyticsUser(AuthenticatedUser):
-    weight = 3
-    credentials = TEACHER_CREDENTIALS
-
-    @task(4)
-    def analytics_overview(self):
-        self.client.get("/analytics/overview", name="/analytics/overview")
-
-    @task(3)
-    def roadmap_progress(self):
-        self.client.get("/analytics/roadmap-progress?limit=10&offset=0", name="/analytics/roadmap-progress")
-
-    @task(2)
-    def weak_topics(self):
-        self.client.get("/analytics/weak-topics", name="/analytics/weak-topics")
-
-    @task(1)
-    def teacher_dashboard(self):
-        self.client.get("/dashboard/teacher", name="/dashboard/teacher")
-
-
-class MentorAdvisoryUser(AuthenticatedUser):
-    weight = 1
-    credentials = MENTOR_CREDENTIALS
-
-    @task(3)
-    def mentor_learners(self):
-        self.client.get("/mentor/learners", name="/mentor/learners")
-
-    @task(2)
-    def mentor_fallback_chat(self):
-        request_id = f"locust-{self.environment.runner.user_count}-{random.randint(1000, 999999)}"
         with self.client.post(
-            "/mentor/chat/fallback",
-            json={
-                "message": "What should this learner focus on next?",
-                "chat_history": [],
-                "request_id": request_id,
-            },
-            headers=self.csrf_headers,
-            name="/mentor/chat/fallback",
+            "/diagnostic/submit",
+            json={"test_id": int(diagnostic["id"]), "answers": answers},
+            headers=self._headers(unsafe=True),
+            name="/diagnostic/submit [100 submit users]",
             catch_response=True,
         ) as response:
-            if response.status_code not in {200, 202, 429}:
-                response.failure(f"mentor fallback unexpected: {response.status_code}")
+            if response.status_code != 200:
+                response.failure(f"diagnostic submit failed: {response.status_code} {response.text[:300]}")
+                return
+            payload = response.json()
+            if int(payload.get("id") or payload.get("test_id") or 0) != int(diagnostic["id"]):
+                response.failure("diagnostic submit response test_id mismatch")

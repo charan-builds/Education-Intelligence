@@ -177,7 +177,6 @@ export default function StudentCareerPage() {
               {interviewMutation.data.questions.map((question, index) => (
                 <div key={`${question.question_text}-${index}`} className="story-card">
                   <p className="text-sm font-semibold text-slate-950">{question.question_text}</p>
-                  <p className="mt-2 text-sm text-slate-600">{question.explanation}</p>
                 </div>
               ))}
             </div>

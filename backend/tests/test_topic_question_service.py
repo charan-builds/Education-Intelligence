@@ -25,9 +25,12 @@ class _Repository:
         self.topic_two = SimpleNamespace(id=2, name="Topic 2")
         self.topics_by_name = {"Topic 1": self.topic}
         self.prerequisite_link = None
+        self.answer_count = 0
         self.question = SimpleNamespace(
             id=1,
             topic_id=1,
+            version=1,
+            is_active=True,
             difficulty=1,
             question_type="multiple_choice",
             question_text="What is 2 + 2?",
@@ -82,8 +85,20 @@ class _Repository:
     async def create_topic(self, name: str, description: str):
         return SimpleNamespace(id=2, name=name, description=description)
 
-    async def get_question(self, question_id: int):
-        return self.question if question_id == 1 else None
+    async def get_question(
+        self,
+        question_id: int,
+        tenant_id: int | None = None,
+        *,
+        active_only: bool = False,
+        for_update: bool = False,
+    ):
+        _ = tenant_id, for_update
+        if question_id != 1:
+            return None
+        if active_only and not self.question.is_active:
+            return None
+        return self.question
 
     async def update_topic(self, topic, **updates):
         for key, value in updates.items():
@@ -91,14 +106,30 @@ class _Repository:
         return topic
 
     async def update_question(self, question, **updates):
-        for key, value in updates.items():
-            setattr(question, key, value)
-        if question.question_type == "multiple_choice" and not question.answer_options:
+        replacement = SimpleNamespace(
+            id=2,
+            topic_id=question.topic_id,
+            version=question.version + 1,
+            is_active=True,
+            difficulty=updates.get("difficulty", question.difficulty),
+            question_type=updates.get("question_type", question.question_type),
+            question_text=updates.get("question_text", question.question_text),
+            correct_answer=updates.get("correct_answer", question.correct_answer),
+            accepted_answers=updates.get("accepted_answers", list(question.accepted_answers)),
+            answer_options=updates.get("answer_options", list(question.answer_options)),
+        )
+        if replacement.question_type == "multiple_choice" and not replacement.answer_options:
             raise ValueError("multiple_choice questions require non-empty answer_options")
-        return question
+        question.is_active = False
+        self.replacement_question = replacement
+        return replacement
+
+    async def count_answers_for_question(self, question_id: int, tenant_id: int | None = None):
+        _ = question_id, tenant_id
+        return self.answer_count
 
     async def delete_question(self, question):
-        _ = question
+        question.is_active = False
         return None
 
     async def delete_topic(self, topic):
@@ -110,8 +141,10 @@ class _Repository:
         _ = link
         return None
 
-    async def list_questions_for_topic(self, topic_id: int):
+    async def list_questions_for_topic(self, topic_id: int, active_only: bool = True):
         _ = topic_id
+        if active_only and not self.question.is_active:
+            return []
         return [self.question]
 
     async def list_prerequisite_links(self, limit: int, offset: int, topic_id: int | None = None):
@@ -252,6 +285,57 @@ def test_list_topics_page_returns_metadata():
     asyncio.run(_run())
 
 
+def test_update_question_creates_new_version_and_keeps_old_answer_target():
+    async def _run():
+        service = TopicService(session=SimpleNamespace())
+        repository = _Repository()
+        service.repository = repository
+
+        updated = await service.update_question(
+            1,
+            question_text="Updated question?",
+            answer_options=["A", "B"],
+        )
+
+        assert repository.question.is_active is False
+        assert repository.question.question_text == "What is 2 + 2?"
+        assert updated.id != repository.question.id
+        assert updated.version == 2
+        assert updated.is_active is True
+        assert updated.question_text == "Updated question?"
+        assert updated.answer_options == ["A", "B"]
+
+    asyncio.run(_run())
+
+
+def test_delete_question_rejects_when_user_answers_exist():
+    async def _run():
+        service = TopicService(session=SimpleNamespace())
+        repository = _Repository()
+        repository.answer_count = 1
+        service.repository = repository
+
+        with pytest.raises(ValidationError, match="user answers"):
+            await service.delete_question(1)
+
+        assert repository.question.is_active is True
+
+    asyncio.run(_run())
+
+
+def test_delete_question_soft_deletes_unanswered_question():
+    async def _run():
+        service = TopicService(session=SimpleNamespace())
+        repository = _Repository()
+        service.repository = repository
+
+        await service.delete_question(1)
+
+        assert repository.question.is_active is False
+
+    asyncio.run(_run())
+
+
 def test_create_topic_rejects_duplicate_name():
     async def _run():
         service = TopicService(session=SimpleNamespace())
@@ -370,9 +454,9 @@ def test_export_questions_csv_contains_headers_and_pipe_joined_lists():
 
         content = await service.export_questions_csv(topic_id=1)
         assert "topic_id" in content
-        assert "accepted_answers" in content
-        assert "four" in content
         assert "3|4|5" in content
+        assert "accepted_answers" not in content
+        assert "correct_answer" not in content
 
     asyncio.run(_run())
 

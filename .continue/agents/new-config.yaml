@@ -1,0 +1,9 @@
+name: Local AI Setup
+version: 1.0.0
+schema: v1
+
+models:
+  - name: LLaMA Local
+    provider: ollama
+    model: llama3
+    apiBase: http://localhost:11434

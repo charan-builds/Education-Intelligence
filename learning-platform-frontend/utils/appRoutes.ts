@@ -19,6 +19,8 @@ export const appRoutes = {
     notifications: "/student/notifications",
   },
   independentLearner: {
+    welcome: "/independent-learner/welcome",
+    onboarding: "/independent-learner/onboarding",
     dashboard: "/independent-learner/dashboard",
     goals: "/independent-learner/goals",
     diagnostic: "/independent-learner/diagnostic",
@@ -184,12 +186,36 @@ export function getRoleHomePath(role: string | null | undefined): string {
 
 export function getRoleProfilePath(role: string | null | undefined): string {
   switch (normalizeRoleInput(role)) {
-    case "independent_learner":
-      return appRoutes.independentLearner.profile;
     case "student":
       return appRoutes.student.profile;
+    case "independent_learner":
+      return appRoutes.independentLearner.profile;
     default:
       return appRoutes.student.profile;
+  }
+}
+
+export function getRoleWelcomePath(role: string | null | undefined): string {
+  switch (normalizeRoleInput(role)) {
+    case "independent_learner":
+      return appRoutes.independentLearner.welcome;
+    default:
+      return getRoleProfilePath(role);
+  }
+}
+
+export function getRoleOnboardingPaths(role: string | null | undefined): string[] {
+  switch (normalizeRoleInput(role)) {
+    case "independent_learner":
+      return [
+        appRoutes.independentLearner.welcome,
+        appRoutes.independentLearner.onboarding,
+        appRoutes.independentLearner.profile,
+      ];
+    case "student":
+      return [appRoutes.student.profile];
+    default:
+      return [getRoleProfilePath(role)];
   }
 }
 

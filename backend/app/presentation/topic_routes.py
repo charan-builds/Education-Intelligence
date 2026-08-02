@@ -32,6 +32,7 @@ from app.schemas.topic_schema import (
     TopicSummaryResponse,
     TopicUpdateRequest,
 )
+from app.schemas.question_serializer import sanitize_question
 
 router = APIRouter(prefix="/topics", tags=["topics"])
 
@@ -138,7 +139,7 @@ async def list_questions(
     _current_user=Depends(get_current_user),
     pagination: PaginationParams = Depends(get_pagination_params),
 ):
-    return await _call_topic_service(
+    page = await _call_topic_service(
         TopicService(db).list_questions_page,
         tenant_id=_current_user.tenant_id,
         limit=pagination.limit,
@@ -147,6 +148,10 @@ async def list_questions(
         question_type=question_type,
         search=search,
     )
+    return {
+        **page,
+        "items": [sanitize_question(question) for question in page.get("items", [])],
+    }
 
 
 @router.get("/prerequisites", response_model=TopicPrerequisitePageResponse)
@@ -199,7 +204,7 @@ async def create_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).create_question(
+    question = await TopicService(db).create_question(
         topic_id=payload.topic_id,
         difficulty=payload.difficulty,
         question_type=payload.question_type,
@@ -207,8 +212,10 @@ async def create_question(
         correct_answer=payload.correct_answer,
         accepted_answers=payload.accepted_answers,
         answer_options=payload.answer_options,
+        options=[option.model_dump() for option in payload.options] if payload.options else None,
         tenant_id=_current_user.tenant_id,
     )
+    return QuestionResponse.model_validate(sanitize_question(question))
 
 
 @router.post("/questions/import", response_model=QuestionImportResponse)
@@ -250,6 +257,7 @@ async def export_questions(
         tenant_id=_current_user.tenant_id,
         topic_id=topic_id,
     )
+    items = [sanitize_question(question) for question in items]
     return PlainTextResponse(
         content=json.dumps(items, indent=2),
         headers={"Content-Disposition": "attachment; filename=questions-export.json"},
@@ -281,12 +289,13 @@ async def update_question(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await _call_topic_service(
+    question = await _call_topic_service(
         TopicService(db).update_question,
         tenant_id=_current_user.tenant_id,
         question_id=question_id,
-        **payload.model_dump(),
+        **payload.model_dump(exclude_none=True),
     )
+    return QuestionResponse.model_validate(sanitize_question(question))
 
 
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -331,10 +340,14 @@ async def generate_questions_with_ai(
     db: AsyncSession = Depends(get_db_session),
     _current_user=Depends(require_roles("super_admin", "admin")),
 ):
-    return await TopicService(db).generate_ai_questions(
+    result = await TopicService(db).generate_ai_questions(
         tenant_id=_current_user.tenant_id,
         user_id=_current_user.id,
         topic=payload.topic,
         difficulty=payload.difficulty,
         count=payload.count,
     )
+    return {
+        **result,
+        "questions": [sanitize_question(question) for question in result.get("questions", [])],
+    }

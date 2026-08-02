@@ -29,8 +29,6 @@ export type InterviewQuestion = {
   question_type: string;
   question_text: string;
   answer_options: string[];
-  correct_answer: string;
-  explanation: string;
 };
 
 export type InterviewPrep = {

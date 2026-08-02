@@ -76,9 +76,9 @@ export async function acceptInvite(email: string, password: string, invite_token
   return data;
 }
 
-export async function requestEmailVerification(tenant_id: number, email: string): Promise<AuthActionResponse> {
+export async function requestEmailVerification(tenant_id: number | null, email: string): Promise<AuthActionResponse> {
   const { data } = await apiClient.post<AuthActionResponse>("/auth/email-verification/request", {
-    tenant_id,
+    tenant_id: tenant_id ?? undefined,
     email,
   });
   return data;
@@ -91,9 +91,9 @@ export async function confirmEmailVerification(token: string): Promise<AuthActio
   return data;
 }
 
-export async function requestPasswordReset(tenant_id: number, email: string): Promise<AuthActionResponse> {
+export async function requestPasswordReset(tenant_id: number | null, email: string): Promise<AuthActionResponse> {
   const { data } = await apiClient.post<AuthActionResponse>("/auth/forgot-password", {
-    tenant_id,
+    tenant_id: tenant_id ?? undefined,
     email,
   });
   return data;

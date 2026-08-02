@@ -5,10 +5,12 @@ import type {
   DiagnosticQuestion,
   DiagnosticResult,
   DiagnosticSession,
+  DiagnosticSubmitAnswerPayload,
 } from "@/types/diagnostic";
 
-export async function startDiagnostic(goal_id: number): Promise<DiagnosticSession> {
-  const { data } = await apiClient.post<DiagnosticSession>("/diagnostic/start", { goal_id });
+export async function startDiagnostic(goal_id: number, user_id?: number | null): Promise<DiagnosticSession> {
+  const payload = user_id ? { goal_id, user_id } : { goal_id };
+  const { data } = await apiClient.post<DiagnosticSession>("/diagnostic/start", payload);
   return data;
 }
 
@@ -25,9 +27,13 @@ export async function answerDiagnosticQuestion(
   return data;
 }
 
-export async function submitAnswers(test_id: number): Promise<DiagnosticSession> {
+export async function submitAnswers(
+  test_id: number,
+  answers: DiagnosticSubmitAnswerPayload[] = [],
+): Promise<DiagnosticSession> {
   const { data } = await apiClient.post<DiagnosticSession>("/diagnostic/submit", {
     test_id,
+    answers,
   });
   return data;
 }

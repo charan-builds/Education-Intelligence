@@ -8,6 +8,7 @@ from app.application.services.ai_request_service import AIRequestService
 from app.application.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.feature_flags import FeatureFlagService
 from app.infrastructure.repositories.topic_repository import TopicRepository
+from app.schemas.question_serializer import sanitize_question
 
 
 class TopicService:
@@ -52,6 +53,47 @@ class TopicService:
             topic_id,
             tenant_id=tenant_id,
         )
+
+    async def _repo_get_question(
+        self,
+        question_id: int,
+        tenant_id: int,
+        *,
+        active_only: bool = False,
+        for_update: bool = False,
+    ):
+        method = self.repository.get_question
+        kwargs: dict[str, object] = {}
+        try:
+            signature = inspect.signature(method)
+            if "tenant_id" in signature.parameters:
+                kwargs["tenant_id"] = tenant_id
+            if "active_only" in signature.parameters:
+                kwargs["active_only"] = active_only
+            if "for_update" in signature.parameters:
+                kwargs["for_update"] = for_update
+        except (TypeError, ValueError):
+            pass
+        return await method(question_id, **kwargs)
+
+    async def _repo_list_questions_for_topic_with_active_filter(
+        self,
+        topic_id: int,
+        tenant_id: int,
+        *,
+        active_only: bool,
+    ):
+        method = self.repository.list_questions_for_topic
+        kwargs: dict[str, object] = {}
+        try:
+            signature = inspect.signature(method)
+            if "tenant_id" in signature.parameters:
+                kwargs["tenant_id"] = tenant_id
+            if "active_only" in signature.parameters:
+                kwargs["active_only"] = active_only
+        except (TypeError, ValueError):
+            pass
+        return await method(topic_id, **kwargs)
 
     async def _repo_list_questions(self, *, limit: int, offset: int, tenant_id: int, topic_id: int | None, question_type: str | None, search: str | None):
         return await self._call_with_optional_tenant(
@@ -224,7 +266,7 @@ class TopicService:
         topic = await self._repo_get_topic(topic_id, tenant_id)
         if topic is None:
             raise NotFoundError("Topic not found")
-        if await self._repo_list_questions_for_topic(topic_id, tenant_id):
+        if await self._repo_list_questions_for_topic_with_active_filter(topic_id, tenant_id, active_only=False):
             raise ValidationError("Cannot delete a topic that still has questions")
         await self.repository.delete_topic(topic)
         await self.repository.session.commit()
@@ -306,13 +348,9 @@ class TopicService:
 
         link = await self.repository.create_prerequisite_link(topic_id, prerequisite_topic_id)
         await self.repository.session.commit()
-        return {
-            "id": int(link.id),
-            "topic_id": int(link.topic_id),
-            "prerequisite_topic_id": int(link.prerequisite_topic_id),
-            "topic_name": str(topic.name),
-            "prerequisite_topic_name": str(prerequisite.name),
-        }
+        setattr(link, "topic_name", str(topic.name))
+        setattr(link, "prerequisite_topic_name", str(prerequisite.name))
+        return link
 
     async def delete_prerequisite(self, prerequisite_id: int, tenant_id: int = 1) -> None:
         link = await self._call_with_optional_tenant(
@@ -350,7 +388,7 @@ class TopicService:
         )
         next_offset = offset + limit if (offset + limit) < total else None
         return {
-            "items": items,
+            "items": [sanitize_question(question) for question in items],
             "meta": {
                 "total": total,
                 "limit": limit,
@@ -369,6 +407,7 @@ class TopicService:
         correct_answer: str,
         accepted_answers: list[str],
         answer_options: list[str],
+        options: list[dict] | None = None,
         tenant_id: int = 1,
     ):
         topic = await self._repo_get_topic(topic_id, tenant_id)
@@ -383,6 +422,7 @@ class TopicService:
                 correct_answer=correct_answer,
                 accepted_answers=accepted_answers,
                 answer_options=answer_options,
+                options=options,
             )
             await self.repository.session.commit()
             return question
@@ -394,11 +434,8 @@ class TopicService:
             raise
 
     async def update_question(self, question_id: int, tenant_id: int = 1, **updates):
-        question = await self._call_with_optional_tenant(
-            self.repository.get_question,
-            question_id,
-            tenant_id=tenant_id,
-        )
+        updates = {key: value for key, value in updates.items() if value is not None}
+        question = await self._repo_get_question(question_id, tenant_id, active_only=True, for_update=True)
         if question is None:
             raise NotFoundError("Question not found")
         try:
@@ -416,13 +453,16 @@ class TopicService:
             raise
 
     async def delete_question(self, question_id: int, tenant_id: int = 1) -> None:
-        question = await self._call_with_optional_tenant(
-            self.repository.get_question,
+        question = await self._repo_get_question(question_id, tenant_id, active_only=True, for_update=True)
+        if question is None:
+            raise NotFoundError("Question not found")
+        answer_count = await self._call_with_optional_tenant(
+            self.repository.count_answers_for_question,
             question_id,
             tenant_id=tenant_id,
         )
-        if question is None:
-            raise NotFoundError("Question not found")
+        if int(answer_count) > 0:
+            raise ValidationError("Cannot delete a question that has user answers")
         await self.repository.delete_question(question)
         await self.repository.session.commit()
 
@@ -485,19 +525,7 @@ class TopicService:
             question_type=None,
             search=None,
         )
-        return [
-            {
-                "id": question.id,
-                "topic_id": question.topic_id,
-                "difficulty": question.difficulty,
-                "question_type": question.question_type,
-                "question_text": question.question_text,
-                "correct_answer": question.correct_answer,
-                "accepted_answers": list(question.accepted_answers),
-                "answer_options": list(question.answer_options),
-            }
-            for question in items
-        ]
+        return [sanitize_question(question) for question in items]
 
     async def export_questions_csv(self, tenant_id: int = 1, topic_id: int | None = None) -> str:
         items = await self.export_questions(tenant_id=tenant_id, topic_id=topic_id)
@@ -510,18 +538,12 @@ class TopicService:
                 "difficulty",
                 "question_type",
                 "question_text",
-                "correct_answer",
-                "accepted_answers",
                 "answer_options",
             ],
         )
         writer.writeheader()
         for item in items:
-            writer.writerow(
-                {
-                    **item,
-                    "accepted_answers": "|".join(item["accepted_answers"]),
-                    "answer_options": "|".join(item["answer_options"]),
-                }
-            )
+            row = {key: item.get(key) for key in writer.fieldnames if key != "answer_options"}
+            row["answer_options"] = "|".join(item.get("answer_options", []))
+            writer.writerow(row)
         return output.getvalue()

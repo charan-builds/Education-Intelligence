@@ -22,6 +22,7 @@ export type AuthUser = {
   role: string | null;
   full_name: string | null;
   email: string | null;
+  avatar_url?: string | null;
   is_profile_completed: boolean;
   is_email_verified: boolean;
 };
@@ -64,6 +65,7 @@ function normalizeUser(payload: User | null): AuthUser | null {
     role: canonicalizeRole(payload.role ? String(payload.role) : null),
     full_name: typeof payload.full_name === "string" ? payload.full_name : null,
     email: payload.email ?? null,
+    avatar_url: payload.avatar_url ?? null,
     is_profile_completed: Boolean(payload.is_profile_completed),
     is_email_verified: Boolean(payload.is_email_verified ?? payload.email_verified_at),
   };

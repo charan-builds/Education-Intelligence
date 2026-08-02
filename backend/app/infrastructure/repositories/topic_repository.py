@@ -1,10 +1,12 @@
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.models.goal_topic import GoalTopic
 from app.domain.models.question import Question
 from app.domain.models.topic import Topic
 from app.domain.models.topic_prerequisite import TopicPrerequisite
+from app.domain.models.user_answer import UserAnswer
 from app.infrastructure.cache.cache_service import CacheService
 
 
@@ -136,8 +138,12 @@ class TopicRepository:
     async def list_questions_for_goal(self, goal_id: int | None = None, tenant_id: int | None = None) -> list[Question]:
         stmt = (
             select(Question)
+            .options(selectinload(Question.option_rows))
             .join(Topic, Topic.id == Question.topic_id)
-            .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .where(
+                Topic.tenant_id == self._require_tenant_id(tenant_id),
+                Question.is_active.is_(True),
+            )
             .order_by(Question.id)
         )
         if goal_id is not None:
@@ -148,41 +154,77 @@ class TopicRepository:
         if goal_id is not None and not questions:
             fallback_stmt = (
                 select(Question)
+                .options(selectinload(Question.option_rows))
                 .join(Topic, Topic.id == Question.topic_id)
-                .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+                .where(
+                    Topic.tenant_id == self._require_tenant_id(tenant_id),
+                    Question.is_active.is_(True),
+                )
                 .order_by(Question.id)
             )
             fallback = await self.session.execute(fallback_stmt)
             return list(fallback.scalars().all())
         return questions
 
-    async def get_question(self, question_id: int, tenant_id: int | None = None) -> Question | None:
+    async def get_question(
+        self,
+        question_id: int,
+        tenant_id: int | None = None,
+        *,
+        active_only: bool = False,
+        for_update: bool = False,
+    ) -> Question | None:
         stmt = (
             select(Question)
+            .options(selectinload(Question.option_rows))
             .join(Topic, Topic.id == Question.topic_id)
             .where(Question.id == question_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
         )
+        if active_only:
+            stmt = stmt.where(Question.is_active.is_(True))
+        if for_update:
+            stmt = stmt.with_for_update(of=Question)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def list_questions_by_ids(self, *, tenant_id: int, question_ids: list[int]) -> list[Question]:
+    async def list_questions_by_ids(
+        self,
+        *,
+        tenant_id: int,
+        question_ids: list[int],
+        active_only: bool = True,
+    ) -> list[Question]:
         if not question_ids:
             return []
-        result = await self.session.execute(
+        stmt = (
             select(Question)
+            .options(selectinload(Question.option_rows))
             .join(Topic, Topic.id == Question.topic_id)
             .where(Question.id.in_(question_ids), Topic.tenant_id == self._require_tenant_id(tenant_id))
             .order_by(Question.id.asc())
         )
+        if active_only:
+            stmt = stmt.where(Question.is_active.is_(True))
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
-    async def list_questions_for_topic(self, topic_id: int, tenant_id: int) -> list[Question]:
-        result = await self.session.execute(
+    async def list_questions_for_topic(
+        self,
+        topic_id: int,
+        tenant_id: int,
+        *,
+        active_only: bool = True,
+    ) -> list[Question]:
+        stmt = (
             select(Question)
+            .options(selectinload(Question.option_rows))
             .join(Topic, Topic.id == Question.topic_id)
             .where(Question.topic_id == topic_id, Topic.tenant_id == self._require_tenant_id(tenant_id))
             .order_by(Question.id.asc())
         )
+        if active_only:
+            stmt = stmt.where(Question.is_active.is_(True))
+        result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def list_questions_for_topics(
@@ -197,12 +239,14 @@ class TopicRepository:
             return []
         stmt = (
             select(Question)
+            .options(selectinload(Question.option_rows))
             .join(Topic, Topic.id == Question.topic_id)
             .where(
                 Topic.tenant_id == self._require_tenant_id(tenant_id),
                 Question.topic_id.in_(topic_ids),
+                Question.is_active.is_(True),
             )
-            .order_by(Question.topic_id.asc(), Question.difficulty.asc(), Question.id.asc())
+            .order_by(Question.topic_id.asc(), Question.difficulty_level.asc(), Question.id.asc())
         )
         if exclude_question_ids:
             stmt = stmt.where(~Question.id.in_(exclude_question_ids))
@@ -238,8 +282,12 @@ class TopicRepository:
     ) -> list[Question]:
         stmt = (
             select(Question)
+            .options(selectinload(Question.option_rows))
             .join(Topic, Topic.id == Question.topic_id)
-            .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .where(
+                Topic.tenant_id == self._require_tenant_id(tenant_id),
+                Question.is_active.is_(True),
+            )
             .order_by(Question.id.asc())
         )
         if topic_id is not None:
@@ -268,7 +316,10 @@ class TopicRepository:
         stmt = (
             select(func.count(Question.id))
             .join(Topic, Topic.id == Question.topic_id)
-            .where(Topic.tenant_id == self._require_tenant_id(tenant_id))
+            .where(
+                Topic.tenant_id == self._require_tenant_id(tenant_id),
+                Question.is_active.is_(True),
+            )
         )
         if topic_id is not None:
             stmt = stmt.where(Question.topic_id == topic_id)
@@ -285,6 +336,19 @@ class TopicRepository:
         result = await self.session.execute(stmt)
         return int(result.scalar_one())
 
+    async def count_answers_for_question(self, question_id: int, tenant_id: int) -> int:
+        stmt = (
+            select(func.count(UserAnswer.id))
+            .join(Question, Question.id == UserAnswer.question_id)
+            .join(Topic, Topic.id == Question.topic_id)
+            .where(
+                UserAnswer.question_id == question_id,
+                Topic.tenant_id == self._require_tenant_id(tenant_id),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
+
     async def create_question(
         self,
         topic_id: int,
@@ -294,6 +358,7 @@ class TopicRepository:
         correct_answer: str,
         accepted_answers: list[str],
         answer_options: list[str],
+        options: list[dict] | None = None,
     ) -> Question:
         question = Question(
             topic_id=topic_id,
@@ -302,17 +367,58 @@ class TopicRepository:
             question_text=question_text,
             correct_answer=correct_answer,
             accepted_answers=accepted_answers,
-            answer_options=answer_options,
+            version=1,
+            is_active=True,
         )
+        question.options = options if options is not None else answer_options
         self.session.add(question)
         await self.session.flush()
         return question
 
     async def update_question(self, question: Question, **updates) -> Question:
-        for field, value in updates.items():
-            setattr(question, field, value)
+        next_updates = dict(updates)
+        for reserved_field in ("id", "topic_id", "version", "is_active", "created_at", "updated_at"):
+            next_updates.pop(reserved_field, None)
+        correct_answer_changed = "correct_answer" in next_updates
+        correct_answer = next_updates.pop("correct_answer", question.correct_answer)
+
+        if "options" in next_updates:
+            option_values = next_updates.pop("options")
+        elif "answer_options" in next_updates:
+            option_values = next_updates.pop("answer_options")
+        elif correct_answer_changed:
+            option_values = list(question.answer_options or [])
+        else:
+            option_values = list(question.options or [])
+
+        difficulty = next_updates.pop(
+            "difficulty",
+            getattr(question, "difficulty_level", getattr(question, "difficulty", 2)),
+        )
+        question_type = next_updates.pop("question_type", question.question_type)
+        question_text = next_updates.pop("question_text", question.question_text)
+        accepted_answers = next_updates.pop("accepted_answers", list(question.accepted_answers or []))
+        explanation = next_updates.pop("explanation", getattr(question, "explanation", None))
+
+        await self.session.execute(update(Question).where(Question.id == question.id).values(is_active=False))
+        new_question = Question(
+            topic_id=question.topic_id,
+            version=int(question.version or 1) + 1,
+            is_active=True,
+            difficulty=difficulty,
+            question_type=question_type,
+            question_text=question_text,
+            correct_answer=correct_answer,
+            accepted_answers=list(accepted_answers or []),
+            explanation=explanation,
+        )
+        new_question.options = option_values
+        for field, value in next_updates.items():
+            setattr(new_question, field, value)
+        self.session.add(new_question)
         await self.session.flush()
-        return question
+        return new_question
 
     async def delete_question(self, question: Question) -> None:
-        await self.session.delete(question)
+        await self.session.execute(update(Question).where(Question.id == question.id).values(is_active=False))
+        await self.session.flush()

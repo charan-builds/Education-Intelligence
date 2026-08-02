@@ -4,6 +4,8 @@ from app.application.exceptions import ConflictError, NotFoundError, ValidationE
 from app.core.pagination import decode_cursor, encode_cursor
 from app.infrastructure.repositories.goal_repository import GoalRepository
 from app.infrastructure.repositories.topic_repository import TopicRepository
+from app.infrastructure.repositories.user_goal_repository import UserGoalRepository
+from app.infrastructure.repositories.user_profile_repository import UserProfileRepository
 
 
 class GoalService:
@@ -11,6 +13,8 @@ class GoalService:
         self.session = session
         self.repository = GoalRepository(session)
         self.topic_repository = TopicRepository(session)
+        self.user_goal_repository = UserGoalRepository(session)
+        self.user_profile_repository = UserProfileRepository(session)
 
     async def _repo_get_by_name(self, tenant_id: int, name: str):
         return await self.repository.get_by_name(tenant_id, name)
@@ -36,7 +40,14 @@ class GoalService:
     async def _topic_repo_get_topic(self, tenant_id: int, topic_id: int):
         return await self.topic_repository.get_topic(topic_id, tenant_id=tenant_id)
 
-    async def list_goals_page(self, tenant_id: int = 1, limit: int = 20, offset: int = 0, cursor: str | None = None) -> dict:
+    async def list_goals_page(
+        self,
+        tenant_id: int = 1,
+        limit: int = 20,
+        offset: int = 0,
+        cursor: str | None = None,
+        user_id: int | None = None,
+    ) -> dict:
         try:
             cursor_id = decode_cursor(cursor) if cursor else None
         except ValueError as exc:
@@ -44,10 +55,27 @@ class GoalService:
 
         items = await self._repo_list_all(tenant_id, limit, offset, cursor_id)
         total = await self._repo_count_all(tenant_id)
+        recommended_goal_id = None
+        if user_id is not None:
+            recommended_goal_id = await self._recommend_goal_id(user_id=user_id, tenant_id=tenant_id, goals=items)
+        serialized_items = [
+            {
+                "id": goal.id,
+                "tenant_id": goal.tenant_id,
+                "name": goal.name,
+                "description": goal.description,
+                "skills_covered": goal.skills_covered,
+                "estimated_duration_weeks": goal.estimated_duration_weeks,
+                "difficulty_tag": goal.difficulty_tag,
+                "roadmap_preview": goal.roadmap_preview,
+                "is_recommended": goal.id == recommended_goal_id,
+            }
+            for goal in items
+        ]
         next_cursor = encode_cursor(items[-1].id) if items and len(items) == limit else None
         next_offset = offset + limit if (offset + limit) < total else None
         return {
-            "items": items,
+            "items": serialized_items,
             "meta": {
                 "total": total,
                 "limit": limit,
@@ -57,15 +85,44 @@ class GoalService:
             },
         }
 
-    async def create_goal(self, tenant_id: int = 1, name: str = "", description: str = ""):
+    async def create_goal(
+        self,
+        tenant_id: int = 1,
+        name: str = "",
+        description: str = "",
+        *,
+        skills_covered: list[str] | None = None,
+        estimated_duration_weeks: int | None = None,
+        difficulty_tag: str | None = None,
+        roadmap_preview: str | None = None,
+    ):
         normalized_name = name.strip()
         if await self._repo_get_by_name(tenant_id, normalized_name) is not None:
             raise ConflictError("Goal name already exists")
-        goal = await self.repository.create_goal(tenant_id, normalized_name, description.strip())
+        goal = await self.repository.create_goal(
+            tenant_id,
+            normalized_name,
+            description.strip(),
+            skills_covered=skills_covered,
+            estimated_duration_weeks=estimated_duration_weeks,
+            difficulty_tag=difficulty_tag,
+            roadmap_preview=roadmap_preview,
+        )
         await self.session.commit()
         return goal
 
-    async def update_goal(self, tenant_id: int = 1, goal_id: int = 0, *, name: str | None = None, description: str | None = None):
+    async def update_goal(
+        self,
+        tenant_id: int = 1,
+        goal_id: int = 0,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        skills_covered: list[str] | None = None,
+        estimated_duration_weeks: int | None = None,
+        difficulty_tag: str | None = None,
+        roadmap_preview: str | None = None,
+    ):
         goal = await self._repo_get_by_id(tenant_id, goal_id)
         if goal is None:
             raise NotFoundError("Goal not found")
@@ -79,6 +136,14 @@ class GoalService:
             updates["name"] = normalized_name
         if description is not None:
             updates["description"] = description.strip()
+        if skills_covered is not None:
+            updates["skills_covered"] = skills_covered
+        if estimated_duration_weeks is not None:
+            updates["estimated_duration_weeks"] = estimated_duration_weeks
+        if difficulty_tag is not None:
+            updates["difficulty_tag"] = difficulty_tag.strip()
+        if roadmap_preview is not None:
+            updates["roadmap_preview"] = roadmap_preview.strip()
 
         updated = await self.repository.update_goal(goal, **updates)
         await self.session.commit()
@@ -121,3 +186,68 @@ class GoalService:
             raise NotFoundError("Goal-topic link not found")
         await self.repository.delete_topic_link(link)
         await self.session.commit()
+
+    async def select_goal_for_user(self, *, user_id: int, tenant_id: int, goal_id: int) -> dict:
+        goal = await self._repo_get_by_id(tenant_id, goal_id)
+        if goal is None:
+            raise NotFoundError("Goal not found")
+        await self.user_goal_repository.deactivate_all_for_user(user_id=user_id)
+        link = await self.user_goal_repository.create_or_activate(user_id=user_id, goal_id=goal_id)
+        await self.session.commit()
+        await self.session.refresh(link)
+        active = await self.user_goal_repository.get_active_for_user(user_id=user_id, tenant_id=tenant_id)
+        if active is None or active.goal is None:
+            raise NotFoundError("Selected goal could not be loaded")
+        return {
+            "user_id": active.user_id,
+            "goal_id": active.goal_id,
+            "is_active": active.is_active,
+            "goal": {
+                "id": active.goal.id,
+                "tenant_id": active.goal.tenant_id,
+                "name": active.goal.name,
+                "description": active.goal.description,
+                "skills_covered": active.goal.skills_covered,
+                "estimated_duration_weeks": active.goal.estimated_duration_weeks,
+                "difficulty_tag": active.goal.difficulty_tag,
+                "roadmap_preview": active.goal.roadmap_preview,
+                "is_recommended": False,
+            },
+        }
+
+    async def get_current_goal_for_user(self, *, user_id: int, tenant_id: int) -> dict | None:
+        active = await self.user_goal_repository.get_active_for_user(user_id=user_id, tenant_id=tenant_id)
+        if active is None or active.goal is None:
+            return None
+        return {
+            "user_id": active.user_id,
+            "goal_id": active.goal_id,
+            "is_active": active.is_active,
+            "goal": {
+                "id": active.goal.id,
+                "tenant_id": active.goal.tenant_id,
+                "name": active.goal.name,
+                "description": active.goal.description,
+                "skills_covered": active.goal.skills_covered,
+                "estimated_duration_weeks": active.goal.estimated_duration_weeks,
+                "difficulty_tag": active.goal.difficulty_tag,
+                "roadmap_preview": active.goal.roadmap_preview,
+                "is_recommended": False,
+            },
+        }
+
+    async def _recommend_goal_id(self, *, user_id: int, tenant_id: int, goals: list) -> int | None:
+        if not goals:
+            return None
+        profile = await self.user_profile_repository.get_for_user(user_id=user_id, tenant_id=tenant_id)
+        experience_level = str(getattr(profile, "experience_level", "") or "").strip().lower()
+        preferred_tags = {
+            "beginner": ("beginner", "easy"),
+            "intermediate": ("intermediate", "medium"),
+            "advanced": ("advanced", "hard"),
+        }.get(experience_level, ("beginner", "easy"))
+        for tag in preferred_tags:
+            match = next((goal for goal in goals if str(getattr(goal, "difficulty_tag", "") or "").strip().lower() == tag), None)
+            if match is not None:
+                return match.id
+        return goals[0].id

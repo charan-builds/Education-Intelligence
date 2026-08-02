@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
-import { buildAuthPath, getRoleProfilePath } from "@/utils/appRoutes";
+import { buildAuthPath, getRoleOnboardingPaths, getRoleWelcomePath } from "@/utils/appRoutes";
 
 type RequireAuthProps = {
   children: ReactNode;
@@ -27,14 +27,15 @@ export default function RequireAuth({ children }: RequireAuthProps) {
       router.replace(buildAuthPath("login", pathname));
       return;
     }
+    const onboardingPaths = getRoleOnboardingPaths(role);
     if (
       isAuthenticated &&
       requiresProfileCompletion &&
       pathname &&
       !PUBLIC_ROUTES.includes(pathname) &&
-      pathname !== getRoleProfilePath(role)
+      !onboardingPaths.includes(pathname)
     ) {
-      router.replace(getRoleProfilePath(role));
+      router.replace(getRoleWelcomePath(role));
     }
   }, [isAuthenticated, isReady, pathname, requiresProfileCompletion, role, router]);
 
@@ -46,7 +47,7 @@ export default function RequireAuth({ children }: RequireAuthProps) {
     return <AccessState mode="redirecting" description="Redirecting to sign in..." />;
   }
 
-  if (isAuthenticated && requiresProfileCompletion && pathname && pathname !== getRoleProfilePath(role)) {
+  if (isAuthenticated && requiresProfileCompletion && pathname && !getRoleOnboardingPaths(role).includes(pathname)) {
     return <AccessState mode="redirecting" description="Redirecting to complete your profile..." />;
   }
 

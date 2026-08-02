@@ -61,3 +61,6 @@ class User(Base):
     notifications = relationship("Notification", cascade="all, delete-orphan")
     gamification_profile = relationship("GamificationProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
     gamification_events = relationship("GamificationEvent", back_populates="user", cascade="all, delete-orphan")
+    profile = relationship("UserProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    learning_profile = relationship("LearningProfile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    user_goals = relationship("UserGoal", back_populates="user", cascade="all, delete-orphan")

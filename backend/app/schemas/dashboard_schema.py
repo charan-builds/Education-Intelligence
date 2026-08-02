@@ -109,6 +109,33 @@ class StudentDashboardResponse(BaseModel):
     recent_activity: list[ActivityItemResponse]
 
 
+class IndependentLearnerNextTopicResponse(BaseModel):
+    topic_id: int | None
+    topic_name: str
+    reason: str
+    estimated_time_hours: float
+
+
+class IndependentLearnerRoadmapStepResponse(BaseModel):
+    step_id: int
+    topic_id: int
+    topic_name: str
+    difficulty: str
+    estimated_time_hours: float
+    status: str
+
+
+class IndependentLearnerDashboardResponse(BaseModel):
+    user_name: str
+    goal: str | None
+    completion_percent: float
+    completed_topics: int
+    remaining_topics: int
+    next_topic: IndependentLearnerNextTopicResponse | None
+    weak_topics: list[str]
+    roadmap_preview: list[IndependentLearnerRoadmapStepResponse]
+
+
 class TeacherTopicClusterResponse(BaseModel):
     topic_id: int
     topic_name: str

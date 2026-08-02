@@ -48,6 +48,16 @@ export const studentNav: AppNavItem[] = [
 ];
 
 export const independentLearnerNav: AppNavItem[] = [
+  {
+    label: "Welcome",
+    href: appRoutes.independentLearner.welcome,
+    icon: Sparkles,
+    match: [
+      appRoutes.independentLearner.welcome,
+      appRoutes.independentLearner.onboarding,
+      appRoutes.independentLearner.profile,
+    ],
+  },
   { label: "Dashboard", href: appRoutes.independentLearner.dashboard, icon: LayoutDashboard },
   { label: "Goals", href: appRoutes.independentLearner.goals, icon: GraduationCap },
   {

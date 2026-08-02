@@ -181,11 +181,28 @@ async def _seed_goals(session, *, tenant: Tenant, goal_specs: list[dict], topic_
             await session.execute(select(Goal).where(Goal.tenant_id == tenant.id, Goal.name == goal_spec["name"]))
         ).scalar_one_or_none()
         if goal is None:
-            goal = Goal(tenant_id=tenant.id, name=goal_spec["name"], description=goal_spec["description"])
+            goal = Goal(
+                tenant_id=tenant.id,
+                name=goal_spec["name"],
+                description=goal_spec["description"],
+                skills_covered=goal_spec.get("skills_covered") or selected_topics[:4],
+                estimated_duration_weeks=goal_spec.get("estimated_duration_weeks") or max(4, len(selected_topics) + 1),
+                difficulty_tag=goal_spec.get("difficulty_tag") or "intermediate",
+                roadmap_preview=goal_spec.get("roadmap_preview")
+                or (
+                    f"Begin with {', '.join(selected_topics[:3])}, then let the diagnostic personalize the remaining roadmap."
+                ),
+            )
             session.add(goal)
             await session.flush()
         else:
             goal.description = goal_spec["description"]
+            goal.skills_covered = goal_spec.get("skills_covered") or selected_topics[:4]
+            goal.estimated_duration_weeks = goal_spec.get("estimated_duration_weeks") or max(4, len(selected_topics) + 1)
+            goal.difficulty_tag = goal_spec.get("difficulty_tag") or "intermediate"
+            goal.roadmap_preview = goal_spec.get("roadmap_preview") or (
+                f"Begin with {', '.join(selected_topics[:3])}, then let the diagnostic personalize the remaining roadmap."
+            )
         goals[goal.name] = goal
 
         for topic_name in selected_topics:

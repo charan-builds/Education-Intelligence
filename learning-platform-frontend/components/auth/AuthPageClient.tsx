@@ -19,7 +19,7 @@ import {
   requestPasswordReset,
   setupMfa,
 } from "@/services/authService";
-import { appRoutes, buildAuthPath, getRoleProfilePath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
+import { appRoutes, buildAuthPath, getRoleProfilePath, getRoleWelcomePath, sanitizeAuthRedirectTarget } from "@/utils/appRoutes";
 import { getRoleRedirectPath } from "@/utils/roleRedirect";
 
 type AuthPageClientProps = {
@@ -67,6 +67,8 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
     [searchParams],
   );
   const mode = inviteToken ? "invite" : (manualMode ?? modeParam ?? initialMode);
+  const isIndependentLearnerHintMode = mode === "login" || mode === "forgot-password" || mode === "email-verification";
+  const showPasswordField = ["login", "register", "invite", "reset-password"].includes(mode);
 
   useEffect(() => {
     setNextPath(sanitizeAuthRedirectTarget(nextParam, appRoutes.auth));
@@ -81,7 +83,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
       return;
     }
     if (requiresProfileCompletion) {
-      router.replace(getRoleProfilePath(role));
+      router.replace(getRoleWelcomePath(role));
       return;
     }
     router.replace(nextPath ?? getRoleRedirectPath(role));
@@ -138,7 +140,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
         }, mfaCode);
         if (session.requires_profile_completion) {
           setSuccess("Profile completion is required before diagnostic, roadmap, and dashboard access.");
-          router.replace(getRoleProfilePath(session.user.role));
+          router.replace(getRoleWelcomePath(session.user.role));
           return;
         }
         router.replace(nextPath ?? getRoleRedirectPath(session.user.role));
@@ -173,9 +175,6 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
       }
 
       if (mode === "forgot-password") {
-        if (!tenantId) {
-          throw new Error("A numeric tenant ID is required for password reset.");
-        }
         await requestPasswordReset(tenantId, email);
         setSuccess("Password reset instructions were issued. Use the reset token to set a new password.");
         return;
@@ -195,9 +194,6 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
         if (token) {
           await confirmEmailVerification(token);
         } else {
-          if (!tenantId) {
-            throw new Error("A numeric tenant ID is required to resend a verification email.");
-          }
           await requestEmailVerification(tenantId, email);
         }
         setSuccess(
@@ -364,9 +360,9 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
                   placeholder="e.g. 7 or northwind"
                   className="mt-2 border-slate-700 bg-slate-900 text-white placeholder:text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                 />
-                {mode === "login" ? (
+                {isIndependentLearnerHintMode ? (
                   <p className="mt-2 text-xs leading-5 text-slate-400">
-                    Institution users can enter tenant context here. Independent learners can leave this blank and sign in with their email directly.
+                    Institution users can enter tenant context here. Independent learners can leave this blank and continue with their email directly.
                   </p>
                 ) : null}
               </div>
@@ -386,10 +382,10 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
               </div>
             ) : null}
 
-            {mode !== "email-verification" ? (
+            {showPasswordField ? (
               <div>
                 <label className="text-sm font-medium text-slate-300" htmlFor="auth-password">
-                  Password
+                  {mode === "reset-password" ? "New password" : "Password"}
                 </label>
                 <Input
                   id="auth-password"
@@ -465,7 +461,7 @@ export default function AuthPageClient({ initialMode = "login" }: AuthPageClient
             <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
               <KeyRound className="h-5 w-5 text-brand-300" />
               <p className="mt-3 text-sm font-semibold">Password recovery</p>
-              <p className="mt-2 text-sm leading-6 text-slate-400">Tenant-aware reset flows avoid cross-tenant confusion and dead links.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">Institution users can include tenant context, while independent learners can recover access with email only.</p>
             </div>
             <div className="rounded-3xl border border-slate-800 bg-slate-900/70 p-4">
               <ShieldCheck className="h-5 w-5 text-brand-300" />

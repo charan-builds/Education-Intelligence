@@ -299,9 +299,14 @@ async def forgot_password(
     request: Request,
     payload: PasswordResetRequest,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db_session),
+    service: AuthService = Depends(get_auth_service),
 ):
-    return await request_password_reset(payload=payload, background_tasks=background_tasks, db=db)
+    token = await service.request_password_reset(
+        tenant_id=payload.tenant_id,
+        email=payload.email,
+        background_tasks=background_tasks,
+    )
+    return AuthActionResponse(detail="Password reset instructions sent", token=token)
 
 
 @router.post("/send-otp", response_model=AuthActionResponse)

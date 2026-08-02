@@ -10,6 +10,7 @@ from app.core.dependencies import get_current_user, require_roles
 from app.domain.models.job_role import JobRole
 from app.domain.models.job_role_skill import JobRoleSkill
 from app.infrastructure.database import get_db_session
+from app.schemas.question_serializer import sanitize_question
 from app.schemas.career_schema import (
     CareerOverviewResponse,
     InterviewPrepRequest,
@@ -51,15 +52,19 @@ async def interview_prep(
     db: AsyncSession = Depends(get_db_session),
     current_user=Depends(get_current_user),
 ):
-    return InterviewPrepResponse(**(
-        await CareerService(db).get_interview_prep(
-            user_id=current_user.id,
-            tenant_id=current_user.tenant_id,
-            role_name=payload.role_name,
-            difficulty=payload.difficulty,
-            count=payload.count,
-        )
-    ))
+    result = await CareerService(db).get_interview_prep(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        role_name=payload.role_name,
+        difficulty=payload.difficulty,
+        count=payload.count,
+    )
+    return InterviewPrepResponse(
+        **{
+            **result,
+            "questions": [sanitize_question(question) for question in result.get("questions", [])],
+        }
+    )
 
 
 @router.post("/roles/bootstrap")

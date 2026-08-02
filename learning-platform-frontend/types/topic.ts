@@ -145,8 +145,8 @@ export type Question = {
   difficulty: number;
   question_type: string;
   question_text: string;
-  correct_answer: string;
-  accepted_answers: string[];
+  correct_answer?: string;
+  accepted_answers?: string[];
   answer_options: string[];
 };
 

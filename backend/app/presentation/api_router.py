@@ -19,6 +19,7 @@ from app.presentation.mentor_routes import router as mentor_router
 from app.presentation.ml_routes import router as ml_router
 from app.presentation.notification_routes import router as notification_router
 from app.presentation.outbox_routes import router as outbox_router
+from app.presentation.profile_routes import router as profile_router
 from app.presentation.realtime_routes import router as realtime_router
 from app.presentation.revision_routes import router as revision_router
 from app.presentation.roadmap_routes import router as roadmap_router
@@ -28,6 +29,7 @@ from app.presentation.test_routes import router as test_router
 from app.presentation.tenant_routes import router as tenant_router
 from app.presentation.topic_routes import router as topic_router
 from app.presentation.user_routes import router as user_router
+from app.presentation.user_goal_routes import router as user_goal_router
 
 api_router = APIRouter()
 api_router.include_router(ai_router)
@@ -41,6 +43,7 @@ api_router.include_router(dashboard_router)
 api_router.include_router(digital_twin_router)
 api_router.include_router(tenant_router)
 api_router.include_router(user_router)
+api_router.include_router(user_goal_router)
 api_router.include_router(goal_router)
 api_router.include_router(gamification_router)
 api_router.include_router(topic_router)
@@ -56,5 +59,6 @@ api_router.include_router(social_router)
 api_router.include_router(search_router)
 api_router.include_router(test_router)
 api_router.include_router(outbox_router)
+api_router.include_router(profile_router)
 api_router.include_router(realtime_router)
 api_router.include_router(ecosystem_router)

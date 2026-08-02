@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.common_schema import PageMeta
 
@@ -10,6 +10,19 @@ class TopicPracticeQuestion(BaseModel):
     question_type: str = "short_text"
     question_text: str
     answer_options: list[str] = []
+
+
+class QuestionOptionPayload(BaseModel):
+    key: str = Field(min_length=1, max_length=8)
+    text: str = Field(min_length=1)
+    is_correct: bool = False
+
+
+class QuestionOptionResponse(BaseModel):
+    key: str
+    text: str
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TopicDetailResponse(BaseModel):
@@ -149,6 +162,7 @@ class QuestionCreateRequest(BaseModel):
     correct_answer: str
     accepted_answers: list[str] = []
     answer_options: list[str] = []
+    options: list[QuestionOptionPayload] = []
 
 
 class QuestionUpdateRequest(BaseModel):
@@ -158,17 +172,19 @@ class QuestionUpdateRequest(BaseModel):
     correct_answer: str | None = None
     accepted_answers: list[str] | None = None
     answer_options: list[str] | None = None
+    options: list[QuestionOptionPayload] | None = None
 
 
 class QuestionResponse(BaseModel):
     id: int
+    version: int = 1
+    is_active: bool = True
     topic_id: int
     difficulty: int
     question_type: str
     question_text: str
-    correct_answer: str
-    accepted_answers: list[str]
     answer_options: list[str]
+    options: list[QuestionOptionResponse] = []
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -186,6 +202,7 @@ class QuestionImportItem(BaseModel):
     correct_answer: str
     accepted_answers: list[str] = []
     answer_options: list[str] = []
+    options: list[QuestionOptionPayload] = []
 
 
 class QuestionImportRequest(BaseModel):
@@ -219,8 +236,6 @@ class AIGeneratedQuestionResponse(BaseModel):
     question_type: str
     question_text: str
     answer_options: list[str]
-    correct_answer: str
-    explanation: str
 
 
 class AIQuestionGenerationResponse(BaseModel):

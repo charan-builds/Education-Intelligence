@@ -26,6 +26,10 @@ class SmartTestGeneratorService:
         return {1: "easy", 2: "medium", 3: "hard"}.get(int(difficulty), "medium")
 
     @staticmethod
+    def _question_difficulty_level(question: object) -> int:
+        return int(getattr(question, "difficulty_level", getattr(question, "difficulty", 2)) or 2)
+
+    @staticmethod
     def _target_difficulty(*, mastery_score: float, confidence: float) -> int:
         if mastery_score < 40.0:
             base = 1
@@ -104,7 +108,7 @@ class SmartTestGeneratorService:
 
         questions_by_topic: dict[int, dict[int, list[object]]] = defaultdict(lambda: defaultdict(list))
         for question in candidate_questions:
-            questions_by_topic[int(question.topic_id)][int(question.difficulty)].append(question)
+            questions_by_topic[int(question.topic_id)][self._question_difficulty_level(question)].append(question)
 
         selected_questions: list[object] = []
         selected_ids: set[int] = set()
@@ -128,7 +132,7 @@ class SmartTestGeneratorService:
                         continue
                     selected_questions.append(question)
                     selected_ids.add(int(question.id))
-                    difficulty_mix[self._difficulty_label(int(question.difficulty))] += 1
+                    difficulty_mix[self._difficulty_label(self._question_difficulty_level(question))] += 1
                     topic_selection_counts[topic_id] += 1
                     taken_for_topic += 1
                     if len(selected_questions) >= safe_count or taken_for_topic >= per_topic_target:
@@ -157,7 +161,7 @@ class SmartTestGeneratorService:
                             continue
                         selected_questions.append(question)
                         selected_ids.add(int(question.id))
-                        difficulty_mix[self._difficulty_label(int(question.difficulty))] += 1
+                        difficulty_mix[self._difficulty_label(self._question_difficulty_level(question))] += 1
                         topic_selection_counts[topic_id] += 1
                         if len(selected_questions) >= safe_count:
                             break
@@ -206,8 +210,8 @@ class SmartTestGeneratorService:
                     "id": int(question.id),
                     "topic_id": int(question.topic_id),
                     "topic_name": str(getattr(topic_map.get(int(question.topic_id)), "name", f"Topic {question.topic_id}")),
-                    "difficulty": int(question.difficulty),
-                    "difficulty_label": self._difficulty_label(int(question.difficulty)),
+                    "difficulty": self._question_difficulty_level(question),
+                    "difficulty_label": getattr(question, "difficulty_label", self._difficulty_label(self._question_difficulty_level(question))),
                     "question_type": str(question.question_type),
                     "question_text": str(question.question_text),
                     "answer_options": list(question.answer_options or []),

@@ -8,6 +8,7 @@ from app.schemas.dashboard_schema import (
     AdminDashboardResponse,
     CommunityIntelligenceResponse,
     ExperimentSummaryResponse,
+    IndependentLearnerDashboardResponse,
     StudentDashboardResponse,
     TeacherAnalyticsResponse,
 )
@@ -22,6 +23,18 @@ async def get_student_dashboard(
     _verified_user=Depends(require_profile_completed),
 ):
     return await DashboardService(db).student_dashboard(
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+    )
+
+
+@router.get("/independent-learner", response_model=IndependentLearnerDashboardResponse)
+async def get_independent_learner_dashboard(
+    db: AsyncSession = Depends(get_db_session),
+    current_user=Depends(require_roles("independent_learner")),
+    _verified_user=Depends(require_profile_completed),
+):
+    return await DashboardService(db).independent_learner_dashboard(
         user_id=current_user.id,
         tenant_id=current_user.tenant_id,
     )

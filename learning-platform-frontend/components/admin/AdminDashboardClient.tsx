@@ -827,8 +827,8 @@ export default function AdminDashboardClient() {
     setDifficulty(String(question.difficulty));
     setQuestionType(question.question_type === "short_text" ? "short_text" : "multiple_choice");
     setQuestionText(question.question_text);
-    setCorrectAnswer(question.correct_answer);
-    setAcceptedAnswers(question.accepted_answers.join(", "));
+    setCorrectAnswer(question.correct_answer ?? "");
+    setAcceptedAnswers((question.accepted_answers ?? []).join(", "));
     setAnswerOptions(question.answer_options.join(", "));
   }
 
@@ -1845,7 +1845,7 @@ export default function AdminDashboardClient() {
                     <td className="px-4 py-3 capitalize">{question.question_type.replace("_", " ")}</td>
                     <td className="px-4 py-3">{question.difficulty}</td>
                     <td className="px-4 py-3">{question.question_text}</td>
-                    <td className="px-4 py-3">{question.correct_answer}</td>
+                    <td className="px-4 py-3">{question.correct_answer ?? ""}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button

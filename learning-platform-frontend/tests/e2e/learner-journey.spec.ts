@@ -252,7 +252,7 @@ async function mockLearnerJourney(page: Page) {
           test_id: 99,
           id: 701,
           topic_id: 11,
-          difficulty: 1,
+          difficulty_level: 1,
           difficulty_label: "easy",
           question_type: "multiple_choice",
           question_text: "Which traversal uses a queue?",

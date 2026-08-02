@@ -57,7 +57,7 @@ class FeatureStoreService:
                 select(
                     Topic.id,
                     Topic.name,
-                    func.avg(Question.difficulty).label("avg_difficulty"),
+                    func.avg(Question.difficulty_level).label("avg_difficulty"),
                     func.avg(TopicScore.score).label("avg_mastery"),
                     func.count(TopicScore.id).label("observations"),
                 )

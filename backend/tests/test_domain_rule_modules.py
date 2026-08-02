@@ -19,6 +19,28 @@ def test_diagnostic_rules_evaluate_answers_accepts_aliases():
     assert result[0]["accuracy"] == 1.0
 
 
+def test_diagnostic_rules_evaluate_answers_accepts_correct_option_key():
+    result = diagnostic_rules.evaluate_answers(
+        [{"question_id": 1, "user_answer": "B"}],
+        {
+            1: type(
+                "_Question",
+                (),
+                {
+                    "correct_answer": "",
+                    "accepted_answers": [],
+                    "options": [
+                        {"key": "A", "text": "3", "is_correct": False},
+                        {"key": "B", "text": "4", "is_correct": True},
+                    ],
+                },
+            )()
+        },
+    )
+
+    assert result[0]["score"] == 100.0
+
+
 def test_roadmap_rules_generate_steps_returns_prioritized_steps():
     steps = roadmap_rules.generate_steps(
         topic_order=[101, 202],

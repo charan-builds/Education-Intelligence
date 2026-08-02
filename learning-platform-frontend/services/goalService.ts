@@ -5,6 +5,7 @@ import type {
   GoalPageResponse,
   GoalTopic,
   GoalTopicPageResponse,
+  UserGoal,
   UpdateGoalPayload,
 } from "@/types/goal";
 
@@ -25,6 +26,26 @@ export async function updateGoal(goalId: number, payload: UpdateGoalPayload): Pr
 
 export async function deleteGoal(goalId: number): Promise<void> {
   await apiClient.delete(`/goals/${goalId}`);
+}
+
+export async function selectCurrentGoal(goal_id: number): Promise<UserGoal> {
+  const { data } = await apiClient.post<UserGoal>("/user/goals/select", { goal_id });
+  return data;
+}
+
+export async function getCurrentGoal(): Promise<UserGoal | null> {
+  try {
+    const { data } = await apiClient.get<UserGoal>("/user/goals/current");
+    return data;
+  } catch (error: unknown) {
+    const status = typeof error === "object" && error !== null && "response" in error
+      ? Number((error as { response?: { status?: number } }).response?.status)
+      : undefined;
+    if (status === 404) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export async function getGoalTopics(goal_id?: number): Promise<GoalTopicPageResponse> {

@@ -1,36 +1,49 @@
 from datetime import datetime
+from enum import Enum
 
-from sqlalchemy import DateTime, ForeignKey
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.domain.models.base import Base
-from app.domain.services import diagnostic_rules
+
+
+class DiagnosticTestStatus(str, Enum):
+    started = "started"
+    in_progress = "in_progress"
+    submitted = "submitted"
+    expired = "expired"
+    abandoned = "abandoned"
 
 
 class DiagnosticTest(Base):
     __tablename__ = "diagnostic_tests"
+    __table_args__ = (
+        CheckConstraint("test_duration > 0", name="ck_diagnostic_tests_test_duration_positive"),
+        CheckConstraint(
+            "status IN ('started', 'in_progress', 'submitted', 'expired', 'abandoned')",
+            name="ck_diagnostic_tests_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="RESTRICT"), index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(length=32),
+        nullable=False,
+        default=DiagnosticTestStatus.started.value,
+        server_default=DiagnosticTestStatus.started.value,
+        index=True,
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    test_duration: Mapped[int] = mapped_column(Integer, nullable=False, default=20, server_default="20")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     user = relationship("User", back_populates="diagnostic_tests")
+    goal = relationship("Goal")
     answers = relationship("UserAnswer", back_populates="test", cascade="all, delete-orphan")
-
-    @staticmethod
-    def _normalize_answer(value: str) -> str:
-        return diagnostic_rules.normalize_answer(value)
-
-    @classmethod
-    def evaluate_answers(cls, answers: list[dict], questions_by_id: dict[int, object]) -> list[dict]:
-        return diagnostic_rules.evaluate_answers(answers, questions_by_id)
-
-    @staticmethod
-    def accuracy_from_score(score: float) -> float:
-        return diagnostic_rules.accuracy_from_score(score)
-
-    @classmethod
-    def build_adaptive_rows(cls, *, answers: list[object], questions_by_id: dict[int, object]) -> list[dict]:
-        return diagnostic_rules.build_adaptive_rows(answers=answers, questions_by_id=questions_by_id)

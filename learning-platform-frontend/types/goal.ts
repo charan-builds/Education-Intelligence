@@ -3,11 +3,20 @@ export type Goal = {
   tenant_id: number;
   name: string;
   description: string;
+  skills_covered?: string[] | null;
+  estimated_duration_weeks?: number | null;
+  difficulty_tag?: string | null;
+  roadmap_preview?: string | null;
+  is_recommended?: boolean;
 };
 
 export type CreateGoalPayload = {
   name: string;
   description: string;
+  skills_covered?: string[] | null;
+  estimated_duration_weeks?: number | null;
+  difficulty_tag?: string | null;
+  roadmap_preview?: string | null;
 };
 
 export type UpdateGoalPayload = Partial<CreateGoalPayload>;
@@ -34,4 +43,11 @@ export type GoalPageResponse = {
 export type GoalTopicPageResponse = {
   items: GoalTopic[];
   meta: PageMeta;
+};
+
+export type UserGoal = {
+  user_id: number;
+  goal_id: number;
+  is_active: boolean;
+  goal: Goal;
 };

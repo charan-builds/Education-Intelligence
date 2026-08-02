@@ -59,4 +59,32 @@ describe("authService", () => {
       created_at: "2026-03-24T00:00:00Z",
     });
   });
+
+  it("allows password reset requests without tenant context", async () => {
+    postMock.mockResolvedValue({
+      data: { success: true, detail: "Password reset instructions sent" },
+    });
+    const { requestPasswordReset } = await import("@/services/authService");
+
+    await requestPasswordReset(null, "solo@example.com");
+
+    expect(postMock).toHaveBeenCalledWith("/auth/forgot-password", {
+      tenant_id: undefined,
+      email: "solo@example.com",
+    });
+  });
+
+  it("allows email verification requests without tenant context", async () => {
+    postMock.mockResolvedValue({
+      data: { success: true, detail: "Email verification instructions sent" },
+    });
+    const { requestEmailVerification } = await import("@/services/authService");
+
+    await requestEmailVerification(null, "solo@example.com");
+
+    expect(postMock).toHaveBeenCalledWith("/auth/email-verification/request", {
+      tenant_id: undefined,
+      email: "solo@example.com",
+    });
+  });
 });

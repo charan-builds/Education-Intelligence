@@ -29,6 +29,7 @@ async def list_goals(
         limit=pagination.limit,
         offset=pagination.offset,
         cursor=pagination.cursor,
+        user_id=_current_user.id,
     )
 
 
@@ -42,6 +43,10 @@ async def create_goal(
         tenant_id=_current_user.tenant_id,
         name=payload.name,
         description=payload.description,
+        skills_covered=payload.skills_covered,
+        estimated_duration_weeks=payload.estimated_duration_weeks,
+        difficulty_tag=payload.difficulty_tag,
+        roadmap_preview=payload.roadmap_preview,
     )
 
 
@@ -95,6 +100,10 @@ async def update_goal(
         goal_id=goal_id,
         name=payload.name,
         description=payload.description,
+        skills_covered=payload.skills_covered,
+        estimated_duration_weeks=payload.estimated_duration_weeks,
+        difficulty_tag=payload.difficulty_tag,
+        roadmap_preview=payload.roadmap_preview,
     )
 
 

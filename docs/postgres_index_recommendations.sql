@@ -24,8 +24,8 @@ ON roadmap_steps (roadmap_id, progress_status, priority);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_roadmap_steps_roadmap_topic
 ON roadmap_steps (roadmap_id, topic_id);
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_questions_topic_difficulty_id
-ON questions (topic_id, difficulty, id);
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_questions_topic_difficulty_level_active_id
+ON questions (topic_id, difficulty_level, is_active, id);
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_goal_topics_goal_topic
 ON goal_topics (goal_id, topic_id);

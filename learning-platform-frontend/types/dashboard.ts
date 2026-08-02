@@ -139,3 +139,30 @@ export type TeacherDashboardPayload = {
   bottom_students: TeacherStudentRiskRow[];
   risk_students: TeacherStudentRiskRow[];
 };
+
+export type IndependentLearnerNextTopic = {
+  topic_id: number | null;
+  topic_name: string;
+  reason: string;
+  estimated_time_hours: number;
+};
+
+export type IndependentLearnerRoadmapStep = {
+  step_id: number;
+  topic_id: number;
+  topic_name: string;
+  difficulty: string;
+  estimated_time_hours: number;
+  status: string;
+};
+
+export type IndependentLearnerDashboardPayload = {
+  user_name: string;
+  goal: string | null;
+  completion_percent: number;
+  completed_topics: number;
+  remaining_topics: number;
+  next_topic: IndependentLearnerNextTopic | null;
+  weak_topics: string[];
+  roadmap_preview: IndependentLearnerRoadmapStep[];
+};

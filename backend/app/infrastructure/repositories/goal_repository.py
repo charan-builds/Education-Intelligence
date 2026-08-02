@@ -31,8 +31,26 @@ class GoalRepository(BaseRepository):
         result = await self.session.execute(select(Goal).where(Goal.tenant_id == tenant_id, Goal.name == name))
         return result.scalar_one_or_none()
 
-    async def create_goal(self, tenant_id: int, name: str, description: str) -> Goal:
-        goal = Goal(tenant_id=tenant_id, name=name, description=description)
+    async def create_goal(
+        self,
+        tenant_id: int,
+        name: str,
+        description: str,
+        *,
+        skills_covered: list[str] | None = None,
+        estimated_duration_weeks: int | None = None,
+        difficulty_tag: str | None = None,
+        roadmap_preview: str | None = None,
+    ) -> Goal:
+        goal = Goal(
+            tenant_id=tenant_id,
+            name=name,
+            description=description,
+            skills_covered=skills_covered,
+            estimated_duration_weeks=estimated_duration_weeks,
+            difficulty_tag=difficulty_tag,
+            roadmap_preview=roadmap_preview,
+        )
         self.session.add(goal)
         await self.session.flush()
         return goal

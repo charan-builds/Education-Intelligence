@@ -40,8 +40,6 @@ class InterviewQuestionResponse(BaseModel):
     question_type: str
     question_text: str
     answer_options: list[str] = Field(default_factory=list)
-    correct_answer: str
-    explanation: str
 
 
 class InterviewPrepResponse(BaseModel):

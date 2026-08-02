@@ -1,3 +1,8 @@
+export type DiagnosticOption = {
+  key: string;
+  text: string;
+};
+
 export type DiagnosticAnswerPayload = {
   question_id: number;
   user_answer: string;
@@ -5,15 +10,33 @@ export type DiagnosticAnswerPayload = {
   time_taken: number;
 };
 
+export type DiagnosticSubmitAnswerPayload = {
+  question_id: number;
+  selected_answer: string;
+  time_taken: number;
+};
+
 export type DiagnosticQuestion = {
   test_id: number;
   id: number;
   topic_id: number;
-  difficulty: number;
-  difficulty_label: string;
+  difficulty_level: number;
+  difficulty_label: "easy" | "medium" | "hard" | string;
+  difficulty?: number | string;
+  concept_tag?: string | null;
   question_type: "multiple_choice" | "short_text" | string;
   question_text: string;
-  answer_options: string[];
+  answer_options?: string[];
+  options?: Array<DiagnosticOption | string>;
+};
+
+export type DiagnosticSubmittedAnswer = {
+  question_id: number;
+  selected_answer: string;
+  score: number;
+  time_taken: number;
+  difficulty_level: number;
+  difficulty_label: "easy" | "medium" | "hard" | string;
 };
 
 export type DiagnosticSession = {
@@ -23,6 +46,10 @@ export type DiagnosticSession = {
   started_at: string;
   completed_at: string | null;
   answered_count?: number;
+  total_score?: number;
+  percentage_score?: number;
+  questions?: DiagnosticQuestion[];
+  answers?: DiagnosticSubmittedAnswer[];
   adaptive_summary?: {
     topic_levels: Array<{
       topic_id: number;

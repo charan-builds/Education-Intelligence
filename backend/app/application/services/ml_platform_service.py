@@ -37,7 +37,7 @@ class MLPlatformService:
         events = events_result.scalars().all()
 
         answer_result = await self.session.execute(
-            select(UserAnswer.score, UserAnswer.time_taken, Question.difficulty)
+            select(UserAnswer.score, UserAnswer.time_taken, Question.difficulty_level)
             .join(Question, Question.id == UserAnswer.question_id)
             .join(DiagnosticTest, DiagnosticTest.id == UserAnswer.test_id)
             .where(
@@ -216,7 +216,7 @@ class MLPlatformService:
 
     async def predict_topic_difficulty(self, *, tenant_id: int, topic_id: int) -> dict:
         result = await self.session.execute(
-            select(func.avg(Question.difficulty), func.avg(UserAnswer.time_taken), func.avg(UserAnswer.score))
+            select(func.avg(Question.difficulty_level), func.avg(UserAnswer.time_taken), func.avg(UserAnswer.score))
             .join(UserAnswer, UserAnswer.question_id == Question.id, isouter=True)
             .where(Question.topic_id == topic_id)
         )
@@ -284,7 +284,7 @@ class MLPlatformService:
         await self.feature_store_service.refresh_topic_features(tenant_id=tenant_id)
         rows = (
             await self.session.execute(
-                select(Topic.id, Topic.name, func.avg(Question.difficulty), func.avg(TopicScore.score))
+                select(Topic.id, Topic.name, func.avg(Question.difficulty_level), func.avg(TopicScore.score))
                 .select_from(Topic)
                 .outerjoin(Question, Question.topic_id == Topic.id)
                 .outerjoin(TopicScore, (TopicScore.topic_id == Topic.id) & (TopicScore.tenant_id == tenant_id))

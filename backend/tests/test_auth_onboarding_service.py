@@ -460,6 +460,11 @@ class _TokenBlacklistRepository:
 def _build_auth_service(store: _Store) -> AuthService:
     auth_service_module.hash_password = _fast_hash_password
     auth_service_module.verify_password = _fast_verify_password
+    async def _noop_provision_defaults(self, *, tenant_id: int):  # noqa: ANN001
+        _ = tenant_id
+        return None
+
+    auth_service_module.PersonalTenantProvisioningService.provision_defaults = _noop_provision_defaults
     session = _FakeSession()
     service = AuthService(session)
 
@@ -667,6 +672,88 @@ async def test_account_locks_after_five_failed_logins():
 
     with pytest.raises(UnauthorizedError, match="Account locked"):
         await service.login("locked@example.com", "StrongPass1!", tenant_id=2)
+
+
+@pytest.mark.asyncio
+async def test_password_reset_clears_lock_state_and_restores_login():
+    store = _Store()
+    service = _build_auth_service(store)
+    user = await service.register(email="recover@example.com", password="StrongPass1!", tenant_id=2, role=UserRole.student)
+    verification_token = await service.request_email_verification(tenant_id=2, email="recover@example.com")
+    await service.verify_email(token=verification_token)
+    user.is_profile_completed = True
+
+    for _ in range(5):
+        with pytest.raises(UnauthorizedError):
+            await service.login("recover@example.com", "WrongPass1!", tenant_id=2)
+
+    reset_token = await service.request_password_reset(tenant_id=2, email="recover@example.com")
+    await service.reset_password(token=reset_token, password="NewStrong1!")
+
+    assert user.failed_login_attempts == 0
+    assert user.locked_until is None
+
+    result = await service.login("recover@example.com", "NewStrong1!", tenant_id=2)
+    assert result.access_token is not None
+    assert result.refresh_token is not None
+
+
+@pytest.mark.asyncio
+async def test_independent_learner_login_ignores_wrong_existing_tenant_context_when_email_is_unique():
+    store = _Store()
+    service = _build_auth_service(store)
+
+    user = await service.register(
+        email="solo-fallback@example.com",
+        password="StrongPass1!",
+        role=UserRole.independent_learner,
+        full_name="Solo Learner",
+    )
+    token = await service.request_email_verification(tenant_id=user.tenant_id, email="solo-fallback@example.com")
+    await service.verify_email(token=token)
+    user.is_profile_completed = True
+
+    result = await service.login("solo-fallback@example.com", "StrongPass1!", tenant_id=2)
+
+    assert result.user.id == user.id
+    assert result.user.tenant_id == user.tenant_id
+    assert result.effective_role == UserRole.independent_learner
+
+
+@pytest.mark.asyncio
+async def test_independent_learner_can_request_email_verification_without_tenant_context():
+    store = _Store()
+    service = _build_auth_service(store)
+
+    user = await service.register(
+        email="verify-solo@example.com",
+        password="StrongPass1!",
+        role=UserRole.independent_learner,
+        full_name="Solo Learner",
+    )
+
+    token = await service.request_email_verification(tenant_id=None, email=user.email)
+
+    assert isinstance(token, str)
+    assert token
+
+
+@pytest.mark.asyncio
+async def test_independent_learner_can_request_password_reset_without_tenant_context():
+    store = _Store()
+    service = _build_auth_service(store)
+
+    user = await service.register(
+        email="reset-solo@example.com",
+        password="StrongPass1!",
+        role=UserRole.independent_learner,
+        full_name="Solo Learner",
+    )
+
+    token = await service.request_password_reset(tenant_id=None, email=user.email)
+
+    assert isinstance(token, str)
+    assert token
 
 
 @pytest.mark.asyncio

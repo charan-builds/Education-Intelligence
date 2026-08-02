@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import AccessState from "@/components/auth/AccessState";
 import { useAuth } from "@/hooks/useAuth";
-import { buildAuthPath, getRoleProfilePath } from "@/utils/appRoutes";
+import { buildAuthPath, getRoleOnboardingPaths, getRoleWelcomePath } from "@/utils/appRoutes";
 import { getRoleRedirectPath, roleHasAccess } from "@/utils/roleRedirect";
 
 type RequireRoleProps = {
@@ -26,9 +26,9 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
       router.replace(buildAuthPath("login", pathname));
       return;
     }
-    const profilePath = getRoleProfilePath(role);
-    if (requiresProfileCompletion && pathname !== profilePath) {
-      router.replace(profilePath);
+    const onboardingPaths = getRoleOnboardingPaths(role);
+    if (requiresProfileCompletion && !onboardingPaths.includes(pathname)) {
+      router.replace(getRoleWelcomePath(role));
       return;
     }
     if (role && !roleHasAccess(role, allowedRoles)) {
@@ -44,7 +44,7 @@ export default function RequireRole({ allowedRoles, children }: RequireRoleProps
     return <AccessState mode="redirecting" description="Redirecting to sign in..." />;
   }
 
-  if (requiresProfileCompletion && pathname !== getRoleProfilePath(role)) {
+  if (requiresProfileCompletion && !getRoleOnboardingPaths(role).includes(pathname)) {
     return <AccessState mode="redirecting" description="Redirecting to complete your profile..." />;
   }
 

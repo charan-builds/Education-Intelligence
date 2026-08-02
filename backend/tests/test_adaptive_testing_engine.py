@@ -35,6 +35,27 @@ def test_two_failed_answers_decrease_difficulty():
     assert next_question.difficulty == 1
 
 
+def test_correct_answer_gets_harder_while_balancing_topics():
+    engine = AdaptiveTestingEngine()
+    previous_answers = [
+        {"question_id": 1, "score": 100.0},
+        {"question_id": 2, "score": 100.0},
+    ]
+    next_question = engine.select_next_question(_questions(), previous_answers, {10: 80.0, 20: 80.0})
+    assert next_question is not None
+    assert next_question.topic_id == 20
+    assert next_question.difficulty == 3
+
+
+def test_wrong_answer_gets_easier_without_repetition():
+    engine = AdaptiveTestingEngine()
+    previous_answers = [{"question_id": 3, "score": 0.0}]
+    next_question = engine.select_next_question(_questions(), previous_answers, {10: 80.0, 20: 80.0})
+    assert next_question is not None
+    assert next_question.id != 3
+    assert next_question.difficulty == 2
+
+
 def test_knowledge_gap_topic_priority():
     engine = AdaptiveTestingEngine()
     next_question = engine.select_next_question(_questions(), [], {10: 88.0, 20: 25.0})

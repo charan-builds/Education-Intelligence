@@ -9,6 +9,7 @@ from app.application.exceptions import ConflictError, UnauthorizedError, Validat
 from app.application.services.audit_log_service import AuditLogService
 from app.application.services.email_service import EmailService
 from app.application.services.mfa_service import MFAService
+from app.application.services.personal_tenant_provisioning_service import PersonalTenantProvisioningService
 from app.application.services.session_service import SessionService
 from app.application.services.token_service import TokenService
 from app.core.config import get_settings
@@ -102,6 +103,7 @@ class AuthService:
             created_at=datetime.now(timezone.utc),
             subdomain=subdomain,
         )
+        await PersonalTenantProvisioningService(self.session).provision_defaults(tenant_id=int(tenant.id))
         return int(tenant.id)
 
     async def _resolve_login_user_by_email(self, *, email: str) -> list[User]:
@@ -270,6 +272,11 @@ class AuthService:
             request_host=request_host,
         )
         user = await self.user_repository.get_by_email(email, tenant_id=resolved_tenant_id)
+        if user is None and (tenant_id is not None or tenant_subdomain):
+            matching_users = await self._resolve_login_user_by_email(email=email)
+            if len(matching_users) == 1 and matching_users[0].role == UserRole.independent_learner:
+                user = matching_users[0]
+                resolved_tenant_id = int(user.tenant_id)
         await self._enforce_account_lock(user)
         if user is None or not verify_password(password, user.password_hash):
             await self._record_failed_login(
@@ -543,6 +550,8 @@ class AuthService:
         await self._mark_auth_token_used(token_row, token=token, purpose=AuthTokenPurpose.email_verification)
         user.is_email_verified = True
         user.email_verified_at = datetime.now(timezone.utc)
+        user.failed_login_attempts = 0
+        user.locked_until = None
         await self.session.commit()
         await self.audit_log_service.record(
             tenant_id=tenant_id,
@@ -608,6 +617,8 @@ class AuthService:
             raise ValidationError("Invalid reset token")
         await self._mark_auth_token_used(token_row, token=token, purpose=AuthTokenPurpose.password_reset)
         user.password_hash = hash_password(password)
+        user.failed_login_attempts = 0
+        user.locked_until = None
         await self.refresh_session_repository.revoke_for_user(user_id=user_id)
         await self.session.commit()
         await self.audit_log_service.record(
@@ -707,6 +718,9 @@ class AuthService:
     async def _resolve_user_by_email(self, *, email: str, tenant_id: int | None) -> User | None:
         if tenant_id is not None:
             return await self.user_repository.get_by_email(email, tenant_id=tenant_id)
+        matching_users = await self._resolve_login_user_by_email(email=email)
+        if len(matching_users) == 1 and matching_users[0].role == UserRole.independent_learner:
+            return matching_users[0]
         return await self.user_repository.get_by_email(email)
 
     def _supports_auth_token_persistence(self) -> bool:

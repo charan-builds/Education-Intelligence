@@ -236,7 +236,7 @@ export default function AdminContentPage() {
           </form>
         </SurfaceCard>
 
-        <SurfaceCard title="Question bank" description="Review current answer keys and edit or remove stale items.">
+        <SurfaceCard title="Question bank" description="Review current questions and edit or remove stale items.">
           <div className="space-y-3">
             {questions.map((question) => (
               <div key={question.id} className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/70">
@@ -246,7 +246,7 @@ export default function AdminContentPage() {
                     <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                       Topic #{question.topic_id} • {question.question_type}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Accepted: {question.accepted_answers.join(", ") || "None"}</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Accepted: {(question.accepted_answers ?? []).join(", ") || "None"}</p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Options: {question.answer_options.join(", ") || "None"}</p>
                   </div>
                   <div className="flex gap-2">
@@ -258,8 +258,8 @@ export default function AdminContentPage() {
                         setTopicId(String(question.topic_id));
                         setQuestionType(question.question_type);
                         setQuestionText(question.question_text);
-                        setCorrectAnswer(question.correct_answer);
-                        setAcceptedAnswers(question.accepted_answers.join(", "));
+                        setCorrectAnswer(question.correct_answer ?? "");
+                        setAcceptedAnswers((question.accepted_answers ?? []).join(", "));
                         setAnswerOptions(question.answer_options.join(", "));
                       }}
                     >

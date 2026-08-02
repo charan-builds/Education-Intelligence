@@ -9,7 +9,7 @@ from app.domain.models.community_member import CommunityMember
 from app.domain.models.content_metadata import ContentMetadata
 from app.domain.models.dead_letter_event import DeadLetterEvent
 from app.domain.models.discussion_reply import DiscussionReply
-from app.domain.models.diagnostic_test import DiagnosticTest
+from app.domain.models.diagnostic_test import DiagnosticTest, DiagnosticTestStatus
 from app.domain.models.discussion_thread import DiscussionThread
 from app.domain.models.experiment import Experiment
 from app.domain.models.experiment_variant import ExperimentVariant
@@ -23,12 +23,14 @@ from app.domain.models.gamification_profile import GamificationProfile
 from app.domain.models.job_role import JobRole
 from app.domain.models.job_role_skill import JobRoleSkill
 from app.domain.models.learning_event import LearningEvent
+from app.domain.models.learning_profile import LearningProfile
 from app.domain.models.marketplace_listing import MarketplaceListing
 from app.domain.models.marketplace_review import MarketplaceReview
 from app.domain.models.ml_feature_snapshot import MLFeatureSnapshot
 from app.domain.models.ml_model_registry import MLModelRegistry
 from app.domain.models.ml_training_run import MLTrainingRun
 from app.domain.models.notification import Notification
+from app.domain.models.onboarding_event import OnboardingEvent
 from app.domain.models.mentor_suggestion import MentorSuggestion
 from app.domain.models.mentor_memory_profile import MentorMemoryProfile
 from app.domain.models.mentor_chat_message import MentorChatMessage
@@ -41,7 +43,8 @@ from app.domain.models.auth_log import AuthLog
 from app.domain.models.auth_token import AuthToken
 from app.domain.models.plugin_registry import PluginRegistry
 from app.domain.models.processed_stream_event import ProcessedStreamEvent
-from app.domain.models.question import Question
+from app.domain.models.question import Question, QuestionDifficulty, QuestionType
+from app.domain.models.question_option import QuestionOption
 from app.domain.models.resource import Resource
 from app.domain.models.refresh_session import RefreshSession
 from app.domain.models.refresh_token import RefreshToken
@@ -60,8 +63,10 @@ from app.domain.models.topic_score import TopicScore
 from app.domain.models.topic_prerequisite import TopicPrerequisite
 from app.domain.models.topic_skill import TopicSkill
 from app.domain.models.user import User
+from app.domain.models.user_profile import UserProfile
 from app.domain.models.user_answer import UserAnswer
 from app.domain.models.user_feature import UserFeature
+from app.domain.models.user_goal import UserGoal
 from app.domain.models.user_skill_vector import UserSkillVector
 from app.domain.models.user_tenant_role import UserTenantRole
 from app.domain.models.token_blacklist import TokenBlacklist
@@ -74,6 +79,7 @@ __all__ = [
     "AuthorizationPolicy",
     "Tenant",
     "User",
+    "UserProfile",
     "Community",
     "CommunityMember",
     "ContentMetadata",
@@ -87,12 +93,14 @@ __all__ = [
     "FeatureFlag",
     "FileAsset",
     "LearningEvent",
+    "LearningProfile",
     "MarketplaceListing",
     "MarketplaceReview",
     "MLFeatureSnapshot",
     "MLModelRegistry",
     "MLTrainingRun",
     "Notification",
+    "OnboardingEvent",
     "MentorSuggestion",
     "MentorMemoryProfile",
     "MentorChatMessage",
@@ -116,6 +124,9 @@ __all__ = [
     "TopicScore",
     "TopicPrerequisite",
     "Question",
+    "QuestionDifficulty",
+    "QuestionOption",
+    "QuestionType",
     "Resource",
     "RefreshSession",
     "RefreshToken",
@@ -126,9 +137,11 @@ __all__ = [
     "StreamConsumerOffset",
     "TopicSkill",
     "DiagnosticTest",
+    "DiagnosticTestStatus",
     "TenantSubscription",
     "UserAnswer",
     "UserFeature",
+    "UserGoal",
     "UserSkillVector",
     "UserTenantRole",
     "TokenBlacklist",

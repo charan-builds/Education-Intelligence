@@ -396,11 +396,7 @@ def test_update_question_admin(monkeypatch):
         assert _FakeTopicService.last_update_args == {
             "question_id": 11,
             "updates": {
-                "difficulty": None,
-                "question_type": None,
                 "question_text": "Updated question",
-                "correct_answer": None,
-                "accepted_answers": None,
                 "answer_options": ["A", "B"],
             },
         }

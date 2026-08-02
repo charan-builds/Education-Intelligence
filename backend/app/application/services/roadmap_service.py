@@ -19,6 +19,7 @@ from app.infrastructure.repositories.topic_repository import TopicRepository
 from app.application.exceptions import NotFoundError
 from app.application.exceptions import ValidationError
 from app.application.services.learning_event_service import LearningEventService
+from app.application.services.learning_profile_service import LearningProfileService
 from app.application.services.gamification_service import GamificationService
 from app.application.services.learning_intelligence_service import LearningIntelligenceService
 from app.application.services.ml_platform_service import MLPlatformService
@@ -46,6 +47,7 @@ class RoadmapService:
         self.skill_vector_service = SkillVectorService(session)
         self.ml_platform_service = MLPlatformService(session)
         self.outbox_service = OutboxService(session)
+        self.learning_profile_service = LearningProfileService(session)
 
     async def _update_gamification_state(self, *, user_id: int, tenant_id: int, completed_step: bool) -> None:
         if not completed_step:
@@ -197,6 +199,14 @@ class RoadmapService:
                 "consistency": profile.consistency,
                 "stamina": profile.stamina,
             }
+            stored_learning_profile = await self.learning_profile_service.get_for_user(
+                user_id=user_id,
+                tenant_id=tenant_id,
+            )
+            if stored_learning_profile:
+                user_learning_profile.update(stored_learning_profile)
+                if stored_learning_profile.get("profile_type"):
+                    user_learning_profile["profile_type"] = str(stored_learning_profile["profile_type"])
             goal_context = {"goal_id": goal_id}
             try:
                 ml_enabled = await self.feature_flag_service.is_enabled("ml_recommendation_enabled", tenant_id)
@@ -249,6 +259,15 @@ class RoadmapService:
                 base_date=datetime.now(timezone.utc),
             )
             for step_data in generated_steps:
+                difficulty_preference = str(user_learning_profile.get("difficulty_preference", "moderate"))
+                if difficulty_preference == "guided":
+                    step_data["estimated_time_hours"] = round(float(step_data["estimated_time_hours"]) * 0.9, 2)
+                    if step_data["difficulty"] == "expert":
+                        step_data["difficulty"] = "hard"
+                elif difficulty_preference == "challenging":
+                    step_data["estimated_time_hours"] = round(float(step_data["estimated_time_hours"]) * 1.1, 2)
+                    if step_data["difficulty"] == "easy":
+                        step_data["difficulty"] = "medium"
                 await self.roadmap_repository.add_step(
                     roadmap_id=roadmap.id,
                     topic_id=step_data["topic_id"],
